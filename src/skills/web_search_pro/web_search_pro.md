@@ -1,0 +1,1 @@
+A comprehensive web search skill that scrapes search results (news, images, videos) from public search engines without requiring an API key. It provides international results and direct links.

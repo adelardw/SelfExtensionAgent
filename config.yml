@@ -1,0 +1,16 @@
+model:
+  name: gpt-4o-mini
+  temperature: 0
+
+code_model:
+  name: google/gemini-3-flash-preview
+  temperature: 0
+
+agent:
+  max_create_retries: 3
+  max_global_retries: 2
+  low_confidence_threshold: 0.7
+
+checkpointer:
+  backend: sqlite
+  sqlite_path: data/checkpoints.db
