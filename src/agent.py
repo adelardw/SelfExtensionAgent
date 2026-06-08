@@ -5,12 +5,10 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 
-warnings.filterwarnings(
-    "ignore",
-    message=".*PydanticSerializationUnexpectedValue.*",
-    category=UserWarning,
-    module="pydantic",
-)
+# Шумные warnings от langchain with_structured_output (pydantic-сериализация).
+# Текст начинается с "Pydantic serializer warnings:" + перенос строки, поэтому
+# матчим по началу (re.match), а не по PydanticSerializationUnexpectedValue (он за \n).
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings", category=UserWarning)
 
 from langchain_openai.chat_models import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -71,6 +69,8 @@ MAX_GLOBAL_RETRIES: int = config.agent.max_global_retries
 LOW_CONF: float = config.agent.low_confidence_threshold
 MAX_SUBTASK_RETRIES: int = config.agent.get("max_subtask_retries", 2)
 MAX_SUBTASKS: int = config.agent.get("max_subtasks", 6)
+AMBIGUITY_GATE: float = config.agent.get("ambiguity_gate", 0.6)
+CONSENSUS_VALIDATION: bool = config.agent.get("consensus_validation", True)
 
 RECALL_K: int = config.get("memory", {}).get("recall_k", 5)
 REFLECT_EVERY: int = config.get("memory", {}).get("reflect_every", 5)
@@ -116,6 +116,7 @@ sgr_create_chain = sgr_create_prompt | llm.with_structured_output(SGRCreateResul
 test_case_chain = test_case_prompt | llm.with_structured_output(SkillTestCase)
 skill_selector_chain = skill_selector_prompt | llm.with_structured_output(SkillSelection)
 validation_chain = validation_prompt | llm.with_structured_output(ValidationResult)
+validation_chain_b = validation_prompt | code_llm.with_structured_output(ValidationResult)  # 2-й судья (консенсус)
 memory_extraction_chain = memory_extraction_prompt | llm.with_structured_output(MemoryExtraction)
 reflection_chain = reflection_prompt | llm.with_structured_output(ReflectionResult)
 # Когнитивные ноды (goal/reflexion/decompose/fast_answer) строятся через
@@ -229,10 +230,16 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
             "memory_context": state.get("memory_context", "Память пуста."),
             "chat_history": _format_chat_history(state),
         }, state["query"])
-        return {"mode": decision.mode}
     except Exception as e:  # noqa: BLE001
         print(f"[Reflexion] failed, fallback deliberate: {e}")
         return {"mode": "deliberate"}
+
+    # Ambiguity-гейт (идея Ouroboros): слишком неоднозначно → переспросить, а не гадать.
+    if decision.ambiguity >= AMBIGUITY_GATE and decision.mode != "clarify":
+        mem = state.get("memory_context", "") or ""
+        need = decision.missing_info or "уточни, что именно нужно"
+        return {"mode": "clarify", "memory_context": f"⚠ Неясно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}"}
+    return {"mode": decision.mode}
 
 
 async def fast_answer_node(state: GeneralGraphState) -> dict:
@@ -638,20 +645,35 @@ async def validation_node(state: GeneralGraphState) -> dict:
     rubric = state.get("goal_rubric", []) or []
     rubric_text = "\n".join(f"- {c}" for c in rubric) if rubric else "Rubric не задан — оцени по общим критериям."
 
-    result = await validation_chain.ainvoke({
+    payload = {
         "query": state["query"],
         "final_answer": state.get("final_answer", "Ответ не сгенерирован."),
         "chat_history": _format_chat_history(state),
         "goal_rubric": rubric_text,
-    })
+    }
+    result = await validation_chain.ainvoke(payload)
+    is_valid, confidence, feedback = result.is_valid, result.confidence, result.feedback
+
+    # Мульти-модельный консенсус (идея Ouroboros): второй судья на другой модели.
+    if CONSENSUS_VALIDATION:
+        try:
+            b = await validation_chain_b.ainvoke(payload)
+            agree = (b.is_valid == result.is_valid)
+            is_valid = result.is_valid and b.is_valid
+            # согласие → берём min уверенности; разногласие → штраф (двигает на ретрай).
+            confidence = min(result.confidence, b.confidence) * (1.0 if agree else 0.6)
+            if not agree:
+                feedback = f"[консенсус: расхождение судей] {feedback} | 2-й: {b.feedback}"
+        except Exception as e:  # noqa: BLE001
+            print(f"[Validation] consensus skipped: {e}")
 
     retries = state.get("global_retries", 0)
-    bumped = retries if result.confidence >= LOW_CONF else retries + 1
+    bumped = retries if confidence >= LOW_CONF else retries + 1
 
     return {
-        "validation_passed": result.is_valid,
-        "confidence": result.confidence,
-        "validation_feedback": result.feedback,
+        "validation_passed": is_valid,
+        "confidence": confidence,
+        "validation_feedback": feedback,
         "global_retries": bumped,
     }
 

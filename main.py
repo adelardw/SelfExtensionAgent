@@ -1,3 +1,8 @@
+import warnings
+# Тихий старт: глушим шумные сторонние warnings ДО тяжёлых импортов.
+warnings.filterwarnings("ignore", message="Pydantic serializer warnings", category=UserWarning)
+warnings.filterwarnings("ignore", message="urllib3")  # RequestsDependencyWarning о версиях
+
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
@@ -15,6 +20,7 @@ from rich.text import Text
 
 from src.agent import build_graph, config, memory_store
 from src.tracing import diagnose, trace_store
+from src.usage import TokenTracker, add_alltime, cost_of, load_alltime
 
 console = Console()
 
@@ -48,7 +54,7 @@ def banner() -> None:
     body = Text.from_markup(
         f"Модель: [cyan]{config.model.name}[/] · код: [cyan]{config.code_model.name}[/]\n"
         f"Режимы: {legend}\n"
-        f"Команды: [dim]/help /new /facts /goal /diagnose /traces /improve  ·  exit[/]"
+        f"Команды: [dim]/help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]"
     )
     console.print(Panel(body, title="🤖 Self-Extension Agent", border_style="bright_blue", expand=False))
 
@@ -131,6 +137,22 @@ def cmd_traces() -> None:
     console.print(t)
 
 
+def _k(n: int) -> str:
+    return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+
+
+def cmd_usage(tracker: TokenTracker) -> None:
+    at = load_alltime()
+    t = Table(title="🧮 Расход токенов", border_style="magenta")
+    t.add_column(""); t.add_column("вход", justify="right"); t.add_column("выход", justify="right")
+    t.add_column("вызовов", justify="right"); t.add_column("~$", justify="right")
+    t.add_row("сессия", _k(tracker.input), _k(tracker.output), str(tracker.calls), f"${tracker.cost():.4f}")
+    t.add_row("всего", _k(at['input']), _k(at['output']), str(at['calls']),
+              f"${cost_of(at['input'], at['output']):.4f}")
+    console.print(t)
+    console.print("[dim]Оценка $ по ставкам gpt-4o-mini; модели разные — это грубо.[/]")
+
+
 async def cmd_improve() -> None:
     from src.improve import graph_backward
 
@@ -152,6 +174,7 @@ async def main():
         Path("data").mkdir(exist_ok=True)
         session: PromptSession = PromptSession(history=FileHistory("data/.repl_history"))
         prompt_html = HTML("\n<b><ansibrightblue>›</ansibrightblue></b> ")
+        tracker = TokenTracker()  # учёт токенов за сессию (через callback)
 
         while True:
             try:
@@ -180,13 +203,17 @@ async def main():
                 cmd_traces(); continue
             if low == "/improve":
                 await cmd_improve(); continue
+            if low == "/usage":
+                cmd_usage(tracker); continue
 
+            pre_in, pre_out, pre_calls = tracker.snapshot()
             try:
                 with console.status("[cyan]Думаю…", spinner="dots"):
                     result = await graph.ainvoke(
                         {"query": query, "user_id": user_id,
                          "chat_history": chat_history + [{"role": "user", "content": query}]},
-                        config={"configurable": {"thread_id": thread_id}, "recursion_limit": 50},
+                        config={"configurable": {"thread_id": thread_id}, "recursion_limit": 50,
+                                "callbacks": [tracker]},
                     )
             except Exception as e:  # noqa: BLE001
                 console.print(Panel(f"{type(e).__name__}: {e}", title="Ошибка", border_style="red"))
@@ -196,6 +223,12 @@ async def main():
             chat_history += [{"role": "user", "content": query}, {"role": "assistant", "content": answer}]
             chat_history = chat_history[-20:]
             render_result(result)
+
+            # Расход токенов за этот запрос + персист all-time.
+            di, do = tracker.input - pre_in, tracker.output - pre_out
+            add_alltime(di, do, tracker.calls - pre_calls)
+            console.print(f"[dim]🧮 токены: {_k(di)} in + {_k(do)} out = {_k(di+do)} "
+                          f"(~${cost_of(di, do):.4f}) · сессия {_k(tracker.total)} · /usage[/]")
 
         console.print("[dim]Пока![/]")
 
