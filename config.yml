@@ -7,10 +7,46 @@ code_model:
   temperature: 0
 
 agent:
-  max_create_retries: 3
+  max_create_retries: 2   # create_skill — дорогой путь, держим ретраи короткими
   max_global_retries: 2
   low_confidence_threshold: 0.7
+  max_subtask_retries: 2   # ретраи одного подшага по его done_check
+  max_subtasks: 6          # потолок числа подшагов в декомпозиции
 
 checkpointer:
   backend: sqlite
   sqlite_path: data/checkpoints.db
+
+memory:
+  db_path: data/memory.db
+  recall_k: 5          # сколько прошлых эпизодов поднимать в контекст
+  reflect_every: 5     # синтезировать выводы раз в N эпизодов
+  recall_budget_chars: 1800  # бюджет символов на блок памяти (анти-bloat контекста)
+  embeddings: false    # true → семантический recall через эмбеддинги (по умолч. OpenRouter)
+  embedding_model: openai/text-embedding-3-small  # модель эмбеддингов (OpenRouter id)
+  # Защита от переполнения (prune раз в reflect_every): что переживает чистку
+  max_episodes: 2000
+  max_facts: 300
+  max_reflections: 200
+
+skills:
+  # Базовые навыки, которые агент НЕ имеет права удалять/перезаписывать
+  # без force. Защищают «скелет» способностей от самоповреждения в self-improve.
+  protected:
+    - web_search
+    - file_operations
+    - text_file_processor
+    - link_parser
+    - uv_package_manager
+    - device_control
+    - deep_agent
+  autosync: true       # при старте чинить реестр: подхватывать orphan-скиллы, чистить битые
+
+improve:
+  # Self-learning loop (L2). Запускается НЕ каждую итерацию, а по триггерам:
+  #   • деградация качества (в reflect, фоном);
+  #   • неактивность (idle-петля в server.py).
+  auto: false          # true → разрешить авто-триггеры само-улучшения
+  optimizer: textgrad  # textgrad | reflexion (фолбэк, если textgrad недоступен)
+  min_failures: 3      # минимум слабых трейсов, чтобы запустить
+  idle_seconds: 900    # столько секунд без запросов → запустить улучшение (idle-триггер)

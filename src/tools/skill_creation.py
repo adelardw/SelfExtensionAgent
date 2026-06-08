@@ -12,6 +12,28 @@ SKILLS_DIR = Path("src/skills")
 REGISTRY_FILE = SKILLS_DIR / "registry.json"
 
 
+def _load_protected() -> set[str]:
+    """Базовые защищённые навыки из config.yml (skills.protected)."""
+    try:
+        from omegaconf import OmegaConf
+
+        cfg = OmegaConf.load("config.yml")
+        return set(cfg.get("skills", {}).get("protected", []) or [])
+    except Exception:  # noqa: BLE001
+        return set()
+
+
+PROTECTED_SKILLS: set[str] = _load_protected()
+
+
+def _is_protected(name: str, registry: Optional[dict] = None) -> bool:
+    """Навык защищён, если он в config-списке ИЛИ помечен protected в реестре."""
+    if name in PROTECTED_SKILLS:
+        return True
+    reg = registry if registry is not None else _load_registry()
+    return bool(reg.get(name, {}).get("protected"))
+
+
 def _ensure_dirs():
     """Создаёт корневую директорию скиллов и registry если нет."""
     SKILLS_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,8 +80,9 @@ def list_skills() -> str:
     lines = []
     for name, meta in registry.items():
         status = "ready" if meta.get("has_tools") else "description only"
+        lock = " 🔒core" if _is_protected(name, registry) else ""
         lines.append(
-            f"• {name} [{status}] — {meta['description'][:100]}"
+            f"• {name} [{status}]{lock} — {meta['description'][:100]}"
         )
     return "Available skills:\n" + "\n".join(lines)
 
@@ -185,6 +208,12 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
     if name not in registry:
         return f"Skill '{name}' does not exist. Create it first with 'create_skill'."
 
+    if _is_protected(name, registry) and not append:
+        return (
+            f"Skill '{name}' is PROTECTED (core capability). Overwriting its tools is "
+            f"blocked. Use append=True to add tools, or pick a different skill name."
+        )
+
     is_valid, err = _validate_python(tool_code)
     if not is_valid:
         return f"Invalid Python code — {err}. Fix and retry."
@@ -210,13 +239,16 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
 
 
 @tool("delete_skill")
-def delete_skill(name: str) -> str:
+def delete_skill(name: str, force: bool = False) -> str:
     """
     Delete a skill entirely (description + tools + registry entry).
     Use with caution — this is irreversible.
 
+    Protected (core) skills cannot be deleted unless force=True.
+
     Args:
         name: The name of the skill to delete.
+        force: Set True to override protection of a core skill (rarely needed).
 
     Returns:
         str: Confirmation message.
@@ -228,6 +260,12 @@ def delete_skill(name: str) -> str:
 
     if name not in registry and not skill_dir.exists():
         return f"Skill '{name}' not found."
+
+    if _is_protected(name, registry) and not force:
+        return (
+            f"Skill '{name}' is PROTECTED (core capability) and was not deleted. "
+            f"It must stay available. Pass force=True only if you are absolutely sure."
+        )
 
     if skill_dir.exists():
         shutil.rmtree(skill_dir)
@@ -339,6 +377,53 @@ def get_skill_runtime_prompts(names: list[str]) -> str:
     return "\n\n---\n\n".join(parts) if parts else ""
 
 
+def sync_registry() -> dict:
+    """
+    Автообновление реестра навыков (вызывать при старте).
+      • orphan на диске (есть папка+код, но нет в registry) → регистрируется;
+      • битая запись (есть в registry, но папки нет) → удаляется;
+      • защищённые из config помечаются protected=True.
+    Возвращает сводку изменений.
+    """
+    _ensure_dirs()
+    registry = _load_registry()
+    added, removed, protected = [], [], []
+
+    # 1. orphan-скиллы на диске → в реестр
+    for sub in SKILLS_DIR.iterdir():
+        if not sub.is_dir():
+            continue
+        name = sub.name
+        has_py = (sub / f"{name}.py").exists()
+        md = sub / f"{name}.md"
+        if name not in registry and (has_py or md.exists()):
+            desc = md.read_text(encoding="utf-8")[:200] if md.exists() else ""
+            registry[name] = {
+                "description": desc,
+                "has_tools": has_py,
+                "has_system_prompt": (sub / "prompt.md").exists(),
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "version": 1,
+            }
+            added.append(name)
+
+    # 2. битые записи (нет папки) → вон
+    for name in list(registry.keys()):
+        if not (SKILLS_DIR / name).exists():
+            registry.pop(name, None)
+            removed.append(name)
+
+    # 3. проставить защиту базовым навыкам
+    for name in PROTECTED_SKILLS:
+        if name in registry and not registry[name].get("protected"):
+            registry[name]["protected"] = True
+            protected.append(name)
+
+    _save_registry(registry)
+    return {"added": added, "removed": removed, "protected": protected}
+
+
 def get_manager_tools() -> list:
     """Возвращает все management tools для передачи в агента."""
     return [
@@ -352,16 +437,21 @@ def get_manager_tools() -> list:
     ]
 
 
-def get_all_loaded_skill_tools() -> list:
+def get_all_loaded_skill_tools(names: Optional[list[str]] = None) -> list:
     """
-    Сканирует все скиллы в реестре, загружает их модули
-    и возвращает все найденные @tool функции.
-    Вызывайте при старте агента чтобы подключить ранее созданные скиллы.
+    Загружает @tool функции из скиллов и возвращает их.
+
+    names=None → все скиллы реестра (для прогрева при старте).
+    names=[...] → ТОЛЬКО указанные скиллы — так в execution попадают лишь
+    релевантные инструменты, а не весь реестр (анти-bloat контекста).
     """
     registry = _load_registry()
     all_tools = []
+    wanted = set(names) if names is not None else None
 
     for name, meta in registry.items():
+        if wanted is not None and name not in wanted:
+            continue
         if not meta.get("has_tools"):
             continue
 

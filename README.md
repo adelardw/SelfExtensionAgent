@@ -1,400 +1,98 @@
-# Self-Extension Agent
+# self-extension-agent
 
-Саморасширяющийся AI-агент на LangGraph, который **сам создаёт себе навыки** (инструменты) в рантайме, валидирует их через smoke-тесты и использует для выполнения задач.
+Самораширяющийся, самообучающийся персональный агент на **LangGraph**. Сам выбирает
+тип мышления под задачу, помнит пользователя между сессиями, расширяет себя навыками
+и **обучается на собственных трейсах**, относясь к своему графу как к обучаемой программе.
 
----
+Полная архитектура — в [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-## Архитектура
+## Что умеет
 
-```
-                              ┌─────────────┐
-                              │    START    │
-                              └──────┬──────┘
-                                     │
-                                     ▼
-                        ┌────────────────────────┐
-                        │      [1] ROUTER        │
-                        │                        │
-                        │  Запрос + история      │
-                        │  + список навыков      │
-                        │         ↓              │
-                        │  create_skill ?        │
-                        │  use_skills   ?        │
-                        └─────┬──────────┬───────┘
-                              │          │
-                 route="create_skill"    route="use_skills"
-                              │          │
-                              ▼          │
-                 ┌────────────────────┐  │
-                 │ [2] CREATE_SKILLS  │  │
-                 │                    │  │
-                 │  ReAct-агент       │  │
-                 │  + manager tools   │  │
-                 │  + code_llm        │  │
-                 └────────┬───────────┘  │
-                          │              │
-                          ▼              │
-                 ┌───────────────────┐   │
-                 │ [3] SGR_CREATE    │   │
-                 │                   │   │
-                 │  Этап 1: Статич.  │   │
-                 │  ревью (LLM)      │   │
-                 │                   │   │
-                 │  Этап 2: Smoke    │   │
-                 │  test (runtime)   │   │
-                 └──┬──────┬──────┬──┘   │
-                    │      │      │      │
-                  FAIL   OK    GIVE UP   │
-                    │      │      │      │
-                    │      │      └───── ┤
-                    │      │             │
-                    ▼      ▼             ▼
-              [retry x3]  router   ┌────────────────────┐
-                                   │ [4] SKILL_SELECTOR │
-                                   │                    │
-                                   │  Выбор навыков     │
-                                   │  из реестра        │
-                                   └─────────┬──────────┘
-                                             │
-                                             ▼
-                                   ┌────────────────────┐
-                                   │ [5] PLANNING       │
-                                   │                    │
-                                   │  Пошаговый план    │
-                                   │  выполнения        │
-                                   └─────────┬──────────┘
-                                             │
-                                             ▼
-                                   ┌─────────────────────┐
-                                   │ [6] SKILL_INJECTION │
-                                   │                     │
-                                   │  Загрузка tools     │
-                                   │  + системные промпты│
-                                   └─────────┬───────────┘
-                                             │
-                                             ▼
-                                   ┌──────────────────────┐
-                                   │ [7] EXECUTION        │
-                                   │                      │
-                                   │  ReAct-агент         │
-                                   │  + загруженные tools │
-                                   │  + code_llm          │
-                                   └─────────┬────────────┘
-                                             │
-                                             ▼
-                                   ┌─────────────────────┐
-                                   │ [8] VALIDATION      │
-                                   │                     │
-                                   │  SGR финальный      │
-                                   │  confidence >= 0.7? │
-                                   └──┬──────────────┬───┘
-                                      │              │
-                                confidence OK   confidence LOW
-                                      │         (retry x2)
-                                      ▼              │
-                                   ┌──────┐          │
-                                   │ END  │     router ◄──┘
-                                   └──────┘
+- **4 типа мышления (Any-2-Any)** — мета-контроллер сам выбирает по анализу задачи:
+  `fast` (интуитивно), `reason` (глубокое рассуждение), `deliberate` (инструменты +
+  декомпозиция + по-пунктовое исполнение/валидация), `clarify` (переспросить). Бюджет
+  встроен: простое не идёт по дорогому пути.
+- **Целеполагание** — определяет цель и держит «стоящую» цель + rubric в контексте.
+- **Память** — эпизодическая/семантическая (факты+тэги)/выводы/цели/саммари, граф-рёбра,
+  TurboVec-ANN, recall с бюджетом, защита от переполнения (prune).
+- **Персонализация** — извлекает устойчивые факты о пользователе, учитывает их везде.
+- **Самообучение** — forward (сбор few-shots из удач) + backward (textual-gradients по
+  трейсу: дифф-credit-assignment → per-node критика → оптимизация промптов → валидация).
+  Запускается **не каждую итерацию**, а по деградации качества или при неактивности.
+- **Навыки** — создаёт новые навыки со smoke-тестами (skill library), защищает базовые,
+  авто-синхронизирует реестр.
+- **Трейсинг и самодиагностика** — спаны по нодам, поиск своих «косяков» и деградации.
+- **Действия с устройством (on-demand)** — открыть сайт/приложение, скриншот, уведомление,
+  TTS, скролл открытого браузера, ввод текста, отправка в Telegram.
+- **DeepAgent (дополнение)** — для долгогоризонтных/файловых подзадач (виртуальная ФС,
+  todo, суб-агенты), вызывается из шага, не заменяя ядро.
+- **Свежий веб-поиск** — SearXNG (приватный) → cloakbrowser (stealth) → urllib.
+- **Интерфейсы** — REPL, Telegram-бот, FastAPI-сервер (общий граф и общая память).
+
+## Установка
+
+```bash
+uv sync
+.venv/bin/python -m playwright install chromium   # для cloakbrowser-поиска
 ```
 
----
+## Настройка
 
-## Как это работает
-
-### Два пути обработки запроса
-
-**Путь 1 — Создание навыка** (левая ветка):
-если ни один существующий навык не подходит, агент сам пишет код нового инструмента, валидирует его и добавляет в реестр.
-
-**Путь 2 — Использование навыков** (правая ветка):
-если подходящие навыки уже есть, агент выбирает их, строит план, инъектирует промпты и выполняет задачу.
-
-### Валидация навыков (SGR Create)
-
-Двухэтапная проверка каждого создаваемого навыка:
-
-| Этап | Что проверяет | Как |
-|------|---------------|-----|
-| **Статический ревью** | Код, импорты, плейсхолдеры, @tool декораторы | LLM анализирует код |
-| **Smoke test** | Реально ли работает код | Загружает модуль, вызывает @tool функцию, проверяет результат |
-
-Автоматический отказ при обнаружении:
-- Заглушки: `results = []`, `pass`, `# TODO`
-- Плейсхолдеры ключей: `YOUR_API_KEY`, `REPLACE_ME`, `<api_key>`
-- API с обязательной регистрацией (OpenWeatherMap, Google API)
-- Рантайм ошибки: `401`, `403`, `No module named`
-
-### Структура навыка
-
+`.env`:
 ```
-src/skills/
-├── registry.json                  # Реестр всех навыков
-└── weather_check/
-    ├── weather_check.md           # Описание: когда и как использовать
-    ├── weather_check.py           # Код с @tool функциями
-    └── prompt.md                  # Системный промпт для execution-агента
+OPEN_ROUTER_API_KEY=...              # обязателен (LLM И эмбеддинги через OpenRouter)
+SEARXNG_URL=http://localhost:8080    # опц. — приватный свежий поиск
+TELEGRAM_BOT_TOKEN=...               # опц. — для Telegram-бота
+# OPENAI_API_KEY=...                 # опц. — альтернатива OpenRouter для эмбеддингов
+
+# Эмбеддинги (семантический recall + TurboVec) включаются в config.yml: memory.embeddings=true
+# и идут через OpenRouter тем же OPEN_ROUTER_API_KEY (модель — memory.embedding_model).
 ```
 
-При использовании навыка:
-1. `skill_injection_node` загружает `.py` файл через `importlib`
-2. `prompt.md` инъектируется в системный промпт execution-агента
-3. Execution-агент получает доступ к `@tool` функциям навыка
-
----
-
-## Конфигурация
-
-```yaml
-# config.yml
-
-model:
-  name: gpt-4o-mini          # Основная модель (роутер, валидация, планирование)
-  temperature: 0
-
-code_model:
-  name: google/gemini-3-flash-preview   # Модель для генерации кода
-  temperature: 0
-
-agent:
-  max_create_retries: 3       # Макс. попыток создания навыка
-  max_global_retries: 2       # Макс. повторов при низкой confidence
-  low_confidence_threshold: 0.7  # Порог принятия ответа (0.0–1.0)
-
-checkpointer:
-  backend: sqlite             # "sqlite" или "memory"
-  sqlite_path: data/checkpoints.db
-```
-
-### Две модели
-
-| Модель | Для чего | Почему |
-|--------|----------|--------|
-| `model` (gpt-4o-mini) | Роутинг, планирование, валидация, выбор навыков | Быстрая, дешёвая, хороша в рассуждениях |
-| `code_model`  | Генерация кода навыков, исполнение | Специализирована на коде, дешёвая |
-
-Обе модели работают через [OpenRouter](https://openrouter.ai/).
-
----
-
-## Структура проекта
-
-```
-self_extension_agent/
-├── main.py                    # Точка входа, REPL, управление chat_history
-├── config.yml                 # Конфигурация моделей и агента
-├── pyproject.toml             # Зависимости
-│
-├── src/
-│   ├── agent.py               # Граф: ноды, роутинг, chains, smoke test
-│   ├── prompts.py             # Все промпты (на русском)
-│   ├── schemas.py             # GeneralGraphState (TypedDict)
-│   ├── structured_outputs.py  # Pydantic модели для structured output
-│   │
-│   ├── tools/
-│   │   ├── __init__.py        # Экспорт: get_manager_tools, get_all_loaded_skill_tools
-│   │   └── skill_creation.py  # 7 @tool функций + утилиты управления навыками
-│   │
-│   └── skills/                # Динамически создаваемые навыки
-│       ├── registry.json
-│       └── <skill_name>/
-│           ├── <skill_name>.md
-│           ├── <skill_name>.py
-│           └── prompt.md
-│
-└── data/
-    └── checkpoints.db         # SQLite состояние графа
-```
-
----
+`config.yml`: модели, `memory.*` (recall/embeddings/caps), `skills.protected/autosync`,
+`improve.*` (триггер само-улучшения).
 
 ## Запуск
 
 ```bash
-# Установка зависимостей
-uv sync
-
-# Настройка API ключа — замените в src/agent.py на свой OpenRouter API key
-
-# Запуск
-uv run python main.py
+.venv/bin/python main.py                 # REPL
+.venv/bin/python bot.py                  # Telegram-бот
+uvicorn src.server:app --port 8000       # HTTP API
 ```
 
-### Команды REPL
+API: `POST /chat {user_id, query}`, `GET /diagnose`, `/memory/facts`, `/memory/goal`, `/traces`.
 
-| Команда | Действие |
-|---------|----------|
-| `exit` / `quit` / `q` | Выход |
-| `new` | Новый тред (очистка истории) |
-| Любой текст | Запрос к агенту |
+## Самообучение и обслуживание (CLI)
 
-### Пример сессии
-
-```
-Self-Extension Agent
-============================================
-Checkpointer: sqlite
-Thread: a1b2c3d4...
-
-> Какая погода в Москве?
-
-[Router] create_skill — нет навыка для погоды
-[Create] Создаю навык weather_check...
-[SGR Static] ✓ Код валидный, нет плейсхолдеров
-[SGR Smoke] ✓ get_weather("London") → "London: Clear, 15°C, ..."
-[Router] use_skills — навык weather_check найден
-[Skill Selector] → weather_check
-[Execution] Вызываю get_weather...
-
-============================================
-Answer:
-Погода в Москве: Облачно, 8°C, влажность 72%, ветер 12 км/ч
-
-[SGR] Ответ полностью отвечает на запрос.
-[Confidence] 95%
-
-> А в Лондоне?
-
-============================================
-Answer:
-Погода в Лондоне: Ясно, 15°C, влажность 55%, ветер 8 км/ч
-
-[SGR] Ответ корректен с учётом контекста диалога.
-[Confidence] 92%
+```bash
+python -m src.improve --graph     # backward по графу: credit assignment + per-node оптимизация
+python -m src.improve --list      # принятые параметры/few-shots
+python -m src.tracing             # самодиагностика по трейсам
+python -m src.maintenance         # безопасный авто-апдейт зависимостей (с откатом)
 ```
 
----
-
-## Ноды графа
-
-### [1] Router
-
-Решает: создать новый навык или использовать существующие.
-Получает список всех навыков из реестра + историю диалога.
-Короткие ответы (`да`, `нет`, `продолжай`) интерпретирует через контекст.
-
-### [2] Create Skills
-
-ReAct-агент с `code_llm` и manager tools.
-Создаёт навык: описание + код + системный промпт.
-При ретрае получает обратную связь и удаляет предыдущую версию.
-
-### [3] SGR Create
-
-**Этап 1** — статический ревью LLM: синтаксис, импорты, плейсхолдеры, структура.
-**Этап 2** — smoke test: загрузка модуля → генерация тестового кейса → вызов @tool функции → проверка результата (таймаут 15с).
-При провале — удаляет навык, отправляет feedback на retry.
-
-### [4] Skill Selector
-
-Выбирает подходящие навыки из реестра по запросу.
-
-### [5] Planning
-
-Строит пошаговый план выполнения на основе выбранных навыков.
-
-### [6] Skill Injection
-
-Загружает `@tool` функции навыков через `importlib`.
-Собирает `prompt.md` файлы и инъектирует их в системный промпт исполнителя.
-
-### [7] Execution
-
-ReAct-агент с `code_llm`, загруженными tools и инъектированными промптами.
-Выполняет план и генерирует финальный ответ.
-
-### [8] Validation
-
-SGR финальной проверки — оценивает ответ по запросу.
-`confidence >= 0.7` → ответ принят.
-`confidence < 0.7` → retry (макс. 2 раза).
-
----
-
-## Chains и Structured Outputs
-
-Все LLM-цепочки в глобальном скоупе:
-
-```python
-route_chain          = router_prompt         | llm.with_structured_output(RouteDecision)
-sgr_create_chain     = sgr_create_prompt     | llm.with_structured_output(SGRCreateResult)
-test_case_chain      = test_case_prompt      | llm.with_structured_output(SkillTestCase)
-skill_selector_chain = skill_selector_prompt | llm.with_structured_output(SkillSelection)
-planning_chain       = planning_prompt       | llm.with_structured_output(ExecutionPlan)
-validation_chain     = validation_prompt     | llm.with_structured_output(ValidationResult)
-```
-
-| Модель | Назначение |
-|--------|-----------|
-| `RouteDecision` | Маршрут: `create_skill` / `use_skills` |
-| `SkillSelection` | Список выбранных навыков |
-| `ExecutionPlan` | Пошаговый план |
-| `SGRCreateResult` | Валидация навыка: is_valid, confidence, issues |
-| `SkillTestCase` | Тестовый кейс: tool_name, test_input |
-| `ValidationResult` | Финальная оценка: confidence, feedback |
-
----
-
-## Manager Tools
-
-| Инструмент | Описание |
-|-----------|----------|
-| `list_skills()` | Список всех навыков в реестре |
-| `read_skill(name)` | Описание + промпт + код навыка |
-| `create_skill(name, description, tool_code, system_prompt)` | Создать навык |
-| `update_skill_tools(name, tool_code, append)` | Обновить код |
-| `delete_skill(name)` | Удалить навык |
-| `load_skill_tools(name)` | Загрузить @tool функции в рантайм |
-| `get_skills_for_prompt()` | Описания для промптов |
-
----
-
-## История диалога
-
-Агент поддерживает многоходовые диалоги через `chat_history`:
-
-- Формат: `[{"role": "user"|"assistant", "content": str}, ...]`
-- Управляется в `main.py`, передаётся во все ноды
-- Ограничение: 20 записей (10 пар user/assistant)
-- Сбрасывается при команде `new`
-
----
-
-## Правила генерации кода
-
-Промпты жёстко ограничивают что может генерировать агент:
-
-**Запрещено:**
-- Заглушки: `results = []`, `pass`, `# TODO`, `# Замените`
-- Плейсхолдеры: `YOUR_API_KEY`, `REPLACE_ME`, `<api_key>`, `dummy`
-- API с обязательной регистрацией/ключом
-
-**Обязательно:**
-- Только бесплатные API без авторизации
-- Стандартная библиотека: `urllib`, `json`, `re`, `pathlib`
-- Полная обработка ошибок (`try/except`)
-
-Рекомендуемые бесплатные API:
-
-| Задача | API |
-|--------|-----|
-| Погода | `wttr.in` |
-| Поиск | DuckDuckGo API |
-| Геокодинг | `nominatim.openstreetmap.org` |
-| Курсы валют | `open.er-api.com` |
-| Wikipedia | `en.wikipedia.org/api/rest_v1/` |
-| Время | `worldtimeapi.org` |
-
----
-
-## Зависимости
+## Структура
 
 ```
-langchain >= 1.2.10
-langchain-openai >= 1.1.10
-langgraph >= 1.0.10
-langgraph-checkpoint-sqlite >= 3.0.3
-omegaconf >= 2.3.0
-pydantic >= 2.12.5
+src/
+  agent.py            граф (recall→goal→reflexion→{fast|reason|deliberate}→…→reflect)
+  prompts.py          промпты + реестр обучаемых (OPTIMIZABLE_PROMPTS)
+  structured_outputs.py
+  memory/             store(SQLite) + embedder + vector_index(TurboVec) + feedback
+  improve/            prompt_store(ParamStore) + optimizer(TextGrad/Reflexion) + pipe + graph_learn
+  tracing/            tracer(спаны) + diagnose
+  external/           контекст A2A/MCP
+  maintenance/        авто-апдейт зависимостей
+  tools/              менеджер навыков (создание/защита/автосинк)
+  skills/             навыки (web_search, device_control, deep_agent, …)
+  server.py           FastAPI
+main.py / bot.py      REPL / Telegram
 ```
 
-Python >= 3.13
+## Статус
+
+Ядро, память, персонализация, 4 режима мышления, по-пунктовое исполнение, self-learning
+(forward+backward, триггер по деградации/неактивности), трейсинг, защита/переполнение,
+device on-demand, DeepAgent, SearXNG, сервер — реализованы и протестированы. Отложено
+(см. `ARCHITECTURE.md`): vision-анализ скриншота, реальный MCP-клиент с human-gate,
+свободная композиция модулей, gradient вдоль рёбер трейса.

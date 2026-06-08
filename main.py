@@ -56,8 +56,11 @@ async def main():
             result = await graph.ainvoke(
                 {
                     "query":                    query,
+                    "user_id":                  "local",
                     "messages":                 [],
                     "chat_history":             chat_history + [{"role": "user", "content": query}],
+                    "memory_context":           "",
+                    "implicit_feedback":        "",
                     "route":                    "",
                     "created_skill_name":       "",
                     "create_validation_passed": False,
@@ -73,7 +76,7 @@ async def main():
                     "validation_feedback":      "",
                     "global_retries":           0,
                 },
-                config={"configurable": {"thread_id": thread_id}},
+                config={"configurable": {"thread_id": thread_id}, "recursion_limit": 50},
             )
 
             answer = result.get("final_answer", "No answer")
