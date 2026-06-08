@@ -20,7 +20,7 @@ from langgraph.prebuilt import create_react_agent
 from omegaconf import OmegaConf
 
 from .schemas import GeneralGraphState
-from .utils import _format_chat_history, _run_smoke_test
+from .utils import _format_chat_history, _run_smoke_test, _skill_loadable
 from .prompts import (
     router_prompt,
     create_skills_system_prompt,
@@ -52,6 +52,8 @@ from .memory import MemoryStore, build_embedder, detect_implicit_feedback
 from .improve import get_prompt as get_prompt_override, maybe_auto_improve
 from .improve.prompt_store import format_fewshots, add_fewshot
 from .external import get_external_context, format_external_context
+from .mcp_client import suggest_server, get_mcp_tools, discover_mcp, approve_server
+from .subagents import get_subagent_tools
 from .tracing import traced, new_run, current_run, trace_store, diagnose
 from .tools import get_manager_tools, get_all_loaded_skill_tools, get_skill_runtime_prompts, sync_registry
 from .tools.skill_creation import (
@@ -321,6 +323,7 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
         "skill_content": skill_content,
     })
 
+    # ── Этап 1: статический ревью (LLM) ──
     if not result.is_valid or result.confidence < LOW_CONF:
         delete_skill.invoke({"name": skill_name})
         return {
@@ -332,6 +335,21 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
             "create_retries": retries + 1,
         }
 
+    # ── Этап 2: загружаемость (без LLM) — модуль импортируется и содержит @tool ──
+    loadable, lmsg = _skill_loadable(skill_name)
+    if not loadable:
+        delete_skill.invoke({"name": skill_name})
+        return {
+            "create_validation_passed": False,
+            "create_feedback": (
+                f"[Загрузка] Навык не импортируется или в нём нет рабочего @tool: {lmsg}. "
+                f"Проверь, что есть 'from langchain_core.tools import tool', все импорты на месте "
+                f"и нет синтаксических ошибок."
+            ),
+            "create_retries": retries + 1,
+        }
+
+    # ── Этап 3: runtime smoke-test (реальный вызов tool) ──
     try:
         test_case = await test_case_chain.ainvoke({
             "skill_content": skill_content,
@@ -364,7 +382,8 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
         }
 
     except Exception as e:
-        print(f"[SGR] Smoke test generation failed: {e}, skipping runtime test")
+        # Smoke-тест не сгенерился, НО этап 2 уже гарантировал загружаемость → принимаем.
+        print(f"[SGR] Smoke test generation failed: {e}; навык загружаем (этап 2 пройден), принимаю.")
         load_skill_tools.invoke({"name": skill_name})
         return {
             "create_validation_passed": True,
@@ -417,7 +436,28 @@ async def capability_research_node(state: GeneralGraphState) -> dict:
         parts.append(f"(поиск способа не удался: {e})")
 
     hint = "\n\n".join(parts) or "Готового способа не нашёл — собери из общих инструментов."
-    return {"selected_skills": selected, "capability_gap": True, "capability_hint": hint}
+
+    # MCP: сначала доверенный каталог (авто-подключение), иначе discovery в реестре.
+    mcp_servers: list[str] = []
+    trusted = suggest_server(query)
+    if trusted:
+        mcp_servers = [trusted]
+        hint = f"[Доверенный MCP: {trusted} — инструменты будут доступны]\n\n" + hint
+    else:
+        cand = discover_mcp(query, limit=config.get("mcp", {}).get("discover_limit", 8))
+        if cand:
+            auto = config.get("mcp", {}).get("auto_trust_discovered", False)
+            if auto:
+                top = cand[0]
+                approve_server(top["name"], top["spec"])
+                mcp_servers = [top["name"]]
+                hint = f"[Найден и авто-подключён MCP: {top['name']} ({top['package']})]\n\n" + hint
+            else:
+                lst = "; ".join(f"{c['name']} ({c['package']})" for c in cand[:4])
+                hint = (f"[Найдены MCP-серверы под задачу (нужно подтверждение пользователя для подключения): "
+                        f"{lst}]\n\n" + hint)
+
+    return {"selected_skills": selected, "capability_gap": True, "capability_hint": hint, "mcp_servers": mcp_servers}
 
 
 async def decompose_node(state: GeneralGraphState) -> dict:
@@ -495,6 +535,27 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     selected = state.get("selected_skills", [])
     tools = get_manager_tools() + get_all_loaded_skill_tools(selected)
 
+    # Автоподключение доверенных MCP-серверов, подобранных под задачу.
+    mcp_names = []
+    for mcp_tool in await get_mcp_tools(state.get("mcp_servers") or []):
+        tools.append(mcp_tool)
+        mcp_names.append(mcp_tool.name)
+
+    # Под-агенты как базовые инструменты (agent-as-tool): доступны исполнителю наравне с навыками.
+    subagent_names = []
+    for sa in get_subagent_tools():
+        tools.append(sa)
+        subagent_names.append(sa.name)
+
+    # Трейсим подключение инструментов (какие скиллы/MCP/под-агенты реально подцепились).
+    try:
+        trace_store.record(
+            current_run(), "tools_attached", 0.0, "ok",
+            output=f"skills={selected} mcp={mcp_names} subagents={subagent_names}",
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
     subtasks = state.get("subtasks", [])
     idx = state.get("current_step", 0)
     step = subtasks[idx]
@@ -548,6 +609,7 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         "current_step": idx + 1,
         "step_retries": 0,
         "step_feedback": "",
+        "active_mcp_tools": mcp_names,
     }
 
 

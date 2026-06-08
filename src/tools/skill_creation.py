@@ -1,5 +1,6 @@
 import ast
 import json
+import os
 import importlib.util
 import sys
 from pathlib import Path
@@ -8,7 +9,23 @@ from typing import Optional
 from langchain_core.tools import tool
 
 
-SKILLS_DIR = Path("src/skills")
+def _skills_base() -> Path:
+    """
+    BASE_PATH навыков/тулов: env AGENT_BASE_PATH → config.yml skills.base_path → src/skills.
+    Позволяет держать навыки/подключаемые тулы в произвольном каталоге.
+    """
+    base = os.getenv("AGENT_BASE_PATH")
+    if not base:
+        try:
+            from omegaconf import OmegaConf
+
+            base = OmegaConf.load("config.yml").get("skills", {}).get("base_path")
+        except Exception:  # noqa: BLE001
+            base = None
+    return Path(base) if base else Path("src/skills")
+
+
+SKILLS_DIR = _skills_base()
 REGISTRY_FILE = SKILLS_DIR / "registry.json"
 
 

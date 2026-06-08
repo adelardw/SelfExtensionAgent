@@ -24,7 +24,8 @@ class GeneralGraphState(TypedDict):
 
     # ── Capabilities ──
     active_tools: list[str]      # имена локальных инструментов навыков в execution
-    active_mcp_tools: list[str]  # имена инструментов, подключённых из MCP-серверов (иной lifecycle)
+    active_mcp_tools: list[str]  # имена инструментов, реально подключённых из MCP-серверов
+    mcp_servers: list[str]       # доверенные MCP-серверы, подобранные под задачу (для подключения)
     capability_gap: bool         # агент осознал нехватку экспертизы → нужен поиск/MCP
     capability_hint: str         # найденный в интернете способ «как это делается» / варианты MCP
 

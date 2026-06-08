@@ -30,6 +30,7 @@ memory:
   max_reflections: 200
 
 skills:
+  base_path: src/skills   # BASE_PATH навыков/тулов (можно переопределить env AGENT_BASE_PATH)
   # Базовые навыки, которые агент НЕ имеет права удалять/перезаписывать
   # без force. Защищают «скелет» способностей от самоповреждения в self-improve.
   protected:
@@ -41,6 +42,10 @@ skills:
     - device_control
     - deep_agent
   autosync: true       # при старте чинить реестр: подхватывать orphan-скиллы, чистить битые
+
+mcp:
+  auto_trust_discovered: false  # true → авто-доверять и подключать MCP, найденные в реестре (РИСК: чужой код)
+  discover_limit: 8
 
 improve:
   # Self-learning loop (L2). Запускается НЕ каждую итерацию, а по триггерам:

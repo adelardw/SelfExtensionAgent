@@ -8,6 +8,40 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 
 SMOKE_TEST_TIMEOUT: int = 15
 
+
+def _skill_loadable(skill_name: str) -> tuple[bool, str]:
+    """
+    Этап валидации «загружаемость»: модуль навыка обязан импортироваться БЕЗ ошибок
+    и содержать хотя бы одну @tool-функцию. Ловит битьё вроде отсутствия
+    `from langchain_core.tools import tool` (name 'tool' is not defined) ещё ДО приёма.
+    Возвращает (ok, сообщение).
+    """
+    py_file = SKILLS_DIR / skill_name / f"{skill_name}.py"
+    if not py_file.exists():
+        return False, "нет файла навыка"
+    module_name = f"skills_load_check.{skill_name}"
+    try:
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        spec = importlib.util.spec_from_file_location(module_name, str(py_file))
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    except Exception as e:  # noqa: BLE001
+        return False, f"{type(e).__name__}: {e}"
+    finally:
+        sys.modules.pop(module_name, None)
+
+    tools = [
+        getattr(module, a).name
+        for a in dir(module)
+        if hasattr(getattr(module, a), "name") and hasattr(getattr(module, a), "invoke")
+    ]
+    if not tools:
+        return False, "не найдено ни одной @tool функции (есть ли 'from langchain_core.tools import tool'?)"
+    return True, ", ".join(tools)
+
+
 def _run_smoke_test(skill_name: str, tool_name: str, test_input: dict) -> tuple[bool, str]:
     """
     Загружает модуль навыка, находит @tool функцию, вызывает с тестовым вводом.
