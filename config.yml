@@ -1,9 +1,16 @@
+provider: openrouter   # openrouter | ollama  (ollama = локально, бесплатно по токенам)
 model:
   name: gpt-4o-mini
   temperature: 0
 code_model:
   name: google/gemini-3-flash-preview
   temperature: 0
+ollama:
+  base_url: http://localhost:11434/v1
+  model: gpt-oss:20b          # MoE ~3.6B-active, Q4 ~13ГБ — влезает в 24ГБ M4 Pro, холодная
+  code_model: qwen2.5-coder:7b  # исполнение/код (7B dense, ~5ГБ)
+  embed_model: nomic-embed-text  # эмбеддинги, если включены
+  num_ctx: 16384              # ВАЖНО: промпты агента ~6–8k токенов → контекст ≥8k обязателен
 agent:
   max_create_retries: 2
   max_global_retries: 2

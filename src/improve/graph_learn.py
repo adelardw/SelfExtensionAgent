@@ -40,14 +40,11 @@ NODE_DESC = {
 
 def _backward_gradients(blamed: list[str], failures_text: str):
     """ОДИН LLM-вызов: textual gradients по виноватым нодам, рассуждая вдоль forward-цепочек."""
-    key = os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
-    if not key:
-        return []
-    from langchain_openai.chat_models import ChatOpenAI
-    from ..llm import OPENROUTER_BASE
+    from ..llm import chat, provider
 
-    llm = ChatOpenAI(api_key=key, base_url=OPENROUTER_BASE,
-                     model=_cfg.get("model", {}).get("name", "gpt-4o-mini"), temperature=0)
+    if provider() == "openrouter" and not (os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")):
+        return []
+    llm = chat(_cfg.get("model", {}).get("name", "gpt-4o-mini"), 0)
     catalog = "\n".join(f"- {n} ({OPTIMIZABLE[n]}): {NODE_DESC.get(n, '')}" for n in blamed)
     chain = backward_prompt | llm.with_structured_output(NodeGradients)
     try:

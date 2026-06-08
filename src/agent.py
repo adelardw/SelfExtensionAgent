@@ -96,19 +96,11 @@ if config.get("skills", {}).get("autosync", True):
     if any(_sync.values()):
         print(f"[SkillRegistry] sync: {_sync}")
 
-llm = ChatOpenAI(
-    api_key=os.getenv('OPEN_ROUTER_API_KEY'),
-    base_url="https://openrouter.ai/api/v1",
-    model=config.model.name,
-    temperature=config.model.temperature,
-)
+from .llm import chat as _chat
 
-code_llm = ChatOpenAI(
-    api_key=os.getenv('OPEN_ROUTER_API_KEY'),
-    base_url="https://openrouter.ai/api/v1",
-    model=config.code_model.name,
-    temperature=config.code_model.temperature,
-)
+# Провайдер (openrouter/ollama) выбирается в config.yml — _chat это учитывает.
+llm = _chat(config.model.name, config.model.temperature)
+code_llm = _chat(config.code_model.name, config.code_model.temperature)
 
 
 route_chain = router_prompt | llm.with_structured_output(RouteDecision)

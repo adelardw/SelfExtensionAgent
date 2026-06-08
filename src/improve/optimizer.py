@@ -17,7 +17,7 @@ from typing import Optional, Protocol
 
 from omegaconf import OmegaConf
 
-from ..llm import OPENROUTER_BASE as _OPENROUTER
+from ..llm import chat, resolve_model
 
 _cfg = OmegaConf.load("config.yml")
 _MODEL = _cfg.get("code_model", {}).get("name", "gpt-4o-mini")
@@ -60,12 +60,10 @@ class TextGradOptimizer:
             import textgrad as tg
             from textgrad.engine.openai import ChatOpenAI as TGEngine
 
-            key = _api_key()
-            if not key:
-                raise RuntimeError("нет API-ключа для движка")
-            os.environ.setdefault("OPENAI_API_KEY", key)
+            base, key, name = resolve_model(_MODEL)
+            os.environ.setdefault("OPENAI_API_KEY", key or "ollama")
             self._tg = tg
-            self._engine = TGEngine(model_string=_MODEL, base_url=_OPENROUTER)
+            self._engine = TGEngine(model_string=name, base_url=base)
         except Exception as e:  # noqa: BLE001
             print(f"[TextGrad] недоступен ({e})")
 
@@ -107,9 +105,7 @@ class ReflexionOptimizer:
     name = "reflexion"
 
     def __init__(self):
-        from langchain_openai.chat_models import ChatOpenAI
-
-        self._llm = ChatOpenAI(api_key=_api_key(), base_url=_OPENROUTER, model=_MODEL, temperature=0.3)
+        self._llm = chat(_MODEL, 0.3)
 
     @property
     def available(self) -> bool:

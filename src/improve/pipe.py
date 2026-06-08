@@ -23,7 +23,7 @@ from ..prompts import OPTIMIZABLE_PROMPTS
 from . import prompt_store
 from .optimizer import build_optimizer
 
-from ..llm import OPENROUTER_BASE as _OPENROUTER
+from ..llm import chat
 
 _cfg = OmegaConf.load("config.yml")
 _MODEL = _cfg.get("model", {}).get("name", "gpt-4o-mini")
@@ -55,12 +55,7 @@ class SelfLearningPipe:
         if self.optimizer is None:
             self.optimizer = build_optimizer(_cfg.get("improve", {}).get("optimizer", "textgrad"))
         if self._judge is None:
-            from langchain_openai.chat_models import ChatOpenAI
-
-            self._judge = (
-                ChatOpenAI(api_key=self._key, base_url=_OPENROUTER, model=_MODEL, temperature=0)
-                .with_structured_output(_Verdict)
-            )
+            self._judge = chat(_MODEL, 0).with_structured_output(_Verdict)
 
     def _judge_improvement(self, role: str, old: str, new: str, failures: list[dict]) -> _Verdict:
         cases = "\n".join(

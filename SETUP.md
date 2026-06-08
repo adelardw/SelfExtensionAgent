@@ -66,6 +66,32 @@ export SEARXNG_URL=http://localhost:8080
   после подтверждения (`approve_server`) или при `config mcp.auto_trust_discovered=true`.
 - node/npx серверы требуют Node.js (`brew install node`); Python-серверы идут через uvx.
 
+## 4b. Локальные модели — Ollama (бесплатно по токенам)
+```bash
+brew install ollama
+# ВАЖНО: промпты агента ~6–8k токенов → поднять контекст при старте сервера
+OLLAMA_CONTEXT_LENGTH=16384 ollama serve &
+ollama pull gpt-oss:20b           # MoE ~3.6B-active — влезает в 24ГБ M4 Pro (самый слабый)
+ollama pull qwen2.5-coder:7b      # для кода/исполнения
+ollama pull nomic-embed-text      # эмбеддинги (если включены)
+```
+> 48ГБ+ RAM → можно `qwen3:30b-a3b` (мощнее). 24ГБ → `gpt-oss:20b`.
+> Без `OLLAMA_CONTEXT_LENGTH` Ollama режет контекст (дефолт мал) → агент деградирует.
+
+**Чтобы НЕ грелся (M4 Pro):**
+- macOS **Low Power Mode** (Настройки → Аккумулятор) — главный и самый простой рычаг, заметно холоднее.
+- Один загруженный модель за раз: `OLLAMA_MAX_LOADED_MODELS=1 OLLAMA_NUM_PARALLEL=1 ollama serve`
+  (иначе fast+code модели висят в памяти разом). Можно сделать `code_model: gpt-oss:20b` (одна модель на всё).
+- Меньше вызовов: в `config.yml` — `agent.consensus_validation: false` (2 судьи → 1),
+  `improve.auto: false`, поменьше `memory.recall_budget_chars` (короче промпты = меньше счёта).
+- Если всё равно тёплый — возьми мелкую модель: `qwen3:4b` / `llama3.2:3b` (холоднее и быстрее, но проще).
+Переключение — одна строка в `config.yml`:
+```yaml
+provider: ollama   # было: openrouter
+```
+Всё (граф, self-learning, эмбеддинги) пойдёт локально. Имена моделей — в секции `ollama:`.
+Назад в облако — `provider: openrouter`.
+
 ## 5. Семантическая память (эмбеддинги + TurboVec)
 В `config.yml`: `memory.embeddings: true` — recall станет семантическим (через OpenRouter,
 тем же ключом; модель — `memory.embedding_model`).

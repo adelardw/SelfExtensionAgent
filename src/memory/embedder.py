@@ -44,6 +44,26 @@ class OpenAIEmbedder:
     _OPENROUTER = "https://openrouter.ai/api/v1"
 
     def __init__(self, model: Optional[str] = None):
+        # Ollama-провайдер: локальные эмбеддинги.
+        try:
+            from omegaconf import OmegaConf
+
+            _c = OmegaConf.load("config.yml")
+            if _c.get("provider") == "ollama":
+                oll = _c.get("ollama", {})
+                self._key, self._base = "ollama", oll.get("base_url", "http://localhost:11434/v1")
+                self.model = model or oll.get("embed_model", "nomic-embed-text")
+                self.enabled = True
+                self._client = None
+                try:
+                    from openai import OpenAI
+                    self._client = OpenAI(api_key=self._key, base_url=self._base)
+                except Exception:  # noqa: BLE001
+                    self.enabled = False
+                return
+        except Exception:  # noqa: BLE001
+            pass
+
         or_key = os.getenv("OPEN_ROUTER_API_KEY")
         oa_key = os.getenv("OPENAI_API_KEY")
         if or_key:
