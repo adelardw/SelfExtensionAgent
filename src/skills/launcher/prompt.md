@@ -1,0 +1,1 @@
+Use this skill to open applications on macOS.

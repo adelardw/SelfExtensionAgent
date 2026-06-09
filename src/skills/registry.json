@@ -128,5 +128,21 @@
     "updated_at": "2026-06-09T01:57:36.586441",
     "version": 1,
     "protected": true
+  },
+  "launcher": {
+    "description": "Skill to launch macOS applications.",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-09T03:21:41.139871",
+    "updated_at": "2026-06-09T03:21:41.139903",
+    "version": 1
+  },
+  "macos_launcher_v2": {
+    "description": "Skill to launch macOS applications using subprocess.",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-09T03:23:52.136173",
+    "updated_at": "2026-06-09T03:23:52.136182",
+    "version": 1
   }
 }

@@ -18,7 +18,8 @@ from rich.markdown import Markdown
 from rich.table import Table
 from rich.text import Text
 
-from src.agent import build_graph, config, memory_store
+from src.agent import build_graph, config, memory_store, rebuild_llms
+from src.llm import active_summary, set_provider
 from src.tracing import diagnose, trace_store
 from src.usage import TokenTracker, add_alltime, cost_of, load_alltime
 
@@ -52,9 +53,9 @@ async def make_checkpointer():
 def banner() -> None:
     legend = "  ".join(f"[{st}]{lbl}[/]" for lbl, st in MODE_STYLE.values())
     body = Text.from_markup(
-        f"Модель: [cyan]{config.model.name}[/] · код: [cyan]{config.code_model.name}[/]\n"
+        f"Активно: [cyan]{active_summary()}[/]\n"
         f"Режимы: {legend}\n"
-        f"Команды: [dim]/help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]"
+        f"Команды: [dim]/model /help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]"
     )
     console.print(Panel(body, title="🤖 Self-Extension Agent", border_style="bright_blue", expand=False))
 
@@ -141,6 +142,24 @@ def _k(n: int) -> str:
     return f"{n/1000:.1f}k" if n >= 1000 else str(n)
 
 
+def cmd_model(args: list[str]) -> None:
+    if not args:
+        console.print(f"Активно: [cyan]{active_summary()}[/]")
+        console.print("[dim]/model api  |  /model ollama [имя_модели]  (напр. /model ollama nemotron-3-nano:4b-q8_0)[/]")
+        return
+    target = args[0].lower()
+    if target in ("api", "openrouter", "cloud"):
+        set_provider("openrouter")
+    elif target == "ollama":
+        set_provider("ollama", args[1] if len(args) > 1 else None)
+    else:
+        console.print("[red]Не понял. Используй: /model api | /model ollama [имя][/]")
+        return
+    with console.status("[cyan]Переключаю модель…"):
+        rebuild_llms()
+    console.print(f"✅ Активно → [cyan]{active_summary()}[/]")
+
+
 def cmd_usage(tracker: TokenTracker) -> None:
     at = load_alltime()
     t = Table(title="🧮 Расход токенов", border_style="magenta")
@@ -193,6 +212,8 @@ async def main():
                 continue
             if low in ("/help", "help", "?"):
                 banner(); continue
+            if low.startswith("/model"):
+                cmd_model(query.split()[1:]); continue
             if low == "/facts":
                 cmd_facts(user_id); continue
             if low == "/goal":

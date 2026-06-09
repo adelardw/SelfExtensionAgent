@@ -1,5 +1,6 @@
 import re
 import asyncio
+import threading
 import warnings
 import os
 from dotenv import load_dotenv
@@ -98,30 +99,38 @@ if config.get("skills", {}).get("autosync", True):
 
 from .llm import chat as _chat
 
-# Провайдер (openrouter/ollama) выбирается в config.yml — _chat это учитывает.
-llm = _chat(config.model.name, config.model.temperature)
-code_llm = _chat(config.code_model.name, config.code_model.temperature)
+
+def rebuild_llms() -> None:
+    """
+    (Пере)создаёт LLM-клиентов и все цепочки по текущему провайдеру/модели.
+    Ноды графа читают эти модульные глобалы при вызове, поэтому смена провайдера в
+    рантайме (CLI /model) подхватывается без пересборки графа.
+    """
+    global llm, code_llm, route_chain, sgr_create_chain, test_case_chain
+    global skill_selector_chain, validation_chain, validation_chain_b
+    global memory_extraction_chain, reflection_chain, step_validation_chain
+    global synth_chain, create_skills_agent
+
+    llm = _chat("fast", config.model.temperature)
+    code_llm = _chat("code", config.code_model.temperature)
+
+    route_chain = router_prompt | llm.with_structured_output(RouteDecision)
+    sgr_create_chain = sgr_create_prompt | llm.with_structured_output(SGRCreateResult)
+    test_case_chain = test_case_prompt | llm.with_structured_output(SkillTestCase)
+    skill_selector_chain = skill_selector_prompt | llm.with_structured_output(SkillSelection)
+    validation_chain = validation_prompt | llm.with_structured_output(ValidationResult)
+    validation_chain_b = validation_prompt | code_llm.with_structured_output(ValidationResult)  # консенсус
+    memory_extraction_chain = memory_extraction_prompt | llm.with_structured_output(MemoryExtraction)
+    reflection_chain = reflection_prompt | llm.with_structured_output(ReflectionResult)
+    # Когнитивные ноды (goal/reflexion/decompose/fast_answer/reason) строятся через
+    # _override_system → их промпты обучаемы (см. graph_learn).
+    step_validation_chain = step_validation_prompt | llm.with_structured_output(StepOutcome)
+    synth_chain = synthesize_prompt | llm
+
+    create_skills_agent = create_react_agent(code_llm, get_manager_tools(), prompt=create_skills_system_prompt)
 
 
-route_chain = router_prompt | llm.with_structured_output(RouteDecision)
-sgr_create_chain = sgr_create_prompt | llm.with_structured_output(SGRCreateResult)
-test_case_chain = test_case_prompt | llm.with_structured_output(SkillTestCase)
-skill_selector_chain = skill_selector_prompt | llm.with_structured_output(SkillSelection)
-validation_chain = validation_prompt | llm.with_structured_output(ValidationResult)
-validation_chain_b = validation_prompt | code_llm.with_structured_output(ValidationResult)  # 2-й судья (консенсус)
-memory_extraction_chain = memory_extraction_prompt | llm.with_structured_output(MemoryExtraction)
-reflection_chain = reflection_prompt | llm.with_structured_output(ReflectionResult)
-# Когнитивные ноды (goal/reflexion/decompose/fast_answer) строятся через
-# _override_system → их промпты обучаемы (см. graph_learn). Здесь — остальные чейны.
-step_validation_chain = step_validation_prompt | llm.with_structured_output(StepOutcome)
-synth_chain = synthesize_prompt | llm
-
-
-create_skills_agent = create_react_agent(
-    code_llm,
-    get_manager_tools(),
-    prompt=create_skills_system_prompt,
-)
+rebuild_llms()
 
 def _override_system(role: str, sysvars: dict) -> str:
     """
@@ -412,13 +421,13 @@ async def capability_research_node(state: GeneralGraphState) -> dict:
     инструментами по найденному способу. Создание навыка — крайняя мера.
     """
     selected = list(state.get("selected_skills", []))
-    # Поиск — БАЗОВАЯ способность исследовать среду: всегда доступен в deliberate-пути.
-    gap = "web_search" not in selected and not selected
-    if "web_search" not in selected:
-        selected.append("web_search")
-
-    if not gap:
+    # Если навык под задачу выбран (в т.ч. device_control/app_control) — НЕ лезем в веб.
+    if selected:
         return {"selected_skills": selected, "capability_gap": False, "capability_hint": "Навык под задачу есть."}
+
+    # Реальный пробел (ничего не подошло) — только тогда подключаем поиск и ищем способ.
+    selected = ["web_search"]
+    gap = True
 
     # Реальный пробел: гуглим «как это делается» + есть ли готовый MCP, прежде чем что-то строить.
     query = state["query"]
@@ -746,47 +755,47 @@ async def reflect_node(state: GeneralGraphState) -> dict:
             "Недавняя активность: " + "; ".join(ep["query"][:60] for ep in recent[:5]),
         )
 
-    results = await asyncio.gather(_extract_facts(), _synth_reflection(), return_exceptions=True)
-    for r in results:
-        if isinstance(r, Exception):
-            print(f"[Reflect] subtask failed: {r}")
-
-    # Трекинг деградации качества: если уверенность валидированных ответов падает —
-    # сигналим и понижаем порог авто-оптимизации (агрессивнее чиним себя).
-    trend = memory_store.quality_trend(user_id)
-    if trend["trend"] == "declining":
-        print(f"[QualityMonitor] ⚠ деградация качества: {trend}")
-
-    # Периодически (раз в REFLECT_EVERY): защита от переполнения + ротация трейсов + самодиагностика.
-    if memory_store.episode_count(user_id) % REFLECT_EVERY == 0:
+    # Тяжёлую пост-обработку (LLM-извлечение фактов, рефлексия, обслуживание, само-улучшение)
+    # уносим в ФОН: ответ пользователю уже готов — не заставляем ждать ещё LLM-вызовы.
+    def _post_reflect() -> None:
+        async def _run():
+            await asyncio.gather(_extract_facts(), _synth_reflection(), return_exceptions=True)
         try:
-            memory_store.prune(**MEM_CAPS)
-            trace_store.prune()
-            report = diagnose(memory_store, user_id)
-            if not report["healthy"]:
-                print(f"[SelfDiagnosis] косяки: {report['findings']}")
+            asyncio.run(_run())
         except Exception as e:  # noqa: BLE001
-            print(f"[Reflect] maintenance failed: {e}")
+            print(f"[Reflect-bg] extract/reflect failed: {e}")
+        trend = memory_store.quality_trend(user_id)
+        if trend["trend"] == "declining":
+            print(f"[QualityMonitor] ⚠ деградация качества: {trend}")
+        if memory_store.episode_count(user_id) % REFLECT_EVERY == 0:
+            try:
+                memory_store.prune(**MEM_CAPS)
+                trace_store.prune()
+                report = diagnose(memory_store, user_id)
+                if not report["healthy"]:
+                    print(f"[SelfDiagnosis] косяки: {report['findings']}")
+            except Exception as e:  # noqa: BLE001
+                print(f"[Reflect-bg] maintenance failed: {e}")
+        try:
+            maybe_auto_improve(memory_store, degrading=(trend["trend"] == "declining"))
+        except Exception as e:  # noqa: BLE001
+            print(f"[Reflect-bg] auto-improve failed: {e}")
 
-    # 4. Evolutionary-контур: само-улучшение НЕ каждую итерацию — только по деградации.
-    #    Триггер при неактивности — отдельно (idle-петля в server.py / CLI).
-    try:
-        maybe_auto_improve(memory_store, degrading=(trend["trend"] == "declining"))
-    except Exception as e:  # noqa: BLE001
-        print(f"[Reflect] auto-improve trigger failed: {e}")
-
+    threading.Thread(target=_post_reflect, daemon=True).start()
     return {}
 
 
 def route_after_reflexion(state: GeneralGraphState) -> str:
-    """Meta-controller выбирает путь мышления (Any-2-Any):
-    fast/clarify → быстрый ответчик; reason → глубокое рассуждение; deliberate → инструменты."""
-    mode = state.get("mode")
-    if mode in ("fast", "clarify"):
+    """Meta-controller: fast/clarify → сразу ответчик (БЕЗ целеполагания, экономия вызова);
+    reason/deliberate → сначала goal (целеполагание нужно для rubric/декомпозиции)."""
+    if state.get("mode") in ("fast", "clarify"):
         return "fast_answer"
-    if mode == "reason":
-        return "reason"
-    return "router"
+    return "goal"
+
+
+def route_after_goal(state: GeneralGraphState) -> str:
+    """После целеполагания: reason → глубокое рассуждение; deliberate → инструменты."""
+    return "reason" if state.get("mode") == "reason" else "router"
 
 
 def route_after_router(state: GeneralGraphState) -> str:
@@ -848,12 +857,14 @@ def build_graph(checkpointer=None) -> CompiledStateGraph:
         graph.add_node(_name, traced(_name, _fn))
 
     graph.add_edge(START, "recall")
-    graph.add_edge("recall", "goal")
-    graph.add_edge("goal", "reflexion")
+    graph.add_edge("recall", "reflexion")   # сначала выбор режима (дёшево)
     graph.add_conditional_edges("reflexion", route_after_reflexion, {
         "fast_answer": "fast_answer",
-        "reason":      "reason",
-        "router":      "router",
+        "goal":        "goal",
+    })
+    graph.add_conditional_edges("goal", route_after_goal, {
+        "reason": "reason",
+        "router": "router",
     })
     graph.add_edge("fast_answer", "reflect")
     graph.add_edge("reason", "validation")  # глубокое рассуждение проходит финальную валидацию

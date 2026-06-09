@@ -33,10 +33,7 @@ def subgraph_to_tool(name: str, description: str, compiled, in_key: str = "query
 def react_subagent_tool(name: str, description: str, system: str,
                         skill_names: Optional[list[str]] = None, model: Optional[str] = None) -> StructuredTool:
     """Оборачивает ReAct-под-агента (со своим промптом и набором навыков) в инструмент."""
-    from omegaconf import OmegaConf
-
-    cfg = OmegaConf.load("config.yml")
-    llm = chat(model or cfg.get("code_model", {}).get("name", "gpt-4o-mini"))
+    llm = chat("code")
     tools = get_all_loaded_skill_tools(skill_names) if skill_names else []
     agent = create_react_agent(llm, tools, prompt=system)
 

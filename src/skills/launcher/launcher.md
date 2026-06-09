@@ -1,0 +1,1 @@
+Skill to launch macOS applications.

@@ -475,6 +475,28 @@ class MemoryStore:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [ep for s, ep in scored[:k] if s > 0.15]
 
+    def _rank_facts(self, user_id: str, query: str) -> list[sqlite3.Row]:
+        """
+        Гибкий отбор персональных фактов под запрос: score = важность + релевантность
+        (по эмбеддингам/токенам ключа+значения+тегов). Устойчивая персона (язык, имя —
+        высокий importance) держится всегда, а тематические факты всплывают под запрос.
+        """
+        facts = self.get_facts(user_id)
+        if not facts:
+            return []
+
+        def fscore(f) -> float:
+            tags = ""
+            if "tags" in f.keys():
+                try:
+                    tags = " ".join(json.loads(f["tags"] or "[]"))
+                except Exception:  # noqa: BLE001
+                    tags = ""
+            rel = self._relevance(query, f"{f['key']} {f['value']} {tags}", f["embedding"])
+            return _W_IMPORTANCE * f["importance"] + _W_RELEVANCE * rel
+
+        return sorted(facts, key=fscore, reverse=True)
+
     def recall(self, user_id: str, query: str, k: int = 5, budget: int = 1800) -> str:
         """
         Адаптивно собирает контекст памяти под бюджет символов (анти-bloat):
@@ -482,7 +504,7 @@ class MemoryStore:
         приоритету, пока не исчерпан budget. При большой памяти попадают только
         самые ценные чанки, а не всё подряд.
         """
-        facts = self.get_facts(user_id)
+        facts = self._rank_facts(user_id, query)
         top_eps = self._rank_episodes(user_id, query, k)
 
         scored_refl = []

@@ -44,7 +44,7 @@ def _backward_gradients(blamed: list[str], failures_text: str):
 
     if provider() == "openrouter" and not (os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")):
         return []
-    llm = chat(_cfg.get("model", {}).get("name", "gpt-4o-mini"), 0)
+    llm = chat("fast", 0)
     catalog = "\n".join(f"- {n} ({OPTIMIZABLE[n]}): {NODE_DESC.get(n, '')}" for n in blamed)
     chain = backward_prompt | llm.with_structured_output(NodeGradients)
     try:

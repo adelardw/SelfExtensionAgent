@@ -55,7 +55,7 @@ class SelfLearningPipe:
         if self.optimizer is None:
             self.optimizer = build_optimizer(_cfg.get("improve", {}).get("optimizer", "textgrad"))
         if self._judge is None:
-            self._judge = chat(_MODEL, 0).with_structured_output(_Verdict)
+            self._judge = chat("fast", 0).with_structured_output(_Verdict)
 
     def _judge_improvement(self, role: str, old: str, new: str, failures: list[dict]) -> _Verdict:
         cases = "\n".join(
