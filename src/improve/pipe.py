@@ -22,14 +22,31 @@ from ..memory import MemoryStore
 from ..prompts import OPTIMIZABLE_PROMPTS
 from . import prompt_store
 from .optimizer import build_optimizer
+from .safety import filter_learnable
 
 from ..llm import chat
 
 _cfg = OmegaConf.load("config.yml")
 _MODEL = _cfg.get("model", {}).get("name", "gpt-4o-mini")
 
-# Роли, которые умеет оптимизировать пайп: весь реестр обучаемых промптов графа.
+# Роли, по которым пайп ВИДИТ дефолты (для анализа/градиентов) — весь реестр.
 _ROLES = OPTIMIZABLE_PROMPTS
+
+# ПОЛИТИКА ОПТИМИЗАЦИИ (что backward вправе ПЕРЕЗАПИСЫВАТЬ):
+#   • системные промпты КЛЮЧЕВЫХ когнитивных нод — ЗАМОРОЖЕНЫ (оставляем как есть:
+#     это «дизайн» поведения агента, его не переписываем по метрике послушности);
+#   • промпты САБ-АГЕНТОВ-ТУЛОВ (researcher и пр.) — оптимизируемы;
+#   • основной канал улучшения/персонализации — FEW-SHOTS (глобальные и пер-юзер).
+# Архитектуру backward не трогает СТРУКТУРНО: он пишет только артефакты в ParamStore
+# (промпты тулов / few-shots), а не код или граф.
+TUNABLE_PROMPT_ROLES: set[str] = {"researcher"}  # промпты саб-агентов-как-тулов
+
+
+def _prompt_tunable(role: str) -> bool:
+    """Можно ли ПЕРЕЗАПИСАТЬ системный промпт этой роли (ключевые ноды — нет)."""
+    if role in TUNABLE_PROMPT_ROLES:
+        return True
+    return bool(_cfg.get("improve", {}).get("optimize_core_prompts", False))
 
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 _run_lock = threading.Lock()
@@ -80,6 +97,15 @@ class SelfLearningPipe:
             return {"status": "error", "role": role, "reason": "unknown role"}
         if not self._key:
             return {"status": "error", "role": role, "reason": "нет API-ключа"}
+        # Ключевые ноды агента — системный промпт ЗАМОРОЖЕН (политика): backward их
+        # не переписывает. Их канал улучшения — few-shots (forward-харвест).
+        if not _prompt_tunable(role):
+            return {"status": "frozen", "role": role,
+                    "reason": "системный промпт ключевой ноды не оптимизируется (только few-shots)"}
+        # Не учимся на попытках взлома собственной защиты.
+        failures = filter_learnable(failures)
+        if not failures:
+            return {"status": "skipped", "role": role, "reason": "после фильтра безопасности кейсов не осталось"}
 
         self._ensure_clients()
         default = _ROLES[role]
@@ -103,10 +129,11 @@ class SelfLearningPipe:
 
     def _failures_batch(self, min_failures: int) -> list[dict]:
         rows = self.store.get_failures(n=20, user_id=None)
-        return [
+        batch = [
             {"query": r["query"], "answer": r["answer"], "feedback": (r["feedback"] if "feedback" in r.keys() else "")}
             for r in rows
         ]
+        return filter_learnable(batch)  # без попыток взлома защиты
 
     def run(self, role: str = "step_execution", min_failures: int = 3, accept: bool = True) -> dict:
         if not self._key:

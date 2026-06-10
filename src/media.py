@@ -25,8 +25,110 @@ from .llm import chat
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic"}
 AUDIO_EXTS = {".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aiff", ".flac"}
 TEXT_EXTS = {".txt", ".md", ".csv", ".json", ".yml", ".yaml", ".py", ".log", ".html", ".xml"}
+DOC_EXTS = {".pdf", ".xlsx", ".xls", ".docx"}  # документы — извлекаем текст/таблицы
 
 MAX_INLINE_TEXT = 6000  # сколько символов текстового файла инлайнить в контекст
+
+
+def _pdf_pymupdf(path: Path, max_chars: int) -> str:
+    import fitz  # pymupdf
+
+    doc = fitz.open(str(path))
+    parts = []
+    for page in doc:
+        parts.append(page.get_text())
+        if sum(len(p) for p in parts) > max_chars:
+            break
+    doc.close()
+    return "\n".join(parts)[:max_chars]
+
+
+def _pdf_liteparse(path: Path, max_chars: int) -> str:
+    """liteparse: сохраняет ЛЕЙАУТ (строки таблиц выровнены) — LLM читает «значение↔строка»."""
+    import liteparse
+
+    # OCR off — для текстовых PDF быстро (~0.04с); включаем только если текста нет (скан).
+    text = liteparse.LiteParse(ocr_enabled=False, quiet=True).parse(str(path)).text
+    if len((text or "").strip()) < 20:  # вероятно скан → пробуем OCR
+        text = liteparse.LiteParse(ocr_enabled=True, quiet=True).parse(str(path)).text
+    return (text or "")[:max_chars]
+
+
+def _pdf_opendataloader(path: Path, max_chars: int) -> str:
+    """opendataloader (#1 точность таблиц/LaTeX) — ТРЕБУЕТ Java 11+; опциональный power-тир."""
+    import opendataloader_pdf
+
+    out = opendataloader_pdf.convert(input_path=[str(path)], format="markdown")
+    return (out if isinstance(out, str) else str(out))[:max_chars]
+
+
+def read_pdf(path: Path, max_chars: int = 12000) -> str:
+    """
+    PDF → текст тиерами (по убыванию точности таблиц, с фолбэком на надёжность):
+      1. liteparse — layout-aware (строки таблиц выровнены), быстро, без JVM — ДЕФОЛТ;
+      2. opendataloader — #1 точность (таблицы/LaTeX), но требует Java — только если включён
+         AGENT_PDF_POWER=1 и Java есть;
+      3. pymupdf — простой надёжный baseline.
+    """
+    import os
+
+    if os.getenv("AGENT_PDF_POWER") == "1":
+        try:
+            t = _pdf_opendataloader(path, max_chars)
+            if t.strip():
+                return t
+        except Exception:  # noqa: BLE001 — нет Java/ошибка → следующий тир
+            pass
+    try:
+        t = _pdf_liteparse(path, max_chars)
+        if t.strip():
+            return t
+    except Exception:  # noqa: BLE001
+        pass
+    return _pdf_pymupdf(path, max_chars)
+
+
+def read_excel(path: Path, max_chars: int = 12000) -> str:
+    """Все листы Excel как текстовые таблицы (pandas)."""
+    import pandas as pd
+
+    out = []
+    for name, df in pd.read_excel(str(path), sheet_name=None).items():
+        out.append(f"[Лист: {name}]\n{df.to_string(max_rows=200)}")
+    return "\n\n".join(out)[:max_chars]
+
+
+def read_docx(path: Path, max_chars: int = 12000) -> str:
+    """Текст из .docx (python-docx)."""
+    import docx
+
+    d = docx.Document(str(path))
+    return "\n".join(p.text for p in d.paragraphs)[:max_chars]
+
+
+def read_file(path: str | Path, max_chars: int = 12000) -> str:
+    """
+    Универсальный ридер вложения по расширению: документ→текст/таблицы, картинка→vision,
+    аудио→транскрипт, текст→содержимое. Используется attachment_context и навыком.
+    """
+    p = Path(path)
+    if not p.exists():
+        return f"[файл не найден: {p}]"
+    ext = p.suffix.lower()
+    try:
+        if ext == ".pdf":
+            return read_pdf(p, max_chars)
+        if ext in (".xlsx", ".xls"):
+            return read_excel(p, max_chars)
+        if ext == ".docx":
+            return read_docx(p, max_chars)
+        if ext in IMAGE_EXTS:
+            return describe_image(p)
+        if ext in AUDIO_EXTS:
+            return transcribe_audio(p)
+        return p.read_text(encoding="utf-8", errors="ignore")[:max_chars]
+    except Exception as e:  # noqa: BLE001
+        return f"[не смог прочитать {p.name}: {type(e).__name__}: {e}]"
 
 
 def _b64(path: Path) -> str:
@@ -98,6 +200,15 @@ def attachment_context(paths: list[str | Path], question: str = "") -> str:
                 blocks.append(f"[Изображение {p.name} (путь: {p})]\nОписание:\n{desc}")
             except Exception as e:  # noqa: BLE001
                 blocks.append(f"[Изображение {p.name} (путь: {p}) — vision не сработал: {e}]")
+        elif ext in DOC_EXTS:
+            content = read_file(p, MAX_INLINE_TEXT)
+            kind = {"pdf": "PDF", "xlsx": "Excel", "xls": "Excel", "docx": "Word"}.get(ext.lstrip("."), "Документ")
+            blocks.append(f"[{kind} {p.name} (путь: {p})]\n{content}")
+        elif ext in AUDIO_EXTS:
+            try:
+                blocks.append(f"[Аудио {p.name} (путь: {p})]\nТранскрипт:\n{transcribe_audio(p)}")
+            except Exception as e:  # noqa: BLE001
+                blocks.append(f"[Аудио {p.name} — транскрипт не сработал: {e}]")
         elif ext in TEXT_EXTS:
             try:
                 text = p.read_text(encoding="utf-8", errors="ignore")

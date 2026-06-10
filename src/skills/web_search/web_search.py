@@ -15,7 +15,10 @@ import re
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from langchain_core.tools import tool
+
+_BROWSE_HARD_TIMEOUT = 35  # сек: жёсткий потолок одного браузерного чтения (анти-зависание)
 
 try:
     from cloakbrowser import launch
@@ -165,7 +168,9 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
             except Exception:  # noqa: BLE001
                 results = []
             if not results and _CLOAK:
-                results = _search_cloak(query, max_results, recency)
+                # cloak-поиск тоже в потоке с жёстким таймаутом (sync-Playwright может зависнуть)
+                with ThreadPoolExecutor(max_workers=1) as ex:
+                    results = ex.submit(_search_cloak, query, max_results, recency).result(timeout=_BROWSE_HARD_TIMEOUT)
                 engine = "cloakbrowser"
         if not results:
             return f"Ничего не найдено по запросу: {query}"
@@ -180,6 +185,105 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
             return "Результаты (fallback):\n" + "\n".join(lines) if lines else f"Ошибка поиска: {e}"
         except Exception as e2:  # noqa: BLE001
             return f"Ошибка поиска: {e}; fallback: {e2}"
+
+
+def _relevant_chunks(text: str, find: str, budget: int = 3500) -> str:
+    """
+    Прицельная выжимка: режем текст на абзацы, ранжируем по пересечению с запросом
+    (token-overlap, без LLM — дёшево) и собираем самые релевантные в пределах budget.
+    Так агент получает ИМЕННО нужный факт, а не 50к символов шума.
+    """
+    qtokens = {w for w in re.findall(r"\w+", find.lower()) if len(w) > 2}
+    if not qtokens:
+        return text[:budget]
+    chunks = [c.strip() for c in re.split(r"\n{2,}|\. (?=[A-ZА-Я])", text) if len(c.strip()) > 30]
+    scored = []
+    for i, c in enumerate(chunks):
+        ctokens = set(re.findall(r"\w+", c.lower()))
+        overlap = len(qtokens & ctokens)
+        if overlap:
+            # бонус за плотность совпадений и за наличие чисел (факты часто числовые)
+            density = overlap / (1 + len(ctokens) ** 0.5)
+            num_bonus = 0.5 if re.search(r"\d", c) else 0
+            scored.append((overlap + density + num_bonus, i, c))
+    scored.sort(reverse=True)
+    out, used = [], 0
+    for _, i, c in scored:
+        if used + len(c) > budget:
+            continue
+        out.append((i, c))
+        used += len(c) + 2
+        if used >= budget:
+            break
+    out.sort()  # вернуть в исходном порядке (связность)
+    return "\n\n".join(c for _, c in out) if out else text[:budget]
+
+
+def _page_text_urllib(url: str) -> tuple[str, str]:
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        html = resp.read().decode("utf-8", "ignore")
+    title = _clean((re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I) or [None, ""])[1])
+    body = re.sub(r"<(script|style|nav|footer|header)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
+    return title, _clean(re.sub("<[^>]+>", " ", body))
+
+
+def _page_text_cloak(url: str) -> tuple[str, str]:
+    browser = launch(headless=True)
+    try:
+        page = browser.new_page()
+        page.goto(url, timeout=25000, wait_until="domcontentloaded")
+        title = _clean(page.title())
+        el = page.query_selector("article") or page.query_selector("main") or page.query_selector("body")
+        return title, (_clean(el.inner_text()) if el else "")
+    finally:
+        browser.close()
+
+
+def _page_text(url: str) -> tuple[str, str]:
+    """
+    (title, ПОЛНЫЙ чистый текст). cloakbrowser в ОТДЕЛЬНОМ ПОТОКЕ с жёстким таймаутом:
+    sync-Playwright может ЗАВИСНУТЬ и заблокировать event loop так, что внешний
+    asyncio.wait_for его не отменит (eval ловил прогоны на 240с). future.result(timeout)
+    даёт нам «бросить» зависший браузер и уйти на urllib, не дожидаясь его.
+    """
+    if _CLOAK:
+        try:
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                title, text = ex.submit(_page_text_cloak, url).result(timeout=_BROWSE_HARD_TIMEOUT)
+            if text:
+                return title, text
+        except Exception:  # noqa: BLE001 — таймаут/сбой браузера → простой ридер
+            pass
+    return _page_text_urllib(url)
+
+
+@tool
+def browse(url: str, find: str = "") -> str:
+    """
+    Open a page and read it for a FACT. Reads the WHOLE page (not a 4k slice) and, when
+    `find` is given, returns the most RELEVANT passages to that query — use this for
+    precise fact-finding (counts, dates, names, numbers) after search_web.
+
+    Args:
+        url: Page URL to read.
+        find: What to look for on the page (e.g. 'number of studio albums 2000-2009').
+              Strongly recommended — returns targeted passages instead of raw dump.
+
+    Returns:
+        Title + targeted relevant text (or a longer extract if `find` is empty).
+    """
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    try:
+        title, text = _page_text(url)
+        if not text:
+            return f"Страница {url} пустая или не отрендерилась."
+        body = _relevant_chunks(text, find, budget=3500) if find else text[:5000]
+        head = f"# {title}\n{url}" + (f"\n[поиск: {find}]" if find else "")
+        return f"{head}\n\n{body}"
+    except Exception as e:  # noqa: BLE001
+        return f"Не удалось прочитать {url}: {type(e).__name__}: {e}"
 
 
 @tool

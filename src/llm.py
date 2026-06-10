@@ -91,11 +91,16 @@ def _base_and_key() -> tuple[str, str]:
 
 
 def chat(role: str = "fast", temperature: float = 0.0):
-    """ChatOpenAI для активного провайдера + модель по роли (fast|code)."""
+    """ChatOpenAI для активного провайдера + модель по роли (fast|code|deep).
+    К каждому клиенту привязан run-budget callback — все вызовы (включая под-агентов)
+    учитываются в токен-бюджете прогона (см. runbudget)."""
     from langchain_openai.chat_models import ChatOpenAI
 
+    from .runbudget import callback
+
     base, key = _base_and_key()
-    return ChatOpenAI(api_key=key or "x", base_url=base, model=model_for(role), temperature=temperature)
+    return ChatOpenAI(api_key=key or "x", base_url=base, model=model_for(role),
+                      temperature=temperature, callbacks=[callback()])
 
 
 def active_summary() -> str:

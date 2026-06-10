@@ -12,7 +12,7 @@ load_dotenv()
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings", category=UserWarning)
 
 from langchain_openai.chat_models import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from langgraph.graph import START, END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langchain.agents import create_agent
@@ -58,9 +58,14 @@ from .structured_outputs import (
     ClarificationSet,
 )
 from . import clarify
-from .memory import MemoryStore, build_embedder, detect_implicit_feedback
+from . import runbudget
+from .hitl import REFUSAL_MARK
+from .memory import (
+    MemoryStore, build_embedder, detect_implicit_feedback,
+    feedback_is_negative, feedback_strip_marker,
+)
 from .improve import get_prompt as get_prompt_override, maybe_auto_improve
-from .improve.prompt_store import format_fewshots, add_fewshot
+from .improve.prompt_store import format_fewshots, add_fewshot, add_user_fewshot
 from .external import get_external_context, format_external_context
 from .mcp_client import suggest_server, get_mcp_tools, discover_mcp, approve_server
 from .subagents import get_subagent_tools
@@ -92,6 +97,17 @@ CONSENSUS_VALIDATION: bool = config.agent.get("consensus_validation", True)
 MAX_REVISIONS: int = config.agent.get("max_revisions", 1)
 RETRY_CONF: float = config.agent.get("retry_confidence", 0.5)
 STEP_ITER_LIMIT: int = config.agent.get("step_iter_limit", 16)
+# Глобальный бюджет прогона: сколько ВСЕГО исполнений шага допустимо на один запрос
+# (включая ретраи шагов, fix-подшаги heavy-ревью, повторы плана при low-conf). Жёсткий
+# предохранитель от runaway — eval ловил heavy на 928k токенов/$0.11/17мин.
+MAX_STEPS_PER_RUN: int = config.agent.get("max_steps_per_run", 12)
+# Токен-бюджет прогона (жёсткий потолок против runaway: eval ловил ~1М токенов/$0.11).
+# При исчерпании ноды принудительно идут к синтезу — собрать что есть, не жечь дальше.
+MAX_RUN_TOKENS: int = config.agent.get("max_run_tokens", 120000)
+# Wall-clock дедлайн прогона: heavy в eval упирался в 5 мин (медленно молотил). Стоп
+# по времени ИЛИ по токенам — что раньше. Держим заметно ниже 5 мин ради UX.
+MAX_RUN_SECONDS: float = config.agent.get("max_run_seconds", 150)
+CAP_RESEARCH_TIMEOUT: float = config.agent.get("cap_research_timeout", 30)  # потолок веб-поиска способа
 
 RECALL_K: int = config.get("memory", {}).get("recall_k", 5)
 REFLECT_EVERY: int = config.get("memory", {}).get("reflect_every", 5)
@@ -185,6 +201,7 @@ async def recall_node(state: GeneralGraphState) -> dict:
     """
     new_run()  # старт нового трейс-прохода
     clarify.reset_ledger()  # чистый реестр уточнений на этот прогон
+    runbudget.reset()       # обнуляем токен-бюджет прогона
     user_id = state.get("user_id") or "default"
     query = state["query"]
 
@@ -193,17 +210,24 @@ async def recall_node(state: GeneralGraphState) -> dict:
     if summary:
         memory_context = f"[Саммари сессии]\n{summary}\n\n{memory_context}"
 
+    # Рабочий профиль (persona): держится в контексте ВСЕХ запросов — агент работает
+    # под роль пользователя (фин-аналитик/разработчик/…): персонализация, навыки, стэши.
+    profile = memory_store.format_profile(user_id)
+    if profile:
+        memory_context = f"{profile}\n\n{memory_context}"
+
     # Онбординг: первый контакт с пользователем (нет ни эпизодов, ни фактов) —
-    # агент должен мягко представиться и начать строить профиль, а не молча отвечать.
+    # агент представляется И узнаёт рабочий профиль, чтобы сразу подстроиться.
     if memory_store.episode_count(user_id) == 0 and not memory_store.get_facts(user_id):
         memory_context = (
             "[ОНБОРДИНГ — первый контакт с этим пользователем]\n"
-            "ГЛАВНОЕ: сначала ПОЛНОСТЬЮ и по существу выполни запрос пользователя — "
-            "онбординг НИКОГДА не заменяет ответ. И только В КОНЦЕ ответа добавь 1–2 "
-            "дружелюбные фразы: представься (персональный агент с памятью, навыками, "
-            "доступом к устройству и веб-поиском) и спроси, как обращаться к пользователю. "
-            "НЕ вываливай весь список возможностей.\n\n"
+            "ГЛАВНОЕ: сначала ПОЛНОСТЬЮ и по существу выполни запрос — онбординг НИКОГДА "
+            "не заменяет ответ. И только В КОНЦЕ добавь 1 короткую дружелюбную фразу: "
+            "представься (персональный агент с памятью, навыками, доступом к устройству и "
+            "веб-поиском) и спроси, как обращаться. НЕ допрашивай о профессии/роли — ты "
+            "сам поймёшь её из дальнейшего общения и подстроишься незаметно.\n\n"
         ) + memory_context
+    # Сигнал несёт служебный маркер [neg] (его читает harvest); снимаем при инъекции в промпт.
     implicit_fb = detect_implicit_feedback(memory_store, user_id, query, LOW_CONF)
     ext = get_external_context(user_id).model_dump()
 
@@ -212,6 +236,14 @@ async def recall_node(state: GeneralGraphState) -> dict:
         "memory_context": memory_context,
         "implicit_feedback": implicit_fb or "Сигналов нет.",
         "external_context": ext,
+        # Сброс run-scoped счётчиков: с чекпойнтером state живёт между ходами треда,
+        # иначе бюджет шагов / ретраи / current_step протекали бы из прошлого запроса.
+        "steps_executed": 0,
+        "current_step": 0,
+        "step_retries": 0,
+        "global_retries": 0,
+        "revision_rounds": 0,
+        "user_blocked": False,
     }
 
 
@@ -266,10 +298,12 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
         decision = await _structured("reflexion", ReflexionDecision, {
             "memory_context": state.get("memory_context", "Память пуста."),
             "chat_history": _format_chat_history(state),
+            # few-shots маршрутизации: «такой запрос → такой режим» (учит не над-эскалировать).
+            "fewshots": format_fewshots("reflexion", k=4, user_id=state.get("user_id", "")),
         }, state["query"])
     except Exception as e:  # noqa: BLE001
         print(f"[Reflexion] failed, fallback deliberate: {e}")
-        return {"mode": "deliberate"}
+        return {"mode": "deliberate"}  # безопасный фолбэк (не мисхэндлит action-задачи)
 
     # Ambiguity-гейт (идея Ouroboros): слишком неоднозначно → переспросить, а не гадать.
     if decision.ambiguity >= AMBIGUITY_GATE and decision.mode != "clarify":
@@ -301,8 +335,18 @@ async def reason_node(state: GeneralGraphState) -> dict:
         "memory_context": state.get("memory_context", "Память пуста."),
         "chat_history": _format_chat_history(state),
     })
-    resp = await llm.ainvoke([SystemMessage(content=sys_text), HumanMessage(content=state["query"])])
-    answer = resp.content if hasattr(resp, "content") else str(resp)
+    msgs = [SystemMessage(content=sys_text), HumanMessage(content=state["query"])]
+    resp = await llm.ainvoke(msgs)
+    answer = (resp.content if hasattr(resp, "content") else str(resp)) or ""
+    # Guard от пустого финала (eval ловил reason→''): один ретрай с нуждом, потом честно.
+    if not answer.strip():
+        try:
+            resp2 = await llm.ainvoke(msgs + [HumanMessage(content="Дай конкретный ответ по существу.")])
+            answer = (resp2.content if hasattr(resp2, "content") else str(resp2)) or ""
+        except Exception:  # noqa: BLE001
+            pass
+    if not answer.strip():
+        answer = "Не удалось сформулировать ответ — переформулируй вопрос, пожалуйста."
     return {"final_answer": answer}
 
 
@@ -334,14 +378,21 @@ async def router_node(state: GeneralGraphState) -> dict:
     """Решает: создать новый навык ИЛИ использовать существующие."""
     available = get_skills_for_prompt.invoke({})
 
-    result = await route_chain.ainvoke({
-        "query": state["query"],
-        "available_skills": available or "Навыков пока нет.",
-        "chat_history": _format_chat_history(state),
-        "memory_context": state.get("memory_context", "Память пуста."),
-    })
+    # Crash-safe: битый JSON от модели не должен ронять прогон. Фолбэк — use_skills
+    # (решаем существующими + веб, а не плодим навык вслепую).
+    try:
+        result = await route_chain.ainvoke({
+            "query": state["query"],
+            "available_skills": available or "Навыков пока нет.",
+            "chat_history": _format_chat_history(state),
+            "memory_context": state.get("memory_context", "Память пуста."),
+        })
+        route = result.route
+    except Exception as e:  # noqa: BLE001
+        print(f"[Router] structured parse failed ({type(e).__name__}) → use_skills")
+        route = "use_skills"
 
-    return {"route": result.route}
+    return {"route": route}
 
 
 async def create_skills_node(state: GeneralGraphState) -> dict:
@@ -489,16 +540,42 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
 
 
 
+def _existing_stashes() -> str:
+    """Список наборов данных пользователя — чтобы селектор/исполнитель знали, что у него
+    УЖЕ есть (бюджет, таблицы), и не лезли в веб за его личными данными."""
+    import json as _json
+    from pathlib import Path as _Path
+
+    d = _Path(os.getenv("AGENT_STASH_DIR", "data/stashes"))
+    if not d.exists():
+        return "(пока нет)"
+    items = []
+    for f in sorted(d.glob("*.json")):
+        try:
+            n = len(_json.loads(f.read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001
+            n = 0
+        items.append(f"{f.stem} ({n} записей)")
+    return ", ".join(items) or "(пока нет)"
+
+
 async def skill_selector_node(state: GeneralGraphState) -> dict:
     """Выбирает релевантные навыки из реестра."""
     available = get_skills_for_prompt.invoke({})
 
-    result = await skill_selector_chain.ainvoke({
-        "query": state["query"],
-        "available_skills": available or "Нет доступных навыков.",
-    })
+    # Crash-safe: парс-сбой → пустой выбор (capability_research добавит web_search).
+    try:
+        result = await skill_selector_chain.ainvoke({
+            "query": state["query"],
+            "available_skills": available or "Нет доступных навыков.",
+            "user_stashes": _existing_stashes(),  # реальные данные пользователя
+        })
+        selected = result.selected_skills
+    except Exception as e:  # noqa: BLE001
+        print(f"[SkillSelector] structured parse failed ({type(e).__name__}) → пустой выбор")
+        selected = []
 
-    return {"selected_skills": result.selected_skills}
+    return {"selected_skills": selected}
 
 
 async def capability_research_node(state: GeneralGraphState) -> dict:
@@ -517,17 +594,21 @@ async def capability_research_node(state: GeneralGraphState) -> dict:
     selected = ["web_search"]
     gap = True
 
-    # Реальный пробел: гуглим «как это делается» + есть ли готовый MCP, прежде чем что-то строить.
+    # Реальный пробел: гуглим «как это делается» — но ОГРАНИЧЕННО по времени (синхронный
+    # веб-поиск мог висеть 60-120с и упирать прогон в таймаут, eval ловил это на загадке).
     query = state["query"]
     parts = []
     try:
         tools = {t.name: t for t in get_all_loaded_skill_tools(["web_search"])}
         search = tools.get("search_web")
         if search:
-            how = search.invoke({"query": f"как сделать: {query}", "max_results": 4})
-            mcp = search.invoke({"query": f"MCP server tool for {query[:60]}", "max_results": 3})
+            how = await asyncio.wait_for(
+                asyncio.to_thread(search.invoke, {"query": f"как сделать: {query[:120]}", "max_results": 3}),
+                timeout=CAP_RESEARCH_TIMEOUT,
+            )
             parts.append("[Как это делается — из поиска]\n" + str(how)[:1200])
-            parts.append("[Возможные готовые MCP/библиотеки]\n" + str(mcp)[:700])
+    except asyncio.TimeoutError:
+        parts.append("(поиск способа прерван по таймауту — собери из общих инструментов)")
     except Exception as e:  # noqa: BLE001
         parts.append(f"(поиск способа не удался: {e})")
 
@@ -574,21 +655,33 @@ async def decompose_node(state: GeneralGraphState) -> dict:
     rubric = state.get("goal_rubric", []) or []
     rubric_text = "\n".join(f"- {c}" for c in rubric) if rubric else "Rubric не задан."
 
-    result = await _structured("decompose", TaskDecomposition, {
-        "skill_context": skill_context,
-        "memory_context": state.get("memory_context", "Память пуста."),
-        "goal_rubric": rubric_text,
-        "external_context": format_external_context(state.get("external_context")),
-        "capability_hint": state.get("capability_hint", "Навык под задачу есть."),
-        "clarifications": clarify.format_ledger(),
-    }, state["query"])
+    # Crash-safe: битый JSON от модели на decompose НЕ должен ронять прогон (eval ловил
+    # ValidationError после ~миллиона сожжённых токенов). Падение → один шаг = весь запрос.
+    try:
+        result = await _structured("decompose", TaskDecomposition, {
+            "skill_context": skill_context,
+            "memory_context": state.get("memory_context", "Память пуста."),
+            "goal_rubric": rubric_text,
+            "external_context": format_external_context(state.get("external_context")),
+            "capability_hint": state.get("capability_hint", "Навык под задачу есть."),
+            "clarifications": clarify.format_ledger(),
+        }, state["query"])
+        subtasks = [
+            {"goal": st.goal, "done_check": st.done_check,
+             "kind": getattr(st, "kind", "research"), "status": "pending", "result": ""}
+            for st in result.subtasks[:MAX_SUBTASKS]
+        ]
+        reasoning = result.reasoning
+    except Exception as e:  # noqa: BLE001
+        print(f"[Decompose] structured parse failed ({type(e).__name__}) → один шаг = весь запрос")
+        subtasks, reasoning = [], "(декомпозиция не распарсилась, выполняю задачу одним шагом)"
 
-    subtasks = [
-        {"goal": st.goal, "done_check": st.done_check, "status": "pending", "result": ""}
-        for st in result.subtasks[:MAX_SUBTASKS]
-    ] or [{"goal": state["query"], "done_check": "Запрос пользователя выполнен.", "status": "pending", "result": ""}]
+    subtasks = subtasks or [
+        {"goal": state["query"], "done_check": "Запрос пользователя выполнен.",
+         "kind": "research", "status": "pending", "result": ""}
+    ]
 
-    plan_text = f"Подход: {result.reasoning}\n\nШаги:\n" + "\n".join(
+    plan_text = f"Подход: {reasoning}\n\nШаги:\n" + "\n".join(
         f"  {i}. {s['goal']} (готово, если: {s['done_check']})" for i, s in enumerate(subtasks, 1)
     )
 
@@ -622,12 +715,89 @@ async def skill_injection_node(state: GeneralGraphState) -> dict:
 
 
 
+# Потолок длины ОДНОГО вывода тула при инъекции обратно в контекст. Это убивает
+# квадратичный рост ReAct: страница read_url не таскается по 4к символов на каждом
+# витке, а несётся обрезанной сутью.
+TOOL_OUTPUT_CAP = 1500
+MAX_DIRECT_TOOLCALLS = 4  # сколько вызовов тулов исполняем за один проход direct-шага
+
+
+def _compress_tools(tools: list, cap: int = TOOL_OUTPUT_CAP) -> list:
+    """Оборачивает тулы так, что их вывод обрезается до cap — анти-квадратичность ReAct."""
+    from langchain_core.tools import StructuredTool
+
+    wrapped = []
+    for t in tools:
+        async def _run(__t=t, **kwargs):
+            r = await __t.ainvoke(kwargs)
+            s = r if isinstance(r, str) else str(r)
+            return s if len(s) <= cap else s[:cap] + f"\n…(обрезано, всего {len(s)} симв.)"
+        wrapped.append(StructuredTool(
+            name=t.name, description=t.description, args_schema=t.args_schema, coroutine=_run,
+        ))
+    return wrapped
+
+
+async def _exec_compose(system: str, goal: str, deadline: float) -> tuple[str, list]:
+    """compose-шаг: синтез из предыдущих результатов БЕЗ инструментов — один LLM-вызов."""
+    resp = await asyncio.wait_for(
+        code_llm.ainvoke([SystemMessage(content=system), HumanMessage(content=goal)]),
+        timeout=deadline,
+    )
+    return (resp.content if hasattr(resp, "content") else str(resp)), []
+
+
+async def _exec_direct(system: str, goal: str, tools: list, deadline: float) -> tuple[str, list]:
+    """
+    direct-шаг: БЕЗ ReAct-петли. Один вызов с привязанными тулами → если нужен тул,
+    исполняем (≤MAX_DIRECT_TOOLCALLS, вывод сжат) → один финальный вызов за ответом.
+    Это 1–2 LLM-вызова вместо петли — основной выигрыш по стоимости/латентности.
+    """
+    if not tools:
+        return await _exec_compose(system, goal, deadline)
+    by_name = {t.name: t for t in tools}
+    llm_t = code_llm.bind_tools(tools)
+    msgs: list = [SystemMessage(content=system), HumanMessage(content=goal)]
+    resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
+    tool_calls = getattr(resp, "tool_calls", None) or []
+    if not tool_calls:  # тул не понадобился — это и есть ответ
+        return (resp.content if hasattr(resp, "content") else str(resp)), msgs + [resp]
+    msgs.append(resp)
+    for tc in tool_calls[:MAX_DIRECT_TOOLCALLS]:
+        t = by_name.get(tc.get("name"))
+        if t is None:
+            out = f"(нет инструмента {tc.get('name')})"
+        else:
+            try:
+                out = await asyncio.wait_for(t.ainvoke(tc.get("args", {})), timeout=deadline)
+            except Exception as e:  # noqa: BLE001
+                out = f"(ошибка инструмента: {type(e).__name__}: {e})"
+        s = out if isinstance(out, str) else str(out)
+        msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
+    final = await asyncio.wait_for(code_llm.ainvoke(msgs), timeout=deadline)
+    return (final.content if hasattr(final, "content") else str(final)), msgs + [final]
+
+
+async def _exec_research(system: str, goal: str, tools: list, deadline: float) -> tuple[str, list]:
+    """research-шаг: итеративная работа с инструментами — ограниченный ReAct + СЖАТЫЕ тулы."""
+    agent = create_agent(code_llm, _compress_tools(tools), system_prompt=system)
+    result = await asyncio.wait_for(
+        agent.ainvoke({"messages": [("human", goal)]}, config={"recursion_limit": STEP_ITER_LIMIT}),
+        timeout=deadline,
+    )
+    msgs = result["messages"]
+    last = msgs[-1]
+    return (last.content if hasattr(last, "content") else str(last)), msgs
+
+
 async def step_executor_node(state: GeneralGraphState) -> dict:
     """
     Исполняет ОДИН текущий подшаг и тут же валидирует его по done_check.
-    Пройден → результат в step_results, переходим к следующему.
-    Не пройден → ретрай этого же подшага с замечанием (до MAX_SUBTASK_RETRIES),
-    после исчерпания — фиксируем как есть и идём дальше (мягкая деградация).
+    Тип шага (kind) задаёт СПОСОБ исполнения (анти-runaway, дёшево):
+      • direct/compose — без ReAct-петли (1–2 вызова);
+      • research — ограниченный ReAct со сжатыми выводами тулов.
+    Пройден → результат в step_results. Не пройден → ретрай (до MAX_SUBTASK_RETRIES),
+    после — фиксируем как есть (мягкая деградация).
     """
     selected = state.get("selected_skills", [])
     # Анти-bloat: management-тулы (создание/удаление навыков) исполнителю шага НЕ нужны —
@@ -666,14 +836,22 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     prior = state.get("step_results", [])
     prior_text = "\n".join(f"{i+1}. {r['goal']} → {r['result'][:200]}" for i, r in enumerate(prior)) or "(нет)"
 
+    # Если выбран stash — даём исполнителю ТОЧНЫЕ имена существующих наборов данных,
+    # чтобы не гадать имя (eval: аналитика искала не тот стэш → 0%).
+    cap_hint = state.get("capability_hint", "Навык под задачу есть.")
+    if "stash" in selected:
+        cap_hint = (f"Существующие стэши пользователя: {_existing_stashes()}. "
+                    f"Для чтения/подсчёта используй ИМЕННО это имя (stash_view/stash_aggregate), "
+                    f"не выдумывай новое.\n" + cap_hint)
+
     # Берём оптимизированный self-learning'ом промпт шага + собранные few-shots.
     step_template = get_prompt_override("step_execution", step_execution_system_prompt)
     fmt = dict(
         memory_context=state.get("memory_context", "Память пуста."),
         external_context=format_external_context(state.get("external_context")),
-        implicit_feedback=state.get("implicit_feedback", "Сигналов нет."),
-        fewshots=format_fewshots("step_execution", k=3),
-        capability_hint=state.get("capability_hint", "Навык под задачу есть."),
+        implicit_feedback=feedback_strip_marker(state.get("implicit_feedback", "Сигналов нет.")),
+        fewshots=format_fewshots("step_execution", k=3, user_id=state.get("user_id", "")),
+        capability_hint=cap_hint,
         clarifications=clarify.format_ledger(),
         prior_steps=prior_text,
         step_goal=step["goal"],
@@ -685,18 +863,25 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     except (KeyError, IndexError):
         system = step_execution_system_prompt.format(**fmt)
 
-    agent = create_agent(code_llm, tools, system_prompt=system)
-    # Лимит витков ReAct-цикла шага: каждый виток ресендит весь контекст + растущие
-    # выводы тулов — без лимита один шаг может «разогнаться» на десятки тысяч токенов.
+    # Диспетчер по типу шага. per-step таймаут (= остаток wall-clock бюджета) — нижняя
+    # страховка от зависания; но основную экономию даёт сам выбор lean-пути для direct/compose.
+    kind = step.get("kind", "research")
+    refused = False
+    step_deadline = max(15.0, MAX_RUN_SECONDS - runbudget.elapsed())
     try:
-        result = await agent.ainvoke(
-            {"messages": [("human", step["goal"])]},
-            config={"recursion_limit": STEP_ITER_LIMIT},
-        )
-        last = result["messages"][-1]
-        output = last.content if hasattr(last, "content") else str(last)
+        if kind == "compose" or not tools:
+            output, msgs = await _exec_compose(system, step["goal"], step_deadline)
+        elif kind == "direct":
+            output, msgs = await _exec_direct(system, step["goal"], tools, step_deadline)
+        else:  # research — ограниченный ReAct со сжатыми тулами
+            output, msgs = await _exec_research(system, step["goal"], tools, step_deadline)
+        # Маркер отказа живёт в TOOL-сообщении, а финальное его перефразирует —
+        # ищем по ВСЕЙ цепочке сообщений шага.
+        refused = any(REFUSAL_MARK in (getattr(m, "content", "") or "") for m in msgs)
+    except asyncio.TimeoutError:
+        output = "(шаг прерван по таймауту прогона — собираю ответ из уже сделанного)"
     except Exception as e:  # noqa: BLE001 — GraphRecursionError и пр.: мягкая деградация шага
-        output = f"(шаг прерван: {type(e).__name__} — вероятно, превышен лимит итераций {STEP_ITER_LIMIT})"
+        output = f"(шаг прерван: {type(e).__name__} ({kind}) — превышен лимит/ошибка исполнения)"
 
     # По-пунктовая валидация
     try:
@@ -709,12 +894,17 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     except Exception as e:  # noqa: BLE001
         passed, note = True, f"(валидация шага пропущена: {e})"
 
+    # Отказ человека (HITL) — это НЕ провал агента: не ретраим шаг (повтор бессмыслен
+    # и жжёт бюджет — eval ловил thrash на 62k токенов), помечаем прогон user_blocked.
+    blocked = refused or REFUSAL_MARK in output
     retries = state.get("step_retries", 0)
-    if not passed and retries < MAX_SUBTASK_RETRIES:
-        return {"step_retries": retries + 1, "step_feedback": note}
+    executed = state.get("steps_executed", 0) + 1  # глобальный счётчик исполнений шага
+    if not passed and not blocked and retries < MAX_SUBTASK_RETRIES:
+        return {"step_retries": retries + 1, "step_feedback": note, "steps_executed": executed}
 
-    # принимаем шаг (пройден или исчерпали ретраи) и двигаемся дальше
-    subtasks[idx] = {**step, "status": "done" if passed else "partial", "result": output}
+    # принимаем шаг (пройден / заблокирован пользователем / исчерпали ретраи) и идём дальше
+    status = "blocked" if blocked else ("done" if passed else "partial")
+    subtasks[idx] = {**step, "status": status, "result": output}
     new_results = prior + [{"goal": step["goal"], "result": output, "passed": passed}]
     return {
         "subtasks": subtasks,
@@ -723,16 +913,18 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         "step_retries": 0,
         "step_feedback": "",
         "active_mcp_tools": mcp_names,
+        "user_blocked": state.get("user_blocked", False) or blocked,
+        "steps_executed": executed,
     }
 
 
 async def synthesize_node(state: GeneralGraphState) -> dict:
-    """Собирает финальный ответ из результатов всех подшагов."""
+    """
+    Собирает ЧИСТЫЙ финальный ответ из результатов подшагов. ВСЕГДА синтезирует (даже
+    для одного шага) — иначе финал утекал сырым обрывком шага («Результат подшага
+    выполнен…») вместо ответа на запрос (GAIA это вскрыл).
+    """
     results = state.get("step_results", [])
-    if len(results) == 1:
-        # одношаговая задача — результат и есть ответ, без лишнего LLM-вызова
-        return {"final_answer": results[0]["result"]}
-
     results_text = "\n\n".join(
         f"[Шаг {i+1}] {r['goal']}\n{r['result']}" for i, r in enumerate(results)
     ) or "(шаги не дали результата)"
@@ -743,7 +935,11 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         "clarifications": clarify.format_ledger(),
         "step_results": results_text,
     })
-    answer = resp.content if hasattr(resp, "content") else str(resp)
+    answer = (resp.content if hasattr(resp, "content") else str(resp)) or ""
+    # Guard от пустого финала: упасть на лучший результат шага, чем отдать пусто.
+    if not answer.strip():
+        answer = next((r["result"] for r in reversed(results) if (r.get("result") or "").strip()),
+                      "Не удалось собрать ответ из шагов.")
     return {"final_answer": answer}
 
 
@@ -794,6 +990,13 @@ async def review_node(state: GeneralGraphState) -> dict:
 
 async def validation_node(state: GeneralGraphState) -> dict:
     """Финальный Schema Guided Reasoning ответа агента."""
+    # Действие заблокировано пользователем (HITL) — ответ корректен по сути («нужно
+    # подтверждение»). НЕ гоним полный ретрай и не штрафуем агента: это не его провал.
+    if state.get("user_blocked"):
+        return {"validation_passed": True, "confidence": 0.7,
+                "validation_feedback": "Действие требует подтверждения пользователя (HITL).",
+                "global_retries": state.get("global_retries", 0)}
+
     rubric = state.get("goal_rubric", []) or []
     rubric_text = "\n".join(f"- {c}" for c in rubric) if rubric else "Rubric не задан — оцени по общим критериям."
 
@@ -803,8 +1006,16 @@ async def validation_node(state: GeneralGraphState) -> dict:
         "chat_history": _format_chat_history(state),
         "goal_rubric": rubric_text,
     }
-    result = await validation_chain.ainvoke(payload)
-    is_valid, confidence, feedback = result.is_valid, result.confidence, result.feedback
+    # Надёжность: модель иногда возвращает битый JSON → structured-output кидает.
+    # Это НЕ должно ронять весь прогон (ответ пользователю уже есть) — мягко принимаем.
+    try:
+        result = await validation_chain.ainvoke(payload)
+        is_valid, confidence, feedback = result.is_valid, result.confidence, result.feedback
+    except Exception as e:  # noqa: BLE001
+        print(f"[Validation] primary judge parse failed ({type(e).__name__}) → принимаю ответ как есть")
+        return {"validation_passed": True, "confidence": LOW_CONF,
+                "validation_feedback": "(валидатор не распарсился, ответ принят)",
+                "global_retries": state.get("global_retries", 0)}
 
     # Мульти-модельный консенсус (идея Ouroboros): второй судья на другой модели.
     if CONSENSUS_VALIDATION:
@@ -860,10 +1071,26 @@ async def reflect_node(state: GeneralGraphState) -> dict:
         mode=mode,
     )
 
-    # Forward-харвест: успешный обдуманный прогон → few-shot пример (генерализация, без LLM).
-    if mode in ("deliberate", "heavy") and confidence >= LOW_CONF and answer:
+    # Forward-харвест: принятый удачный прогон → few-shot. ВЕКТОРИЗАЦИЯ ПОД ПОЛЬЗОВАТЕЛЯ:
+    # пишем И в персональный стор (учимся на том, что заходит ИМЕННО ему), И в глобальный
+    # (кросс-юзерная генерализация). «Принят» = валидирован (conf>=LOW_CONF) И этот ход не
+    # был реакцией на прошлый плохой ответ (нет негативного implicit feedback).
+    reacted_negative = feedback_is_negative(state.get("implicit_feedback", "") or "")
+    if mode in ("deliberate", "heavy") and confidence >= LOW_CONF and answer and not reacted_negative:
         try:
-            add_fewshot("step_execution", query, answer, confidence)
+            add_fewshot("step_execution", query, answer, confidence)            # глобальный
+            add_user_fewshot(user_id, "step_execution", query, answer, confidence)  # персональный
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Харвест МАРШРУТИЗАЦИИ: какой РЕЖИМ подошёл к этому запросу → учит reflexion не
+    # над-эскалировать (eval ловил «как меня зовут» в deliberate). Принят = outcome ok
+    # и не негативная реакция; пишем и глобально, и персонально.
+    if outcome == "ok" and not reacted_negative and query:
+        try:
+            score = confidence if confidence > 0 else 0.5
+            add_fewshot("reflexion", query, mode, score)
+            add_user_fewshot(user_id, "reflexion", query, mode, score)
         except Exception:  # noqa: BLE001
             pass
 
@@ -938,29 +1165,37 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     # Тяжёлую пост-обработку (LLM-извлечение фактов, рефлексия, обслуживание, само-улучшение)
     # уносим в ФОН: ответ пользователю уже готов — не заставляем ждать ещё LLM-вызовы.
     def _post_reflect() -> None:
+        # Фоновая пост-обработка идёт в daemon-потоке параллельно с REPL → её принты
+        # ЗАСОРЯЛИ строку ввода. Теперь служебные сообщения только под AGENT_DEBUG=1.
+        dbg = os.getenv("AGENT_DEBUG") == "1"
+
         async def _run():
             await asyncio.gather(_extract_facts(), _synth_reflection(), _judge_created_skill(),
                                  return_exceptions=True)
         try:
             asyncio.run(_run())
         except Exception as e:  # noqa: BLE001
-            print(f"[Reflect-bg] extract/reflect failed: {e}")
+            if dbg:
+                print(f"[Reflect-bg] extract/reflect failed: {e}")
         trend = memory_store.quality_trend(user_id)
-        if trend["trend"] == "declining":
+        if dbg and trend["trend"] == "declining":
             print(f"[QualityMonitor] ⚠ деградация качества: {trend}")
         if memory_store.episode_count(user_id) % REFLECT_EVERY == 0:
             try:
                 memory_store.prune(**MEM_CAPS)
                 trace_store.prune()
-                report = diagnose(memory_store, user_id)
-                if not report["healthy"]:
-                    print(f"[SelfDiagnosis] косяки: {report['findings']}")
+                if dbg:
+                    report = diagnose(memory_store, user_id)
+                    if not report["healthy"]:
+                        print(f"[SelfDiagnosis] косяки: {report['findings']}")
             except Exception as e:  # noqa: BLE001
-                print(f"[Reflect-bg] maintenance failed: {e}")
+                if dbg:
+                    print(f"[Reflect-bg] maintenance failed: {e}")
         try:
             maybe_auto_improve(memory_store, degrading=(trend["trend"] == "declining"))
         except Exception as e:  # noqa: BLE001
-            print(f"[Reflect-bg] auto-improve failed: {e}")
+            if dbg:
+                print(f"[Reflect-bg] auto-improve failed: {e}")
 
     threading.Thread(target=_post_reflect, daemon=True).start()
     return {}
@@ -1001,7 +1236,12 @@ def route_after_sgr_create(state: GeneralGraphState) -> str:
 
 
 def route_after_step(state: GeneralGraphState) -> str:
-    """Шаговый цикл: остались подшаги (или идёт ретрай) → step_executor, иначе → synthesize."""
+    """Шаговый цикл: остались подшаги (или идёт ретрай) → step_executor, иначе → synthesize.
+    Глобальный предохранитель: исчерпан бюджет шагов на прогон → принудительно synthesize."""
+    if state.get("steps_executed", 0) >= MAX_STEPS_PER_RUN or runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
+        print(f"[Budget] стоп: шаги={state.get('steps_executed', 0)}/{MAX_STEPS_PER_RUN}, "
+              f"токены={runbudget.used()}/{MAX_RUN_TOKENS}, {runbudget.elapsed():.0f}с — собираю что есть")
+        return "synthesize"
     if state.get("current_step", 0) < len(state.get("subtasks", [])):
         return "step_executor"
     return "synthesize"
@@ -1010,14 +1250,18 @@ def route_after_step(state: GeneralGraphState) -> str:
 def route_after_synthesize(state: GeneralGraphState) -> str:
     """Heavy-режим: после сборки решения — сквозной ревью (пока есть бюджет раундов);
     остальные режимы идут сразу на финальную валидацию."""
-    if state.get("mode") == "heavy" and state.get("revision_rounds", 0) < MAX_REVISIONS:
+    # Бюджет/время исчерпаны → пропускаем дорогой deep-ревью, сразу валидация.
+    if state.get("mode") == "heavy" and state.get("revision_rounds", 0) < MAX_REVISIONS \
+            and not runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
         return "review"
     return "validation"
 
 
 def route_after_review(state: GeneralGraphState) -> str:
-    """Ревью добавил fix-подшаги → обратно в шаговый цикл; чисто → финальная валидация."""
-    if state.get("current_step", 0) < len(state.get("subtasks", [])):
+    """Ревью добавил fix-подшаги → обратно в шаговый цикл; чисто/бюджет исчерпан → валидация."""
+    if state.get("steps_executed", 0) < MAX_STEPS_PER_RUN and \
+            not runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS) and \
+            state.get("current_step", 0) < len(state.get("subtasks", [])):
         return "step_executor"
     return "validation"
 
@@ -1032,6 +1276,9 @@ def route_after_validation(state: GeneralGraphState) -> str:
     """
     invalid = not state.get("validation_passed", True)
     conf = state.get("confidence", 1.0)
+    # Бюджет/время исчерпаны → не перезапускаем весь пайплайн (ретрай дороже всего), принимаем как есть.
+    if runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
+        return "reflect"
     if (invalid or conf < RETRY_CONF) and state.get("global_retries", 0) < MAX_GLOBAL_RETRIES:
         return "router"
     return "reflect"

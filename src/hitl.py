@@ -40,6 +40,11 @@ def set_confirmer(fn: Optional[Confirmer]) -> None:
     _confirmer = fn
 
 
+# Маркер отклонённого пользователем действия — по нему граф понимает, что это НЕ
+# провал агента, а сознательный отказ: не ретраить и не винить ноды (см. step_executor).
+REFUSAL_MARK = "⛔ОТКЛОНЕНО"
+
+
 def needs_confirmation(skill_name: str) -> bool:
     """Side-effect навыки из config + ЛЮБОЙ импортированный (сторонний) скилл."""
     if not REQUIRE_CONFIRMATION:
@@ -75,8 +80,9 @@ def wrap_with_confirmation(t, skill_name: str):
         args_short = ", ".join(f"{k}={str(v)[:80]}" for k, v in kwargs.items())
         if not await confirm(f"{skill_name}.{t.name}({args_short})"):
             return (
-                "⛔ Действие отклонено (human-in-the-loop): пользователь не подтвердил "
-                f"вызов {t.name}. Не повторяй этот вызов — сообщи пользователю."
+                f"{REFUSAL_MARK}: пользователь не подтвердил вызов {t.name}. "
+                "НЕ повторяй этот и любые похожие вызовы — сразу заверши и сообщи пользователю, "
+                "что действие требует его подтверждения."
             )
         return await t.ainvoke(kwargs)
 

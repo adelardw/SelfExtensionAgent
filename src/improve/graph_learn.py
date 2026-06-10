@@ -101,7 +101,11 @@ def credit_assignment(memory_store: MemoryStore, min_batch: int) -> tuple[dict, 
     ЧАЩЕ, чем в успехах (blame = failRate − successRate). Так goal/reflexion,
     срабатывающие всегда, не получают ложную вину — выделяются реально слабые связи.
     """
-    fails = memory_store.get_failures(n=40)
+    from .safety import is_unsafe_to_learn
+
+    # Не учимся на попытках взлома собственной защиты (инъекции/джейлбреки исключаются
+    # ДО анализа вины — иначе backward мог бы «оптимизировать» обход guardrails).
+    fails = [f for f in memory_store.get_failures(n=60) if not is_unsafe_to_learn(f["query"])]
     if len(fails) < min_batch:
         return {}, list(fails)
     sucs = memory_store.get_successes(n=40)
@@ -133,13 +137,23 @@ def graph_backward(memory_store: MemoryStore, min_batch: int = 6, accept: bool =
     if not blamed:
         return {"status": "skipped", "reason": "нет виноватых нод"}
 
+    # Политика: системные промпты ключевых нод заморожены. Если все виноватые ноды —
+    # core (промпт не переписываем), не тратим LLM-вызов на градиенты: их канал
+    # улучшения — few-shots (forward-харвест), не backward-переписывание промпта.
+    from .pipe import _prompt_tunable
+
+    tunable_blamed = [n for n in blamed if _prompt_tunable(OPTIMIZABLE.get(n, n))]
+    if not tunable_blamed:
+        return {"status": "skipped", "reason": "виноватые ноды — ключевые (промпты заморожены); "
+                "канал улучшения для них — few-shots", "blame": blame, "blamed_nodes": blamed}
+
     failures = [
         {"query": f["query"], "answer": f["answer"], "feedback": (f["feedback"] if "feedback" in f.keys() else "")}
         for f in fails
     ]
     # edge-aware backward: даём модели forward-цепочки (нода→выход) из трейса
     failures_text = _format_failure_chains(fails, failures)
-    gradients = _backward_gradients(blamed, failures_text)
+    gradients = _backward_gradients(tunable_blamed, failures_text)
 
     pipe = SelfLearningPipe(memory_store)
     results = []

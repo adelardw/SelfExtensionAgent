@@ -632,6 +632,15 @@ wheels = [
 ]
 
 [[package]]
+name = "et-xmlfile"
+version = "2.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d3/38/af70d7ab1ae9d4da450eeec1fa3918940a5fafb9055e934af8d6eb0c2313/et_xmlfile-2.0.0.tar.gz", hash = "sha256:dab3f4764309081ce75662649be815c4c9081e88f0837825f90fd28317d4da54", size = 17234, upload-time = "2024-10-25T17:25:40.039Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl", hash = "sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa", size = 18059, upload-time = "2024-10-25T17:25:39.051Z" },
+]
+
+[[package]]
 name = "fastcore"
 version = "1.13.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1545,6 +1554,28 @@ wheels = [
 ]
 
 [[package]]
+name = "liteparse"
+version = "2.0.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/6a/f0/a78f8d67e4e77d18b1242424e5a7157a007e7ef3e821218a527f3bbb4ef3/liteparse-2.0.7.tar.gz", hash = "sha256:42f17456d58af25d20ef868c8115ec20eb94d68754e0f521732a2636c4f55db8", size = 120767, upload-time = "2026-06-08T15:25:58.493Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b1/4f/b9804d18c0006c94d6c5e60406b62b7448f8c6a0a5379e9749b2088953db/liteparse-2.0.7-cp313-cp313-macosx_10_12_x86_64.whl", hash = "sha256:60d2bcf06c264d9dd32fc9a1a7f50545738aacd90f8c039ebae1374db9c599c4", size = 8076868, upload-time = "2026-06-08T15:25:31.864Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/a1/74156b53d56d55853afca9d46bb2593f9342ec49a495e7ba09545e1728d2/liteparse-2.0.7-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:c4c55bab5ab265b3eb6d06588c59ccc43481cd2a865136f9ba0d9ed82b83c460", size = 7684251, upload-time = "2026-06-08T15:25:33.34Z" },
+    { url = "https://files.pythonhosted.org/packages/34/a3/98ec394311b0a9fbe08db88c2a487d96d79749311c85281b1b2bfadf0824/liteparse-2.0.7-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:537c6c54cb686e135170d8a44010ac78021c225d46bc4378e03521db1eaec246", size = 8866211, upload-time = "2026-06-08T15:25:34.791Z" },
+    { url = "https://files.pythonhosted.org/packages/24/6f/3d4c9fae5f581d7ebb2b81944a35e4afb311da62b8f92b721fb062f920b8/liteparse-2.0.7-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:3760c8150ffc85d3908405380dd9f47c221a8590855e8534d0994ba737ee9079", size = 9181782, upload-time = "2026-06-08T15:25:36.786Z" },
+    { url = "https://files.pythonhosted.org/packages/17/84/7cf59af979f28032ed30d497615267102040d027edf836bc37de32c775ca/liteparse-2.0.7-cp313-cp313-win_amd64.whl", hash = "sha256:a80a4c6873c14b5ed6f7d083d88664a1a43bffa1a9c6e809e0fca86de41c90ce", size = 7718588, upload-time = "2026-06-08T15:25:38.638Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/6e/90686867de0b89d6948a3cca76b275fbc68273ddd7afb9bcd557239257ac/liteparse-2.0.7-cp313-cp313-win_arm64.whl", hash = "sha256:0295b55637b8441843a8a4a01ae1873fe77939c2a33f74eb77b16ec7e1d4c54b", size = 7399744, upload-time = "2026-06-08T15:25:40.242Z" },
+    { url = "https://files.pythonhosted.org/packages/63/a1/f835db72629c8e8987a74b0e43db91bd68c1c106f9e8f04c55b1e85b1df1/liteparse-2.0.7-cp314-cp314-macosx_10_12_x86_64.whl", hash = "sha256:d204fe21655ab07b1e8055c908ae19ca3295d315266667262849cac1e5cc2036", size = 8077163, upload-time = "2026-06-08T15:25:41.7Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/ea/103771bf2085ebb9d0255ed10a624103f9d408c6718abddf9a0276dea663/liteparse-2.0.7-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:59d4abd31d8722a829b418e82901f8d442078a86103f1537559d95bb402fcc0c", size = 7681910, upload-time = "2026-06-08T15:25:43.131Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/ae/15706c6468b9e5db87f236757207e1ad840319603513f31544af3853e560/liteparse-2.0.7-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:2c574bb79224584bb7dae123f7cc4ca9feea6116442c2a486736d5c094a660dd", size = 8868069, upload-time = "2026-06-08T15:25:44.816Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/75/e0a72c642f99b8f136dcfa43c8f1abd5e3b2c6c810bbb9657f7cfb75be57/liteparse-2.0.7-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:7afe9077251743f439f0c9d2dfde73acf7e958c147b137f9e4724ea62af06d86", size = 9181360, upload-time = "2026-06-08T15:25:46.509Z" },
+    { url = "https://files.pythonhosted.org/packages/26/9b/d50bc2773c4b54b44c811db916c2ad16943b3259d1d9983cadd5999a8022/liteparse-2.0.7-cp314-cp314-win_amd64.whl", hash = "sha256:673d7d974f4ce2c72ce1c807477931069fe3576c21e0f45ab9f25e0ab7e20991", size = 7719307, upload-time = "2026-06-08T15:25:48.399Z" },
+    { url = "https://files.pythonhosted.org/packages/75/22/28bab14a9c243fb7e0a2e8107ae8b17b4e5bc6082f2ec54462bdbf01a781/liteparse-2.0.7-cp314-cp314-win_arm64.whl", hash = "sha256:ca61c023b52e064f952208be6d51a06ad402285731a07d4d735e5c7317a9363a", size = 7397129, upload-time = "2026-06-08T15:25:49.746Z" },
+    { url = "https://files.pythonhosted.org/packages/53/37/8db65fc44538edad60e156f7ca2287276ec1a64afa13fadf6e9710ed2f5b/liteparse-2.0.7-cp315-cp315-manylinux_2_28_aarch64.whl", hash = "sha256:6ce338fd9df9b3b51741410fab6a1a783fef0ae78530d0b7559ca442a514a581", size = 8868409, upload-time = "2026-06-08T15:25:51.137Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/6e/02caed64d5b115cdbe12bf9d457921523748e01cd15e6aa1f94b094f1e5c/liteparse-2.0.7-cp315-cp315-manylinux_2_28_x86_64.whl", hash = "sha256:64be1b0225c6f6fdca9f257179d9f763c7b017060320b4e485581124dddf302b", size = 9181394, upload-time = "2026-06-08T15:25:52.801Z" },
+]
+
+[[package]]
 name = "lxml"
 version = "6.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1962,6 +1993,27 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d7/91/2a06c4e9597c338cac1e5e5a8dd6f29e1836fc229c4c523529dca387fda8/openai-2.26.0.tar.gz", hash = "sha256:b41f37c140ae0034a6e92b0c509376d907f3a66109935fba2c1b471a7c05a8fb", size = 666702, upload-time = "2026-03-05T23:17:35.874Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c6/2e/3f73e8ca53718952222cacd0cf7eecc9db439d020f0c1fe7ae717e4e199a/openai-2.26.0-py3-none-any.whl", hash = "sha256:6151bf8f83802f036117f06cc8a57b3a4da60da9926826cc96747888b57f394f", size = 1136409, upload-time = "2026-03-05T23:17:34.072Z" },
+]
+
+[[package]]
+name = "opendataloader-pdf"
+version = "2.4.7"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1d/5a/98cd2079f2828f7886ee447eae21ee60a858930596aebcc8d275a1fe2b12/opendataloader_pdf-2.4.7.tar.gz", hash = "sha256:a16e995f2f526d706045218d9e359a31f50371a0bc0e3bb1bc15abb467c08fb7", size = 22554865, upload-time = "2026-05-27T10:04:54.285Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b7/14/f897eabf04eab4e6a40dce9214d921558165f3eaed68335892a5b1a004d0/opendataloader_pdf-2.4.7-py3-none-any.whl", hash = "sha256:1c359183650f4c012875010c156f13b6d3477b00762b8e3fbd8479fa03feb628", size = 22568934, upload-time = "2026-05-27T10:04:49.902Z" },
+]
+
+[[package]]
+name = "openpyxl"
+version = "3.1.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "et-xmlfile" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz", hash = "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050", size = 186464, upload-time = "2024-06-28T14:03:44.161Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl", hash = "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2", size = 250910, upload-time = "2024-06-28T14:03:41.161Z" },
 ]
 
 [[package]]
@@ -2472,6 +2524,22 @@ crypto = [
 ]
 
 [[package]]
+name = "pymupdf"
+version = "1.27.2.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/32/708bedc9dde7b328d45abbc076091769d44f2f24ad151ad92d56a6ec142b/pymupdf-1.27.2.3.tar.gz", hash = "sha256:7a92faa25129e8bbec5e50eeb9214f187665428c31b05c4ef6e36c58c0b1c6d2", size = 85759618, upload-time = "2026-04-24T14:13:14.42Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/09/ddbdfa7ee91fbabd6f63d7d744884cbdfe3e7ff9b8604749fb38bddf5c5d/pymupdf-1.27.2.3-cp310-abi3-macosx_10_9_x86_64.whl", hash = "sha256:fc1bc3cae6e9e150b0dbb0a9221bdfd411d65f0db2fe359eaa22467d7cc2a05f", size = 24002636, upload-time = "2026-04-24T14:09:17.459Z" },
+    { url = "https://files.pythonhosted.org/packages/01/89/3f8edd6c4f50ca370e2a2f2a3011face36f3760728ffe76dffec91c0fca0/pymupdf-1.27.2.3-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:660d93cb6da5bbddf11d3982ae27745dd3a9902d9f24cdb69adab83962294b5a", size = 23278238, upload-time = "2026-04-24T14:09:32.882Z" },
+    { url = "https://files.pythonhosted.org/packages/c3/26/b7e5a70eb83bd189f8b5df87ec442746b992f2f632662839b288170d357d/pymupdf-1.27.2.3-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:1dd460a3ae4597a755f00a3bd9771f5ebf1531dc111f6a36bf05dd00a6b84425", size = 24333923, upload-time = "2026-04-24T14:09:47.341Z" },
+    { url = "https://files.pythonhosted.org/packages/e4/a0/aa1ee2240f29481a04a827c313333b4ecd8a14d6ac3e15d3f41a30574781/pymupdf-1.27.2.3-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:857842b4888827bd6155a1131341b2822a7ebe9a8c15a975fd7d490d7a64a30c", size = 24963198, upload-time = "2026-04-24T14:10:07.408Z" },
+    { url = "https://files.pythonhosted.org/packages/69/49/4f742451f980840829fc00ba158bebb25d389c846d8f4f8c65936ee55de8/pymupdf-1.27.2.3-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:580983849c64a08d08344ca3d1580e87c01f046a8392421797bc850efd72a5b6", size = 25184609, upload-time = "2026-04-24T14:10:22.911Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/3f/3853d6608f394faf6eec2bd4e8ea9f6a00beea329b071abdb29f4164cc3d/pymupdf-1.27.2.3-cp310-abi3-win32.whl", hash = "sha256:a5c1088a87189891a4946ab314a14b7934ac4c5b6077f7e74ebee956f8906d0e", size = 18019286, upload-time = "2026-04-24T14:10:34.239Z" },
+    { url = "https://files.pythonhosted.org/packages/44/47/5fb10fe73f96b31253a41647c362ea9e0380920bddf16028414a051247fc/pymupdf-1.27.2.3-cp310-abi3-win_amd64.whl", hash = "sha256:d20f68ef15195e073071dbc4ae7455257c7889af7584e39df490c0a92728526e", size = 19249102, upload-time = "2026-04-24T14:10:46.72Z" },
+    { url = "https://files.pythonhosted.org/packages/53/a4/b9e91aac82293f9c954654c85581ee8212b5b05efadc534b581141241e6f/pymupdf-1.27.2.3-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:77691604c5d1d0233827139bbcdea61fd57879c84712b8e49b1f45520f7ab9c2", size = 25000393, upload-time = "2026-04-24T14:11:01.669Z" },
+]
+
+[[package]]
 name = "pyobjc-core"
 version = "12.2"
 source = { registry = "https://pypi.org/simple" }
@@ -2628,6 +2696,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a6/12/38c1a0b1e64806780c9563e3fc9f6e472251839662587cfbe9bfaf2ae10a/python_discovery-1.4.0.tar.gz", hash = "sha256:eb8bc7daad3c226c147e45bb4e970a1feb1bf4048ee178e6db59e197b8010ce3", size = 68455, upload-time = "2026-05-28T01:15:37.639Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/c8/8d/3d316429f65029532bb1e28ff77b797d86b5ac3915bb44ca4e19aa283d43/python_discovery-1.4.0-py3-none-any.whl", hash = "sha256:26ed78d703e234879a66244c7d4114563fb13ec5cd30a2d1357e5fb4850782da", size = 33217, upload-time = "2026-05-28T01:15:36.573Z" },
+]
+
+[[package]]
+name = "python-docx"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/f7/eddfe33871520adab45aaa1a71f0402a2252050c14c7e3009446c8f4701c/python_docx-1.2.0.tar.gz", hash = "sha256:7bc9d7b7d8a69c9c02ca09216118c86552704edc23bac179283f2e38f86220ce", size = 5723256, upload-time = "2025-06-16T20:46:27.921Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/00/1e03a4989fa5795da308cd774f05b704ace555a70f9bf9d3be057b680bcf/python_docx-1.2.0-py3-none-any.whl", hash = "sha256:3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7", size = 252987, upload-time = "2025-06-16T20:46:22.506Z" },
 ]
 
 [[package]]
@@ -2953,12 +3034,17 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "langgraph" },
     { name = "langgraph-checkpoint-sqlite" },
+    { name = "liteparse" },
     { name = "matplotlib" },
     { name = "omegaconf" },
     { name = "openai" },
+    { name = "opendataloader-pdf" },
+    { name = "openpyxl" },
     { name = "pydantic" },
+    { name = "pymupdf" },
     { name = "pyobjc-framework-applicationservices" },
     { name = "pyobjc-framework-cocoa" },
+    { name = "python-docx" },
     { name = "python-pptx" },
     { name = "pyyaml" },
     { name = "swebench" },
@@ -2984,12 +3070,17 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=1.1.10" },
     { name = "langgraph", specifier = ">=1.0.10" },
     { name = "langgraph-checkpoint-sqlite", specifier = ">=3.0.3" },
+    { name = "liteparse", specifier = ">=2.0.7" },
     { name = "matplotlib", specifier = ">=3.10.9" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "openai", specifier = ">=2.26.0" },
+    { name = "opendataloader-pdf", specifier = ">=2.4.7" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pydantic", specifier = ">=2.12.5" },
+    { name = "pymupdf", specifier = ">=1.27.2.3" },
     { name = "pyobjc-framework-applicationservices", specifier = ">=12.2" },
     { name = "pyobjc-framework-cocoa", specifier = ">=12.2" },
+    { name = "python-docx", specifier = ">=1.2.0" },
     { name = "python-pptx", specifier = ">=1.0.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "swebench", specifier = ">=4.1.0" },

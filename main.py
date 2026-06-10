@@ -22,7 +22,7 @@ from src.agent import build_graph, config, memory_store, rebuild_llms
 from src.clarify import set_clarifier
 from src.hitl import set_confirmer
 from src.llm import active_summary, set_provider
-from src.media import AUDIO_EXTS, IMAGE_EXTS, TEXT_EXTS, attachment_context, transcribe_audio
+from src.media import AUDIO_EXTS, DOC_EXTS, IMAGE_EXTS, TEXT_EXTS, attachment_context, transcribe_audio
 from src.progress import stream_with_progress
 from src.tracing import diagnose, trace_store
 from src.usage import TokenTracker, add_alltime, cost_of, load_alltime
@@ -228,7 +228,7 @@ def _augment_attachments(query: str) -> str:
     Вложения в REPL: если в запросе упомянут существующий файл (картинка/текст/аудио),
     подкладываем его содержимое/vision-описание в контекст запроса.
     """
-    known = IMAGE_EXTS | TEXT_EXTS | AUDIO_EXTS
+    known = IMAGE_EXTS | TEXT_EXTS | AUDIO_EXTS | DOC_EXTS
     paths = [
         t for t in query.replace("'", " ").replace('"', " ").split()
         if Path(t).expanduser().suffix.lower() in known and Path(t).expanduser().exists()

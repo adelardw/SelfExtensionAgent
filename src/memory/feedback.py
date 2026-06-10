@@ -16,6 +16,20 @@ from .store import MemoryStore, _overlap
 # Насколько похожим должен быть запрос, чтобы счесть его переформулировкой.
 _REPEAT_SIM = 0.35
 
+# Маркер негативного сигнала — общий для detect() и потребителей (чтобы не
+# матчить формулировку строками в разных местах).
+_NEG_MARK = "[neg]"
+
+
+def is_negative(signal: str) -> bool:
+    """True, если гипотеза implicit feedback негативная (прошлый ответ не зашёл)."""
+    return signal.startswith(_NEG_MARK)
+
+
+def strip_marker(signal: str) -> str:
+    """Убирает служебный маркер перед инъекцией в промпт."""
+    return signal[len(_NEG_MARK):].lstrip() if signal.startswith(_NEG_MARK) else signal
+
 
 def detect(store: MemoryStore, user_id: str, query: str, low_conf: float) -> str:
     """
@@ -29,7 +43,7 @@ def detect(store: MemoryStore, user_id: str, query: str, low_conf: float) -> str
             continue
         if (ep["confidence"] or 1.0) < low_conf or ep["outcome"] != "ok":
             return (
-                "Пользователь, похоже, переспрашивает задачу, по которой прошлый "
+                _NEG_MARK + " Пользователь, похоже, переспрашивает задачу, по которой прошлый "
                 "ответ был слабым. НЕ повторяй прежний подход — зайди с другой "
                 "стороны, уточни детали или используй другой инструмент."
             )

@@ -386,6 +386,47 @@ class MemoryStore:
         ).fetchone()
         return int(row["c"]) if row else 0
 
+    # ── рабочий профиль = ФАКТЫ с тегом роли (без отдельной подсистемы/костылей) ──
+    # Роль пользователя — обычный факт с тегом ROLE_TAG. Вся гигиена достаётся бесплатно
+    # от механики фактов: затухание по recency (заброшенная роль тонет в ранжировании и
+    # не лезет в контекст → меньше галлюцинаций), разрешение конфликтов через upsert по
+    # ключу (сменилась ситуация — перезаписался факт), бюджет recall, prune по cap.
+    # Мульти-роль выходит сама собой: разные роли = разные факты-ключи.
+
+    ROLE_TAG = "роль"
+
+    def get_role_facts(self, user_id: str, k: int = 4) -> list[sqlite3.Row]:
+        """Факты-роли, ранжированные тем же скорингом recency+importance, что и весь recall."""
+        scored = []
+        for f in self.get_facts(user_id):
+            try:
+                tags = json.loads(f["tags"] or "[]") if "tags" in f.keys() else []
+            except Exception:  # noqa: BLE001
+                tags = []
+            if any(self.ROLE_TAG in str(t).lower() for t in tags):
+                score = _W_RECENCY * self._recency(f["ts"]) + _W_IMPORTANCE * f["importance"]
+                scored.append((score, f))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [f for _, f in scored[:k]]
+
+    def format_profile(self, user_id: str) -> str:
+        """
+        Мульти-роль профиль = свежие факты с тегом роли. Заброшенные роли сами тонут
+        по recency и в блок не попадают — агент меняется вместе с пользователем, не
+        таща устаревшее в контекст.
+        """
+        roles = self.get_role_facts(user_id)
+        if not roles:
+            return ""
+        lines = "\n".join(f"- {f['key']}: {f['value']}" for f in roles)
+        return (
+            "[ВНУТРЕННЕЕ состояние — контекст пользователя, мульти-роль; НЕ упоминай это в ответе]\n"
+            f"{lines}\n"
+            "Используй ВНУТРЕННЕ для подстройки: выбор инструментов/навыков, глубина и стиль "
+            "ответа, какие данные стоит предложить сохранить. НИКОГДА не пиши «как фин-аналитику», "
+            "не перечисляй роли и не сообщай, что подстраиваешься — просто дай более уместный ответ."
+        )
+
     # ── local context: rolling summary (SummaryCtx) ──────────────────
 
     def get_summary(self, user_id: str) -> str:

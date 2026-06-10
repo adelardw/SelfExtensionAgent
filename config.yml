@@ -27,7 +27,10 @@ agent:
   require_confirmation: true  # human-in-the-loop: side-effect навыки (skills.confirm) требуют подтверждения
   max_revisions: 1            # heavy-режим: сколько раундов «сквозной ревью → доработка» после сборки
   retry_confidence: 0.5       # полный ретрай пайплайна только если conf ниже (или is_valid=false); 0.5–0.7 принимаем
-  step_iter_limit: 16         # потолок витков ReAct-цикла одного шага (анти-разгон токенов)
+  step_iter_limit: 10         # потолок витков ReAct-цикла одного шага (анти-разгон токенов)
+  max_steps_per_run: 8        # глобальный потолок исполнений шага на прогон
+  max_run_tokens: 120000      # жёсткий токен-бюджет прогона (≈$0.02) — стоп-кран от runaway
+  max_run_seconds: 150        # wall-clock дедлайн прогона (сек) — стоп от медленного heavy
 checkpointer:
   backend: sqlite
   sqlite_path: data/checkpoints.db
@@ -54,6 +57,7 @@ skills:
   - app_control
   - ax_control
   - phone_control
+  - stash
   confirm:                   # side-effect навыки: вызов тула требует подтверждения человека (HITL)
   - device_control
   - app_control
@@ -69,3 +73,5 @@ improve:
   optimizer: textgrad
   min_failures: 3
   idle_seconds: 900
+  optimize_core_prompts: false  # системные промпты ключевых нод заморожены (политика);
+                                # backward правит только промпты саб-агентов-тулов + few-shots
