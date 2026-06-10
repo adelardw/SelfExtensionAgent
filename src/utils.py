@@ -2,7 +2,9 @@ from .tools.skill_creation import SKILLS_DIR
 from .schemas import GeneralGraphState
 import importlib
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import importlib.util
@@ -148,19 +150,56 @@ except Exception as e:
 """
 
 
+def _syscall_sandbox_prefix() -> list[str]:
+    """
+    Опциональная изоляция syscall-уровня ПОВЕРХ rlimits, если в системе есть
+    подходящий инструмент (best-effort, без жёсткой зависимости):
+      • Linux: bubblewrap (bwrap) — read-only / namespaces, либо firejail;
+      • macOS: sandbox-exec с профилем (deprecated, но рабочий) — отключён по
+        умолчанию, т.к. ломает часть импортов; включается AGENT_SANDBOX_EXEC=1.
+    Управление: AGENT_SYSCALL_SANDBOX=0 — выключить совсем; =1/auto (default) — авто.
+    Возвращает prefix-команду (или пусто → только rlimits).
+    """
+    mode = os.environ.get("AGENT_SYSCALL_SANDBOX", "auto").lower()
+    if mode in ("0", "off", "none"):
+        return []
+    import platform as _pf
+
+    if _pf.system() == "Linux":
+        if shutil.which("bwrap"):
+            # read-only весь корень, изоляция pid/ipc/uts, без новых привилегий;
+            # /tmp как tmpfs для записи. Сеть оставляем (навыки часто ходят в API).
+            return [
+                "bwrap", "--ro-bind", "/", "/", "--tmpfs", "/tmp",
+                "--unshare-pid", "--unshare-ipc", "--unshare-uts",
+                "--die-with-parent", "--new-session",
+            ]
+        if shutil.which("firejail"):
+            return ["firejail", "--quiet", "--private-tmp", "--noprofile"]
+    elif _pf.system() == "Darwin" and os.environ.get("AGENT_SANDBOX_EXEC") == "1":
+        if shutil.which("sandbox-exec"):
+            # минимальный профиль: разрешаем чтение/сеть, запрет записи вне /tmp
+            prof = ("(version 1)(allow default)(deny file-write*)"
+                    '(allow file-write* (subpath "/private/tmp") (subpath "/tmp"))')
+            return ["sandbox-exec", "-p", prof]
+    return []
+
+
 def run_tool_sandboxed(py_file: Path, tool_name: str, test_input: dict,
                        timeout: int = SMOKE_TEST_TIMEOUT) -> tuple[bool, str]:
     """
     Запускает tool из файла в ИЗОЛИРОВАННОМ подпроцессе (отдельный python того же
-    venv, resource-лимиты CPU/FSIZE/AS, жёсткий wall-таймаут с kill). Это песочница
-    уровня процесса: сгенерированный код не исполняется в процессе агента и не может
-    его повесить/уронить. Возвращает (success, result_or_error).
+    venv, resource-лимиты CPU/FSIZE/AS, жёсткий wall-таймаут с kill) + опциональная
+    syscall-изоляция (bubblewrap/firejail/sandbox-exec, если есть). Сгенерированный
+    код не исполняется в процессе агента. Возвращает (success, result_or_error).
     """
+    base = [sys.executable, "-c", _SANDBOX_RUNNER, str(py_file), tool_name, json.dumps(test_input)]
+    cmd = _syscall_sandbox_prefix() + base
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", _SANDBOX_RUNNER, str(py_file), tool_name, json.dumps(test_input)],
-            capture_output=True, text=True, timeout=timeout + SMOKE_IMPORT_GRACE,
-        )
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + SMOKE_IMPORT_GRACE)
+    except FileNotFoundError:
+        # sandbox-обёртка вдруг недоступна → деградируем до чистых rlimits
+        proc = subprocess.run(base, capture_output=True, text=True, timeout=timeout + SMOKE_IMPORT_GRACE)
     except subprocess.TimeoutExpired:
         return False, f"Tool '{tool_name}' завис (таймаут {timeout}с) — процесс убит"
     except Exception as e:  # noqa: BLE001

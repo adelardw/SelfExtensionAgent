@@ -69,12 +69,17 @@ START
 - `python -m src.tracing` — самодиагностика.
 - `python -m src.maintenance` — авто-апдейт зависимостей.
 
+## Сделано из прежнего TODO
+
+- **Backward = trace-aware edge-gradient**: tracer пишет выход каждой ноды (`spans.output`), `run_trace(run_id)` даёт цепочку нода→выход; `_format_failure_chains` строит «нода→выход→…→финал», и per-node градиенты раздаются вдоль рёбер (не наивная коактивация).
+- **Vision-анализ скриншота**: `device_control.analyze_screen` = `capture_screen` + `media.describe_image` (мультимодальный fast-вызов) одним шагом.
+- **MCP/A2A реальный клиент**: `mcp_client` (MultiServerMCPClient) + TRUSTED-allowlist + `discover_mcp` по реестру + human-gate на недоверенные; авто-подключение в `capability_research`.
+- **Кроссплатформенность device-ядра**: `open_url/open_app/capture_screen/analyze_screen/notify/speak` имеют бэкенды macOS/Linux/Windows (выбор по `platform.system()`), деградация с подсказкой что доставить.
+- **Песочница**: rlimits+kill (всегда) + опциональная syscall-изоляция (bubblewrap/firejail на Linux, sandbox-exec на macOS) — `AGENT_SYSCALL_SANDBOX`.
+- **Per-thread chat_history в сервере**: рабочий буфер на `user_id` (поверх долгой памяти).
+
 ## Известные границы (TODO)
 
-- Песочница навыков — процессная (rlimits+kill), не syscall-уровня (gVisor/seccomp); кроссплатформенность device/app-навыков (сейчас macOS) — в плане.
-
-- Backward = 1 агрегированный вызов по батчу (аппроксимация GEPA); «чистый» textual gradient вдоль рёбер трейса нода→нода — следующий уровень (нужен захват выходов нод в трейс).
-- Оркестрация = выбор 1 из 4 фикс-путей; свободная композиция модулей — дальше.
-- Vision-анализ скриншота (`capture_screen` даёт PNG) — нужен multimodal-вызов.
-- MCP/A2A: слот есть; реальный клиент + авто-подключение по нехватке экспертизы — только через human-gate (security).
-- Per-thread chat_history в сервере не хранится (опора на долгую память).
+- Syscall-песочница опциональна и зависит от наличия bwrap/firejail; полноценный gVisor/контейнер на каждый smoke — следующий уровень.
+- Работа с УЖЕ ОТКРЫТЫМИ окнами (keystroke/scroll/AX, phone/adb) — пока только macOS; кроссплатформенный UI-automation слой — дальше.
+- Оркестрация = выбор 1 из 5 фикс-путей (fast/reason/deliberate/heavy/clarify); свободная динамическая композиция когнитивных модулей — дальше.

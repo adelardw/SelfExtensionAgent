@@ -41,6 +41,14 @@ except Exception:  # noqa: BLE001
     _graph = build_graph(MemorySaver())
 
 
+# Per-thread диалоговая история в рамках процесса сервера: короткий «рабочий
+# буфер» поверх долгой памяти (она остаётся опорой между перезапусками). Ключ —
+# user_id (= thread_id). Долгая память персистентна, этот буфер — для связности
+# реплик внутри живой сессии.
+_CHAT_HISTORY: dict[str, list[dict]] = {}
+_HISTORY_LIMIT = 20
+
+
 class ChatIn(BaseModel):
     user_id: str
     query: str
@@ -73,11 +81,20 @@ async def chat(inp: ChatIn) -> dict:
     _last_request = time.time()
     _idle_done = False
     cfg = {"configurable": {"thread_id": inp.user_id}, "recursion_limit": 50}
+    history = _CHAT_HISTORY.get(inp.user_id, [])
     r = await _graph.ainvoke(
-        {"query": inp.query, "user_id": inp.user_id, "chat_history": []}, config=cfg
+        {"query": inp.query, "user_id": inp.user_id,
+         "chat_history": history + [{"role": "user", "content": inp.query}]},
+        config=cfg,
     )
+    answer = r.get("final_answer", "")
+    # обновляем рабочий буфер истории этого треда (с обрезкой)
+    _CHAT_HISTORY[inp.user_id] = (history + [
+        {"role": "user", "content": inp.query},
+        {"role": "assistant", "content": answer},
+    ])[-_HISTORY_LIMIT:]
     return {
-        "answer": r.get("final_answer", ""),
+        "answer": answer,
         "mode": r.get("mode", ""),
         "aim": r.get("aim", ""),
         "confidence": r.get("confidence", 0.0),
