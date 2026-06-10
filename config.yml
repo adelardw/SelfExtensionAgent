@@ -22,6 +22,7 @@ agent:
   max_subtask_retries: 2
   max_subtasks: 6
   ambiguity_gate: 0.6        # ambiguity >= порога → переспросить (clarify), а не гадать
+  clarify_soft_gate: 0.3     # средняя неоднозначность [soft..gate) на пути с инструментами → батч уточнений
   consensus_validation: true  # финальную валидацию подтверждают 2 модели (мульти-модельный консенсус)
   require_confirmation: true  # human-in-the-loop: side-effect навыки (skills.confirm) требуют подтверждения
   max_revisions: 1            # heavy-режим: сколько раундов «сквозной ревью → доработка» после сборки

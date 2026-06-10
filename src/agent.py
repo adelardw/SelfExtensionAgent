@@ -55,7 +55,9 @@ from .structured_outputs import (
     StepOutcome,
     IntegrationReview,
     SkillRetention,
+    ClarificationSet,
 )
+from . import clarify
 from .memory import MemoryStore, build_embedder, detect_implicit_feedback
 from .improve import get_prompt as get_prompt_override, maybe_auto_improve
 from .improve.prompt_store import format_fewshots, add_fewshot
@@ -85,6 +87,7 @@ LOW_CONF: float = config.agent.low_confidence_threshold
 MAX_SUBTASK_RETRIES: int = config.agent.get("max_subtask_retries", 2)
 MAX_SUBTASKS: int = config.agent.get("max_subtasks", 6)
 AMBIGUITY_GATE: float = config.agent.get("ambiguity_gate", 0.6)
+CLARIFY_SOFT_GATE: float = config.agent.get("clarify_soft_gate", 0.3)
 CONSENSUS_VALIDATION: bool = config.agent.get("consensus_validation", True)
 MAX_REVISIONS: int = config.agent.get("max_revisions", 1)
 RETRY_CONF: float = config.agent.get("retry_confidence", 0.5)
@@ -181,6 +184,7 @@ async def recall_node(state: GeneralGraphState) -> dict:
     (ретраи возвращаются в router, минуя recall).
     """
     new_run()  # старт нового трейс-прохода
+    clarify.reset_ledger()  # чистый реестр уточнений на этот прогон
     user_id = state.get("user_id") or "default"
     query = state["query"]
 
@@ -272,7 +276,10 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
         mem = state.get("memory_context", "") or ""
         need = decision.missing_info or "уточни, что именно нужно"
         return {"mode": "clarify", "memory_context": f"⚠ Неясно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}"}
-    return {"mode": decision.mode}
+    # Средняя неоднозначность на путях с инструментами → не гадать молча, а собрать
+    # батч уточнений ПЕРЕД исполнением (clarify_gate). Низкая — пропускаем (нулевая цена).
+    soft = CLARIFY_SOFT_GATE <= decision.ambiguity < AMBIGUITY_GATE
+    return {"mode": decision.mode, "needs_clarify_gate": soft}
 
 
 async def fast_answer_node(state: GeneralGraphState) -> dict:
@@ -297,6 +304,30 @@ async def reason_node(state: GeneralGraphState) -> dict:
     resp = await llm.ainvoke([SystemMessage(content=sys_text), HumanMessage(content=state["query"])])
     answer = resp.content if hasattr(resp, "content") else str(resp)
     return {"final_answer": answer}
+
+
+async def clarify_gate_node(state: GeneralGraphState) -> dict:
+    """
+    Онбординг неясной задачи ПЕРЕД исполнением: по контексту формирует батч точных
+    вопросов (маркеры где набор конечен, открытые где нет), задаёт их человеку через
+    зарегистрированный канал (REPL/бот) и кладёт ответы в общий ledger прогона.
+    Нет ответа/канала → разумные допущения (status=assumed). Ответы переиспользуются
+    всеми нодами ниже (decompose/step/synthesize) — агент не переспрашивает дважды.
+    """
+    try:
+        result = await _structured("clarify_gate", ClarificationSet, {
+            "memory_context": state.get("memory_context", "Память пуста."),
+        }, state["query"])
+    except Exception as e:  # noqa: BLE001
+        print(f"[ClarifyGate] failed, пропускаю: {e}")
+        return {}
+
+    items = [{"question": it.question, "options": it.options, "assume": it.assume}
+             for it in result.items[:4]]
+    if not items:
+        return {}
+    resolved = await clarify.ask(items)  # канал человека или авто-допущения → ledger
+    return {"clarifications": resolved}
 
 
 async def router_node(state: GeneralGraphState) -> dict:
@@ -549,6 +580,7 @@ async def decompose_node(state: GeneralGraphState) -> dict:
         "goal_rubric": rubric_text,
         "external_context": format_external_context(state.get("external_context")),
         "capability_hint": state.get("capability_hint", "Навык под задачу есть."),
+        "clarifications": clarify.format_ledger(),
     }, state["query"])
 
     subtasks = [
@@ -615,6 +647,9 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         tools.append(sa)
         subagent_names.append(sa.name)
 
+    # Догон-уточнение: исполнитель может спросить пользователя, упёршись в развилку.
+    tools.append(clarify.make_ask_user_tool())
+
     # Трейсим подключение инструментов (какие скиллы/MCP/под-агенты реально подцепились).
     try:
         trace_store.record(
@@ -639,6 +674,7 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         implicit_feedback=state.get("implicit_feedback", "Сигналов нет."),
         fewshots=format_fewshots("step_execution", k=3),
         capability_hint=state.get("capability_hint", "Навык под задачу есть."),
+        clarifications=clarify.format_ledger(),
         prior_steps=prior_text,
         step_goal=step["goal"],
         step_done_check=step["done_check"],
@@ -704,6 +740,7 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
     resp = await synth_chain.ainvoke({
         "query": state["query"],
         "memory_context": state.get("memory_context", "Память пуста."),
+        "clarifications": clarify.format_ledger(),
         "step_results": results_text,
     })
     answer = resp.content if hasattr(resp, "content") else str(resp)
@@ -938,8 +975,13 @@ def route_after_reflexion(state: GeneralGraphState) -> str:
 
 
 def route_after_goal(state: GeneralGraphState) -> str:
-    """После целеполагания: reason → глубокое рассуждение; deliberate → инструменты."""
-    return "reason" if state.get("mode") == "reason" else "router"
+    """После целеполагания: reason → рассуждение; средняя неоднозначность на пути с
+    инструментами → clarify_gate (батч уточнений); иначе → router."""
+    if state.get("mode") == "reason":
+        return "reason"
+    if state.get("needs_clarify_gate") and state.get("mode") in ("deliberate", "heavy"):
+        return "clarify_gate"
+    return "router"
 
 
 def route_after_router(state: GeneralGraphState) -> str:
@@ -1006,6 +1048,7 @@ def build_graph(checkpointer=None) -> CompiledStateGraph:
         "reflexion": reflexion_node,
         "fast_answer": fast_answer_node,
         "reason": reason_node,
+        "clarify_gate": clarify_gate_node,
         "router": router_node,
         "create_skills": create_skills_node,
         "sgr_create": sgr_create_node,
@@ -1030,8 +1073,10 @@ def build_graph(checkpointer=None) -> CompiledStateGraph:
     })
     graph.add_conditional_edges("goal", route_after_goal, {
         "reason": "reason",
+        "clarify_gate": "clarify_gate",
         "router": "router",
     })
+    graph.add_edge("clarify_gate", "router")
     graph.add_edge("fast_answer", "reflect")
     graph.add_edge("reason", "validation")  # глубокое рассуждение проходит финальную валидацию
     graph.add_conditional_edges("router", route_after_router, {

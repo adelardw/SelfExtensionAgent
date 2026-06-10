@@ -14,7 +14,11 @@ START
       ├─ fast      → fast_answer ───────────────────────────────→ reflect → END   (System 1, дёшево)
       ├─ clarify   → fast_answer ───────────────────────────────→ reflect → END   (переспросить)
       ├─ reason    → reason ─────────────────→ validation ──────→ reflect → END   (System 2, без тулов)
-      └─ deliberate / heavy → router → (create_skill | skill_selector)
+      └─ deliberate / heavy → [clarify_gate?] → router → (create_skill | skill_selector)
+                       clarify_gate — при средней неоднозначности: батч уточнений
+                       (маркеры/открытые) перед исполнением; ответы в реестр уточнений
+                       прогона, переиспользуются decompose/step/synthesize; нет ответа
+                       → разумное допущение. Догон в шаге: инструмент ask_user.
                        skill_selector → decompose → skill_injection
                           → step_executor⟲ (исполнение+валидация ПО ПУНКТАМ)
                           → synthesize ─→ validation → reflect → END               (deliberate)

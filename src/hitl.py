@@ -41,7 +41,17 @@ def set_confirmer(fn: Optional[Confirmer]) -> None:
 
 
 def needs_confirmation(skill_name: str) -> bool:
-    return REQUIRE_CONFIRMATION and skill_name in CONFIRM_SKILLS
+    """Side-effect навыки из config + ЛЮБОЙ импортированный (сторонний) скилл."""
+    if not REQUIRE_CONFIRMATION:
+        return False
+    if skill_name in CONFIRM_SKILLS:
+        return True
+    try:  # импортированные OpenClaw-скиллы — сторонний код/CLI → всегда под подтверждением
+        from .tools.skill_creation import _load_registry
+
+        return bool(_load_registry().get(skill_name, {}).get("imported"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 async def confirm(description: str) -> bool:

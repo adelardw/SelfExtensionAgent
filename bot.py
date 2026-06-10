@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from src.agent import build_graph, memory_store
+from src.clarify import set_clarifier
 from src.hitl import set_confirmer
 from src.media import attachment_context, transcribe_audio
 from src.progress import stream_with_progress
@@ -84,6 +85,67 @@ async def hitl_callback(cb: types.CallbackQuery):
 
 
 set_confirmer(_bot_confirm)
+
+
+# ── Уточнения (онбординг неясной задачи): варианты-кнопки или ответ текстом ──
+_pending_opts: dict[str, asyncio.Future] = {}      # cid → выбор варианта
+_pending_text: dict[str, asyncio.Future] = {}      # uid → ответ свободным текстом
+CLARIFY_TIMEOUT_S = 180
+
+
+async def _bot_clarify(items: list[dict]) -> list[str]:
+    message = _current_msg.get()
+    if message is None:
+        return []
+    uid = str(message.from_user.id)
+    await message.answer("❓ Чтобы сделать правильно, уточни пару деталей "
+                         "(не ответишь — решу сам разумным образом):")
+    answers: list[str] = []
+    for it in items:
+        q = it.get("question", "")
+        opts = it.get("options") or []
+        if opts:
+            cid = uuid.uuid4().hex[:12]
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+            _pending_opts[cid] = fut
+            rows = [[types.InlineKeyboardButton(text=o[:60], callback_data=f"clr:{cid}:{j}")]
+                    for j, o in enumerate(opts)]
+            rows.append([types.InlineKeyboardButton(text="🤖 на твоё усмотрение", callback_data=f"clr:{cid}:-1")])
+            await message.answer(f"❓ {q}", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=rows))
+            try:
+                idx = await asyncio.wait_for(fut, timeout=CLARIFY_TIMEOUT_S)
+                answers.append(opts[idx] if 0 <= idx < len(opts) else "")
+            except asyncio.TimeoutError:
+                answers.append("")
+            finally:
+                _pending_opts.pop(cid, None)
+        else:
+            fut = asyncio.get_running_loop().create_future()
+            _pending_text[uid] = fut
+            await message.answer(f"❓ {q}\n(ответь сообщением или подожди — решу сам)")
+            try:
+                answers.append(await asyncio.wait_for(fut, timeout=CLARIFY_TIMEOUT_S))
+            except asyncio.TimeoutError:
+                answers.append("")
+            finally:
+                _pending_text.pop(uid, None)
+    return answers
+
+
+@dp.callback_query(F.data.startswith("clr:"))
+async def clarify_callback(cb: types.CallbackQuery):
+    _, cid, idx = cb.data.split(":", 2)
+    fut = _pending_opts.get(cid)
+    if fut is not None and not fut.done():
+        fut.set_result(int(idx))
+    await cb.answer("Принято")
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+set_clarifier(_bot_clarify)
 
 
 def _thread(user_id: str) -> str:
@@ -249,6 +311,12 @@ async def handle_document(message: types.Message):
 
 @dp.message(F.text)
 async def handle_message(message: types.Message):
+    # Если ждём ответ на открытый вопрос-уточнение — это он, а не новый запрос.
+    uid = str(message.from_user.id)
+    fut = _pending_text.get(uid)
+    if fut is not None and not fut.done():
+        fut.set_result(message.text.strip())
+        return
     await _process(message, message.text)
 
 

@@ -36,6 +36,7 @@ NODE_DESC = {
     "reason": "глубокое пошаговое рассуждение без инструментов",
     "step_executor": "исполняет подшаг инструментами и самопроверяет",
     "review": "heavy: сквозной ревью собранного решения, выдаёт fix-подшаги",
+    "clarify_gate": "батч уточнений перед исполнением неясной задачи",
 }
 
 
@@ -79,6 +80,7 @@ OPTIMIZABLE = {
     "reason": "reason",
     "step_executor": "step_execution",
     "review": "review",
+    "clarify_gate": "clarify_gate",
 }
 
 

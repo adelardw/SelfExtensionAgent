@@ -22,6 +22,8 @@ class GeneralGraphState(TypedDict):
     # ── Self-Reflexion Choice (meta-controller) ──
     mode: str                 # "fast" | "reason" | "deliberate" | "heavy" | "clarify" — тип мышления
     revision_rounds: int      # heavy: сколько раундов «сквозной ревью → доработка» уже прошло
+    needs_clarify_gate: bool  # средняя неоднозначность → собрать батч уточнений перед исполнением
+    clarifications: list[dict]  # реестр уточнений прогона (вопрос/варианты/ответ/статус)
 
     # ── Capabilities ──
     active_tools: list[str]      # имена локальных инструментов навыков в execution

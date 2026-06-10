@@ -145,8 +145,9 @@ def list_skills() -> str:
         status = "ready" if meta.get("has_tools") else "description only"
         lock = " 🔒core" if _is_protected(name, registry) else ""
         temp = " 🕒temp" if meta.get("temporary") else ""
+        imp = " 🦞imported" if meta.get("imported") else ""
         lines.append(
-            f"• {name} [{status}]{lock}{temp} — {meta['description'][:100]}"
+            f"• {name} [{status}]{lock}{temp}{imp} — {meta['description'][:100]}"
         )
     return "Available skills:\n" + "\n".join(lines)
 
@@ -527,6 +528,8 @@ def sync_registry() -> dict:
 
 def get_manager_tools() -> list:
     """Возвращает все management tools для передачи в агента."""
+    from .openclaw_import import import_openclaw_skill_tool
+
     return [
         list_skills,
         read_skill,
@@ -535,6 +538,7 @@ def get_manager_tools() -> list:
         delete_skill,
         load_skill_tools,
         get_skills_for_prompt,
+        import_openclaw_skill_tool,
     ]
 
 

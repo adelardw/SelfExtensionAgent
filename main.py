@@ -19,6 +19,7 @@ from rich.table import Table
 from rich.text import Text
 
 from src.agent import build_graph, config, memory_store, rebuild_llms
+from src.clarify import set_clarifier
 from src.hitl import set_confirmer
 from src.llm import active_summary, set_provider
 from src.media import AUDIO_EXTS, IMAGE_EXTS, TEXT_EXTS, attachment_context, transcribe_audio
@@ -239,6 +240,30 @@ def _augment_attachments(query: str) -> str:
     return f"{query}\n\n=== ВЛОЖЕНИЯ ===\n{ctx}"
 
 
+async def _repl_clarify(items: list[dict]) -> list[str]:
+    """Онбординг неясной задачи в REPL: задаём вопросы с маркерами, пустой ответ → допущение."""
+    console.print(Panel("Чтобы сделать правильно, уточни несколько деталей "
+                        "([dim]Enter — оставить на моё усмотрение[/]):",
+                        title="❓ Уточнение задачи", border_style="magenta", expand=False))
+    answers: list[str] = []
+    for i, it in enumerate(items, 1):
+        q = it.get("question", "")
+        opts = it.get("options") or []
+        if opts:
+            console.print(f"[bold]{i}. {q}[/]")
+            for j, o in enumerate(opts, 1):
+                console.print(f"   [cyan]{j}[/]) {o}")
+            raw = (await asyncio.to_thread(input, "   выбор (номер или свой текст): ")).strip()
+            if raw.isdigit() and 1 <= int(raw) <= len(opts):
+                answers.append(opts[int(raw) - 1])
+            else:
+                answers.append(raw)  # свой текст или пусто → допущение
+        else:
+            raw = (await asyncio.to_thread(input, f"[{i}] {q}\n   ")).strip()
+            answers.append(raw)
+    return answers
+
+
 async def _repl_confirm(description: str) -> bool:
     """Human-in-the-loop: подтверждение side-effect действия прямо в терминале."""
     console.print(Panel(description, title="⚠️  Агент просит разрешение на действие",
@@ -249,6 +274,7 @@ async def _repl_confirm(description: str) -> bool:
 
 async def main():
     set_confirmer(_repl_confirm)
+    set_clarifier(_repl_clarify)
     async with make_checkpointer() as checkpointer:
         graph = build_graph(checkpointer)
         thread_id = str(uuid.uuid4())
