@@ -12,6 +12,7 @@ Graceful: если cloakbrowser/Chromium недоступны — падает �
 import json
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from langchain_core.tools import tool
@@ -27,6 +28,19 @@ except Exception:  # noqa: BLE001
 # 200+ источников). Указывается через env SEARXNG_URL (напр. http://localhost:8080).
 _SEARXNG = os.getenv("SEARXNG_URL", "").rstrip("/")
 _RECENCY_RANGE = {"d": "day", "w": "week", "m": "month", "y": "year"}
+_SEARXNG_COOLDOWN_S = 600          # после отказа не дёргаем SearXNG N секунд (анти-спам в лог)
+
+# Cooldown живёт в env, а не в глобале: модуль навыка ПЕРЕЗАГРУЖАЕТСЯ на каждом
+# подключении тулов (exec_module), и глобал сбрасывался бы каждый шаг.
+def _searxng_down_until() -> float:
+    try:
+        return float(os.environ.get("SEARXNG_DOWN_UNTIL", "0"))
+    except ValueError:
+        return 0.0
+
+
+def _set_searxng_down(until: float) -> None:
+    os.environ["SEARXNG_DOWN_UNTIL"] = str(until)
 
 
 def _clean(text: str) -> str:
@@ -132,20 +146,27 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
     engine = "http-fallback"
     results = []
     try:
-        if _SEARXNG:
+        if _SEARXNG and time.time() >= _searxng_down_until():
             results = _search_searxng(query, max_results, recency)
             engine = "searxng"
     except Exception as e:  # noqa: BLE001
-        print(f"[web_search] SearXNG failed ({e}), fallback")
+        # SearXNG недоступен (не поднят docker) → молчаливый cooldown, лог один раз,
+        # а не спам "Connection refused" на каждый поисковый вызов.
+        _set_searxng_down(time.time() + _SEARXNG_COOLDOWN_S)
+        print(f"[web_search] SearXNG недоступен ({e}) — выключаю на {_SEARXNG_COOLDOWN_S // 60} мин, иду в fallback")
 
     try:
         if not results:
-            if _CLOAK:
-                results = _search_cloak(query, max_results, recency)
-                engine = "cloakbrowser"
-            if not results:
+            # Сначала лёгкий urllib (тот же DDG, без запуска Chromium — браузер
+            # «мигает» в доке на каждый вызов); cloak — только последняя надежда.
+            try:
                 results = _search_fallback(query, max_results, recency)
                 engine = "http-fallback"
+            except Exception:  # noqa: BLE001
+                results = []
+            if not results and _CLOAK:
+                results = _search_cloak(query, max_results, recency)
+                engine = "cloakbrowser"
         if not results:
             return f"Ничего не найдено по запросу: {query}"
         lines = []

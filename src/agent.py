@@ -15,11 +15,17 @@ from langchain_openai.chat_models import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import START, END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from omegaconf import OmegaConf
 
 from .schemas import GeneralGraphState
-from .utils import _format_chat_history, _run_smoke_test, _skill_loadable
+from .utils import (
+    _format_chat_history,
+    _run_smoke_test,
+    _skill_loadable,
+    ensure_python_package,
+    missing_module_from_error,
+)
 from .prompts import (
     router_prompt,
     create_skills_system_prompt,
@@ -32,6 +38,7 @@ from .prompts import (
     step_execution_system_prompt,
     step_validation_prompt,
     synthesize_prompt,
+    skill_retention_prompt,
     OPTIMIZABLE_PROMPTS,
 )
 from .structured_outputs import (
@@ -46,6 +53,8 @@ from .structured_outputs import (
     ReflexionDecision,
     TaskDecomposition,
     StepOutcome,
+    IntegrationReview,
+    SkillRetention,
 )
 from .memory import MemoryStore, build_embedder, detect_implicit_feedback
 from .improve import get_prompt as get_prompt_override, maybe_auto_improve
@@ -59,7 +68,12 @@ from .tools.skill_creation import (
     get_skills_for_prompt,
     read_skill,
     load_skill_tools,
-    delete_skill
+    delete_skill,
+    pop_last_created,
+    mark_temporary,
+    clear_temporary,
+    _delete_skill_impl,
+    _load_registry,
 )
 
 
@@ -72,6 +86,9 @@ MAX_SUBTASK_RETRIES: int = config.agent.get("max_subtask_retries", 2)
 MAX_SUBTASKS: int = config.agent.get("max_subtasks", 6)
 AMBIGUITY_GATE: float = config.agent.get("ambiguity_gate", 0.6)
 CONSENSUS_VALIDATION: bool = config.agent.get("consensus_validation", True)
+MAX_REVISIONS: int = config.agent.get("max_revisions", 1)
+RETRY_CONF: float = config.agent.get("retry_confidence", 0.5)
+STEP_ITER_LIMIT: int = config.agent.get("step_iter_limit", 16)
 
 RECALL_K: int = config.get("memory", {}).get("recall_k", 5)
 REFLECT_EVERY: int = config.get("memory", {}).get("reflect_every", 5)
@@ -106,13 +123,15 @@ def rebuild_llms() -> None:
     Ноды графа читают эти модульные глобалы при вызове, поэтому смена провайдера в
     рантайме (CLI /model) подхватывается без пересборки графа.
     """
-    global llm, code_llm, route_chain, sgr_create_chain, test_case_chain
+    global llm, code_llm, deep_llm, route_chain, sgr_create_chain, test_case_chain
     global skill_selector_chain, validation_chain, validation_chain_b
     global memory_extraction_chain, reflection_chain, step_validation_chain
-    global synth_chain, create_skills_agent
+    global synth_chain, create_skills_agent, skill_retention_chain
 
     llm = _chat("fast", config.model.temperature)
     code_llm = _chat("code", config.code_model.temperature)
+    # deep — редкие тяжёлые вызовы (heavy-ревью); дороже, поэтому только точечно.
+    deep_llm = _chat("deep", config.get("deep_model", {}).get("temperature", 0))
 
     route_chain = router_prompt | llm.with_structured_output(RouteDecision)
     sgr_create_chain = sgr_create_prompt | llm.with_structured_output(SGRCreateResult)
@@ -126,8 +145,9 @@ def rebuild_llms() -> None:
     # _override_system → их промпты обучаемы (см. graph_learn).
     step_validation_chain = step_validation_prompt | llm.with_structured_output(StepOutcome)
     synth_chain = synthesize_prompt | llm
+    skill_retention_chain = skill_retention_prompt | llm.with_structured_output(SkillRetention)
 
-    create_skills_agent = create_react_agent(code_llm, get_manager_tools(), prompt=create_skills_system_prompt)
+    create_skills_agent = create_agent(code_llm, get_manager_tools(), system_prompt=create_skills_system_prompt)
 
 
 rebuild_llms()
@@ -168,6 +188,18 @@ async def recall_node(state: GeneralGraphState) -> dict:
     summary = memory_store.get_summary(user_id)
     if summary:
         memory_context = f"[Саммари сессии]\n{summary}\n\n{memory_context}"
+
+    # Онбординг: первый контакт с пользователем (нет ни эпизодов, ни фактов) —
+    # агент должен мягко представиться и начать строить профиль, а не молча отвечать.
+    if memory_store.episode_count(user_id) == 0 and not memory_store.get_facts(user_id):
+        memory_context = (
+            "[ОНБОРДИНГ — первый контакт с этим пользователем]\n"
+            "ГЛАВНОЕ: сначала ПОЛНОСТЬЮ и по существу выполни запрос пользователя — "
+            "онбординг НИКОГДА не заменяет ответ. И только В КОНЦЕ ответа добавь 1–2 "
+            "дружелюбные фразы: представься (персональный агент с памятью, навыками, "
+            "доступом к устройству и веб-поиском) и спроси, как обращаться к пользователю. "
+            "НЕ вываливай весь список возможностей.\n\n"
+        ) + memory_context
     implicit_fb = detect_implicit_feedback(memory_store, user_id, query, LOW_CONF)
     ext = get_external_context(user_id).model_dump()
 
@@ -293,13 +325,16 @@ async def create_skills_node(state: GeneralGraphState) -> dict:
     })
 
 
-    created_name = ""
-    for m in reversed(result["messages"]):
-        text = m.content if hasattr(m, "content") else str(m)
-        match = re.search(r"Skill '(\w+)'.*created", text, re.I)
-        if match:
-            created_name = match.group(1)
-            break
+    # Структурный канал: create_skill сам фиксирует имя при успехе (pop_last_created).
+    # Регэксп по тексту сообщений — только фолбэк на случай нестандартного пути.
+    created_name = pop_last_created()
+    if not created_name:
+        for m in reversed(result["messages"]):
+            text = m.content if hasattr(m, "content") else str(m)
+            match = re.search(r"Skill '(\w+)'.*created", text, re.I)
+            if match:
+                created_name = match.group(1)
+                break
 
     return {"created_skill_name": created_name}
 
@@ -346,6 +381,14 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
     # ── Этап 2: загружаемость (без LLM) — модуль импортируется и содержит @tool ──
     loadable, lmsg = _skill_loadable(skill_name)
     if not loadable:
+        # Недостающая python-зависимость → ставим САМИ (uv add), не просим пользователя.
+        mod = missing_module_from_error(lmsg)
+        if mod:
+            ok, note = await asyncio.to_thread(ensure_python_package, mod)
+            print(f"[SGR] авто-зависимость '{mod}': {note}")
+            if ok:
+                loadable, lmsg = _skill_loadable(skill_name)
+    if not loadable:
         delete_skill.invoke({"name": skill_name})
         return {
             "create_validation_passed": False,
@@ -370,6 +413,18 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
         )
 
         if not success:
+            # Smoke упал на недостающем модуле (ленивый import внутри функции) →
+            # авто-установка и один повтор.
+            mod = missing_module_from_error(output)
+            if mod:
+                ok, note = await asyncio.to_thread(ensure_python_package, mod)
+                print(f"[SGR] авто-зависимость '{mod}': {note}")
+                if ok:
+                    success, output = _run_smoke_test(
+                        skill_name, test_case.tool_name, test_case.test_input,
+                    )
+
+        if not success:
             delete_skill.invoke({"name": skill_name})
             return {
                 "create_validation_passed": False,
@@ -383,6 +438,7 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
             }
 
         load_skill_tools.invoke({"name": skill_name})
+        mark_temporary(skill_name)  # создан под задачу; судьбу решит retention-судья в reflect
         return {
             "create_validation_passed": True,
             "create_feedback": "",
@@ -393,6 +449,7 @@ async def sgr_create_node(state: GeneralGraphState) -> dict:
         # Smoke-тест не сгенерился, НО этап 2 уже гарантировал загружаемость → принимаем.
         print(f"[SGR] Smoke test generation failed: {e}; навык загружаем (этап 2 пройден), принимаю.")
         load_skill_tools.invoke({"name": skill_name})
+        mark_temporary(skill_name)
         return {
             "create_validation_passed": True,
             "create_feedback": "",
@@ -541,7 +598,10 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     после исчерпания — фиксируем как есть и идём дальше (мягкая деградация).
     """
     selected = state.get("selected_skills", [])
-    tools = get_manager_tools() + get_all_loaded_skill_tools(selected)
+    # Анти-bloat: management-тулы (создание/удаление навыков) исполнителю шага НЕ нужны —
+    # они живут в create_skills-ветке. Каждый лишний тул = плата за описание в КАЖДОМ
+    # витке ReAct-цикла шага.
+    tools = get_all_loaded_skill_tools(selected)
 
     # Автоподключение доверенных MCP-серверов, подобранных под задачу.
     mcp_names = []
@@ -564,7 +624,8 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     except Exception:  # noqa: BLE001
         pass
 
-    subtasks = state.get("subtasks", [])
+    # Копия, НЕ мутируем state in-place (рассинхрон с чекпойнтерами LangGraph).
+    subtasks = list(state.get("subtasks", []))
     idx = state.get("current_step", 0)
     step = subtasks[idx]
     prior = state.get("step_results", [])
@@ -588,10 +649,18 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     except (KeyError, IndexError):
         system = step_execution_system_prompt.format(**fmt)
 
-    agent = create_react_agent(code_llm, tools, prompt=system)
-    result = await agent.ainvoke({"messages": [("human", step["goal"])]})
-    last = result["messages"][-1]
-    output = last.content if hasattr(last, "content") else str(last)
+    agent = create_agent(code_llm, tools, system_prompt=system)
+    # Лимит витков ReAct-цикла шага: каждый виток ресендит весь контекст + растущие
+    # выводы тулов — без лимита один шаг может «разогнаться» на десятки тысяч токенов.
+    try:
+        result = await agent.ainvoke(
+            {"messages": [("human", step["goal"])]},
+            config={"recursion_limit": STEP_ITER_LIMIT},
+        )
+        last = result["messages"][-1]
+        output = last.content if hasattr(last, "content") else str(last)
+    except Exception as e:  # noqa: BLE001 — GraphRecursionError и пр.: мягкая деградация шага
+        output = f"(шаг прерван: {type(e).__name__} — вероятно, превышен лимит итераций {STEP_ITER_LIMIT})"
 
     # По-пунктовая валидация
     try:
@@ -641,6 +710,51 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
     return {"final_answer": answer}
 
 
+async def review_node(state: GeneralGraphState) -> dict:
+    """
+    Heavy-режим: сквозной ревью СОБРАННОГО решения (deep-модель, редкий дорогой вызов).
+    Человеческий паттерн «большая работа → перечитать целиком перед сдачей»: смотрит на
+    полный пайплайн запрос→шаги→финал, находит интеграционные проблемы и добавляет
+    подшаги доработки обратно в цикл step_executor (до MAX_REVISIONS раундов).
+    """
+    rounds = state.get("revision_rounds", 0)
+    steps_text = "\n".join(
+        f"[Шаг {i+1}] {r['goal']} → {r['result'][:400]}" for i, r in enumerate(state.get("step_results", []))
+    ) or "(шагов не было)"
+    rubric = state.get("goal_rubric", []) or []
+    sys_text = _override_system("review", {
+        "goal_rubric": "\n".join(f"- {c}" for c in rubric) if rubric else "(rubric не задан)",
+    })
+    try:
+        review = await deep_llm.with_structured_output(IntegrationReview).ainvoke([
+            SystemMessage(content=sys_text),
+            HumanMessage(content=(
+                f"Исходная задача: {state['query']}\n\n"
+                f"Выполненные шаги:\n{steps_text}\n\n"
+                f"Собранный финальный ответ:\n{state.get('final_answer', '')[:4000]}"
+            )),
+        ])
+    except Exception as e:  # noqa: BLE001
+        print(f"[Review] failed, пропускаю ревью: {e}")
+        return {"revision_rounds": rounds + 1}
+
+    if review.passed or not review.fix_subtasks:
+        return {"revision_rounds": rounds + 1}
+
+    # Доработка: добавляем fix-подшаги в конец плана и возвращаемся в шаговый цикл.
+    fixes = [
+        {"goal": st.goal, "done_check": st.done_check, "status": "pending", "result": ""}
+        for st in review.fix_subtasks[:3]
+    ]
+    problems = "; ".join(review.problems[:5])
+    print(f"[Review] найдены проблемы: {problems} → {len(fixes)} fix-подшагов")
+    return {
+        "subtasks": list(state.get("subtasks", [])) + fixes,
+        "revision_rounds": rounds + 1,
+        "step_feedback": f"Сквозной ревью нашёл проблемы: {problems}",
+    }
+
+
 async def validation_node(state: GeneralGraphState) -> dict:
     """Финальный Schema Guided Reasoning ответа агента."""
     rubric = state.get("goal_rubric", []) or []
@@ -669,7 +783,8 @@ async def validation_node(state: GeneralGraphState) -> dict:
             print(f"[Validation] consensus skipped: {e}")
 
     retries = state.get("global_retries", 0)
-    bumped = retries if confidence >= LOW_CONF else retries + 1
+    # Инкремент только когда реально уходим на полный ретрай (см. route_after_validation).
+    bumped = retries + 1 if (not is_valid or confidence < RETRY_CONF) else retries
 
     return {
         "validation_passed": is_valid,
@@ -691,7 +806,7 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     mode = state.get("mode", "deliberate")
     # Валидируемые режимы (deliberate, reason) считаются неудачей при низкой уверенности;
     # быстрые/уточняющие (fast, clarify) не валидируются → всегда ok, в тренд не идут.
-    validated = mode in ("deliberate", "reason")
+    validated = mode in ("deliberate", "reason", "heavy")
     outcome = "ok" if (not validated or confidence >= LOW_CONF) else "low_conf"
 
     # 1. Эпизодическая память / trajectory-store
@@ -709,11 +824,39 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     )
 
     # Forward-харвест: успешный обдуманный прогон → few-shot пример (генерализация, без LLM).
-    if mode == "deliberate" and confidence >= LOW_CONF and answer:
+    if mode in ("deliberate", "heavy") and confidence >= LOW_CONF and answer:
         try:
             add_fewshot("step_execution", query, answer, confidence)
         except Exception:  # noqa: BLE001
             pass
+
+    # Судьба ВРЕМЕННОГО навыка, созданного по ходу задачи: оставить в библиотеке
+    # (переиспользуем) или выбросить (одноразовый). Решается в фоне, дёшево.
+    created_skill = state.get("created_skill_name", "")
+
+    async def _judge_created_skill():
+        if not created_skill:
+            return
+        meta = _load_registry().get(created_skill)
+        if not meta or not meta.get("temporary"):
+            return
+        if outcome != "ok":
+            return  # задача не решена — навык остаётся temp, TTL-чистка приберёт
+        try:
+            verdict = await skill_retention_chain.ainvoke({
+                "query": query,
+                "skill_name": created_skill,
+                "skill_description": meta.get("description", ""),
+                "confidence": f"{confidence:.0%}",
+            })
+            if verdict.keep:
+                clear_temporary(created_skill)
+                print(f"[SkillRetention] '{created_skill}' принят в библиотеку: {verdict.reason}")
+            else:
+                _delete_skill_impl(created_skill, allow_protected=False)
+                print(f"[SkillRetention] '{created_skill}' одноразовый, удалён: {verdict.reason}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[SkillRetention] judge failed (навык остаётся temp): {e}")
 
     # 2+3. Извлечение фактов и периодическая рефлексия — независимы → параллельно.
     async def _extract_facts():
@@ -759,7 +902,8 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     # уносим в ФОН: ответ пользователю уже готов — не заставляем ждать ещё LLM-вызовы.
     def _post_reflect() -> None:
         async def _run():
-            await asyncio.gather(_extract_facts(), _synth_reflection(), return_exceptions=True)
+            await asyncio.gather(_extract_facts(), _synth_reflection(), _judge_created_skill(),
+                                 return_exceptions=True)
         try:
             asyncio.run(_run())
         except Exception as e:  # noqa: BLE001
@@ -821,13 +965,34 @@ def route_after_step(state: GeneralGraphState) -> str:
     return "synthesize"
 
 
+def route_after_synthesize(state: GeneralGraphState) -> str:
+    """Heavy-режим: после сборки решения — сквозной ревью (пока есть бюджет раундов);
+    остальные режимы идут сразу на финальную валидацию."""
+    if state.get("mode") == "heavy" and state.get("revision_rounds", 0) < MAX_REVISIONS:
+        return "review"
+    return "validation"
+
+
+def route_after_review(state: GeneralGraphState) -> str:
+    """Ревью добавил fix-подшаги → обратно в шаговый цикл; чисто → финальная валидация."""
+    if state.get("current_step", 0) < len(state.get("subtasks", [])):
+        return "step_executor"
+    return "validation"
+
+
 def route_after_validation(state: GeneralGraphState) -> str:
-    """Final SGR → reflect (ок / исчерпали ретраи) | router (low confidence, ретраим)"""
-    if state.get("confidence", 1.0) >= LOW_CONF:
-        return "reflect"
-    if state.get("global_retries", 0) >= MAX_GLOBAL_RETRIES:
-        return "reflect"
-    return "router"
+    """
+    Final SGR → reflect | router (полный ретрай).
+    Полный повтор пайплайна — САМАЯ дорогая операция (×2 токенов на запрос),
+    поэтому ретраим только реально невалидный ответ (is_valid=False или
+    confidence < retry_confidence). «Серединная» уверенность (0.5–0.7) —
+    принимаем с замечанием: это пища для self-learning, а не повод сжечь бюджет.
+    """
+    invalid = not state.get("validation_passed", True)
+    conf = state.get("confidence", 1.0)
+    if (invalid or conf < RETRY_CONF) and state.get("global_retries", 0) < MAX_GLOBAL_RETRIES:
+        return "router"
+    return "reflect"
 
 
 def build_graph(checkpointer=None) -> CompiledStateGraph:
@@ -850,6 +1015,7 @@ def build_graph(checkpointer=None) -> CompiledStateGraph:
         "skill_injection": skill_injection_node,
         "step_executor": step_executor_node,
         "synthesize": synthesize_node,
+        "review": review_node,
         "validation": validation_node,
         "reflect": reflect_node,
     }
@@ -888,7 +1054,14 @@ def build_graph(checkpointer=None) -> CompiledStateGraph:
         "step_executor": "step_executor",  # ретрай шага / следующий шаг
         "synthesize":    "synthesize",
     })
-    graph.add_edge("synthesize", "validation")
+    graph.add_conditional_edges("synthesize", route_after_synthesize, {
+        "review":     "review",      # heavy: сквозной ревью собранного решения
+        "validation": "validation",
+    })
+    graph.add_conditional_edges("review", route_after_review, {
+        "step_executor": "step_executor",  # доработка fix-подшагов
+        "validation":    "validation",
+    })
 
     graph.add_conditional_edges("validation", route_after_validation, {
         "router":  "router",

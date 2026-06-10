@@ -80,6 +80,52 @@ def _validate_python(code: str) -> tuple[bool, str]:
         return False, f"SyntaxError at line {e.lineno}: {e.msg}"
 
 
+def _security_gate(code: str) -> tuple[bool, str]:
+    """
+    AST-гейт безопасности для ГЕНЕРИРУЕМОГО кода (точка записи — единственный путь,
+    которым LLM сохраняет код навыка). Владелец может отключить: AGENT_ALLOW_RISKY_SKILLS=1.
+    """
+    if os.getenv("AGENT_ALLOW_RISKY_SKILLS") == "1":
+        return True, "OK (гейт отключён env)"
+    from ..utils_validation import validate_skill_code
+
+    ok, issues = validate_skill_code(code)
+    if ok:
+        return True, "OK"
+    return False, (
+        "Security gate: " + "; ".join(issues) +
+        ". Генерируемым навыкам запрещены subprocess/os.system/eval/exec и т.п. — "
+        "используй стандартные библиотеки (urllib, json, pathlib) или существующие core-навыки."
+    )
+
+
+# Имена навыков, созданных в этой сессии (структурный канал для create_skills_node,
+# вместо хрупкого регэкспа по тексту сообщений агента).
+_session_created: list[str] = []
+
+
+def pop_last_created() -> str:
+    """Возвращает имя последнего созданного в сессии навыка (и забывает его)."""
+    return _session_created.pop() if _session_created else ""
+
+
+# ── временные навыки (создан под задачу → решение «оставить/выбросить» позже) ──
+
+def mark_temporary(name: str) -> None:
+    """Помечает навык временным: создан под текущую задачу, в библиотеку ещё не принят."""
+    registry = _load_registry()
+    if name in registry:
+        registry[name]["temporary"] = True
+        _save_registry(registry)
+
+
+def clear_temporary(name: str) -> None:
+    """Принимает навык в библиотеку насовсем (решение retention-судьи)."""
+    registry = _load_registry()
+    if name in registry and registry[name].pop("temporary", None):
+        _save_registry(registry)
+
+
 
 @tool("list_skills")
 def list_skills() -> str:
@@ -98,8 +144,9 @@ def list_skills() -> str:
     for name, meta in registry.items():
         status = "ready" if meta.get("has_tools") else "description only"
         lock = " 🔒core" if _is_protected(name, registry) else ""
+        temp = " 🕒temp" if meta.get("temporary") else ""
         lines.append(
-            f"• {name} [{status}]{lock} — {meta['description'][:100]}"
+            f"• {name} [{status}]{lock}{temp} — {meta['description'][:100]}"
         )
     return "Available skills:\n" + "\n".join(lines)
 
@@ -174,6 +221,9 @@ def create_skill(
         is_valid, err = _validate_python(tool_code)
         if not is_valid:
             return f"Invalid Python code — {err}. Fix the code and try again."
+        safe, sec_msg = _security_gate(tool_code)
+        if not safe:
+            return f"Rejected. {sec_msg}"
 
     skill_dir = SKILLS_DIR / name
     skill_dir.mkdir(parents=True, exist_ok=True)
@@ -197,6 +247,7 @@ def create_skill(
         "version": 1,
     }
     _save_registry(registry)
+    _session_created.append(name)
 
     result = f"Skill '{name}' created successfully."
     if has_tools:
@@ -234,6 +285,9 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
     is_valid, err = _validate_python(tool_code)
     if not is_valid:
         return f"Invalid Python code — {err}. Fix and retry."
+    safe, sec_msg = _security_gate(tool_code)
+    if not safe:
+        return f"Rejected. {sec_msg}"
 
     skill_file = SKILLS_DIR / name / f"{name}.py"
 
@@ -255,21 +309,7 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
     return f"Tools for skill '{name}' updated (v{registry[name]['version']})."
 
 
-@tool("delete_skill")
-def delete_skill(name: str, force: bool = False) -> str:
-    """
-    Delete a skill entirely (description + tools + registry entry).
-    Use with caution — this is irreversible.
-
-    Protected (core) skills cannot be deleted unless force=True.
-
-    Args:
-        name: The name of the skill to delete.
-        force: Set True to override protection of a core skill (rarely needed).
-
-    Returns:
-        str: Confirmation message.
-    """
+def _delete_skill_impl(name: str, allow_protected: bool) -> str:
     import shutil
 
     registry = _load_registry()
@@ -278,10 +318,10 @@ def delete_skill(name: str, force: bool = False) -> str:
     if name not in registry and not skill_dir.exists():
         return f"Skill '{name}' not found."
 
-    if _is_protected(name, registry) and not force:
+    if _is_protected(name, registry) and not allow_protected:
         return (
-            f"Skill '{name}' is PROTECTED (core capability) and was not deleted. "
-            f"It must stay available. Pass force=True only if you are absolutely sure."
+            f"Skill '{name}' is PROTECTED (core capability) and cannot be deleted by the agent. "
+            f"Only the owner can remove it (force_delete_skill from CLI)."
         )
 
     if skill_dir.exists():
@@ -291,6 +331,27 @@ def delete_skill(name: str, force: bool = False) -> str:
     _save_registry(registry)
 
     return f"Skill '{name}' has been deleted."
+
+
+@tool("delete_skill")
+def delete_skill(name: str) -> str:
+    """
+    Delete a non-protected skill entirely (description + tools + registry entry).
+    Use with caution — this is irreversible. Protected (core) skills can NEVER
+    be deleted through this tool.
+
+    Args:
+        name: The name of the skill to delete.
+
+    Returns:
+        str: Confirmation message.
+    """
+    return _delete_skill_impl(name, allow_protected=False)
+
+
+def force_delete_skill(name: str) -> str:
+    """Владельческое удаление (включая protected) — НЕ tool, только из кода/CLI."""
+    return _delete_skill_impl(name, allow_protected=True)
 
 
 @tool("load_skill_tools")
@@ -437,8 +498,31 @@ def sync_registry() -> dict:
             registry[name]["protected"] = True
             protected.append(name)
 
+    # 4. протухшие временные навыки (не принятые retention-судьёй) → вычистить
+    expired = []
+    try:
+        from omegaconf import OmegaConf
+
+        ttl_days = float(OmegaConf.load("config.yml").get("skills", {}).get("temp_ttl_days", 7))
+    except Exception:  # noqa: BLE001
+        ttl_days = 7.0
+    now = datetime.now()
+    for name in list(registry.keys()):
+        meta = registry[name]
+        if not meta.get("temporary") or meta.get("protected"):
+            continue
+        try:
+            age_days = (now - datetime.fromisoformat(meta.get("created_at", now.isoformat()))).days
+        except ValueError:
+            age_days = 0
+        if age_days >= ttl_days:
+            _save_registry(registry)  # registry мог измениться выше
+            _delete_skill_impl(name, allow_protected=False)
+            registry = _load_registry()
+            expired.append(name)
+
     _save_registry(registry)
-    return {"added": added, "removed": removed, "protected": protected}
+    return {"added": added, "removed": removed, "protected": protected, "expired_temp": expired}
 
 
 def get_manager_tools() -> list:
@@ -486,10 +570,13 @@ def get_all_loaded_skill_tools(names: Optional[list[str]] = None) -> list:
             sys.modules[module_name] = module
             spec.loader.exec_module(module)
 
+            from ..hitl import needs_confirmation, wrap_with_confirmation
+
+            guard = needs_confirmation(name)
             for attr_name in dir(module):
                 obj = getattr(module, attr_name)
                 if hasattr(obj, "name") and hasattr(obj, "invoke"):
-                    all_tools.append(obj)
+                    all_tools.append(wrap_with_confirmation(obj, name) if guard else obj)
 
         except Exception as e:
             print(f"[SkillManager] Failed to load '{name}': {e}")

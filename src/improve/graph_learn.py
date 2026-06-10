@@ -30,11 +30,12 @@ _cfg = OmegaConf.load("config.yml")
 
 NODE_DESC = {
     "goal": "определяет цель и стоящую цель/rubric",
-    "reflexion": "выбирает режим мышления (fast/reason/deliberate/clarify)",
+    "reflexion": "выбирает режим мышления (fast/reason/deliberate/heavy/clarify)",
     "decompose": "раскладывает задачу на подшаги с done_check",
     "fast_answer": "быстрый интуитивный ответ без инструментов",
     "reason": "глубокое пошаговое рассуждение без инструментов",
     "step_executor": "исполняет подшаг инструментами и самопроверяет",
+    "review": "heavy: сквозной ревью собранного решения, выдаёт fix-подшаги",
 }
 
 
@@ -77,6 +78,7 @@ OPTIMIZABLE = {
     "fast_answer": "fast_answer",
     "reason": "reason",
     "step_executor": "step_execution",
+    "review": "review",
 }
 
 

@@ -14,10 +14,13 @@ START
       ├─ fast      → fast_answer ───────────────────────────────→ reflect → END   (System 1, дёшево)
       ├─ clarify   → fast_answer ───────────────────────────────→ reflect → END   (переспросить)
       ├─ reason    → reason ─────────────────→ validation ──────→ reflect → END   (System 2, без тулов)
-      └─ deliberate→ router → (create_skill | skill_selector)
+      └─ deliberate / heavy → router → (create_skill | skill_selector)
                        skill_selector → decompose → skill_injection
                           → step_executor⟲ (исполнение+валидация ПО ПУНКТАМ)
-                          → synthesize → validation → reflect → END                (инструменты)
+                          → synthesize ─→ validation → reflect → END               (deliberate)
+                                       └→ review (heavy: сквозной ревью deep-моделью)
+                                            ├─ проблемы → fix-подшаги → step_executor⟲ → synthesize → validation
+                                            └─ чисто → validation
  reflect              запись эпизода (trajectory), извлечение фактов(+тэги, рёбра),
                       рефлексия, саммари, prune, трекинг деградации, авто-self-learning
 ```
@@ -33,6 +36,7 @@ START
 | Навыки | `tools/skill_creation.py`, `skills/*` | реестр, защита core-навыков, автосинк, динамическая загрузка; `web_search`(SearXNG→cloakbrowser), `device_control` |
 | Самообучение | `improve/` | forward-харвест few-shots; backward: дифф-credit-assignment по трейсу → per-node textual gradients → multi-node оптимизация промптов (TextGrad/Reflexion) → валидация → ParamStore |
 | Трейсинг/диагностика | `tracing/` | спаны по нодам (data/traces.db), самодиагностика, ротация |
+| Безопасность | `utils_validation.py` (AST-гейт), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop) | генерируемый код: AST-запреты на записи + smoke в изолированном процессе (rlimits/kill); side-effect тулы — подтверждение человеком, deny by default без канала |
 | Внешнее | `external/context.py` | контекст A2A/MCP в состоянии (слот + плумбинг) |
 | Обслуживание | `maintenance/dep_update.py` | безопасный авто-апдейт зависимостей с health-check и откатом |
 | Интерфейсы | `main.py` (REPL), `bot.py` (Telegram), `server.py` (FastAPI) | общий граф + общая память |
@@ -46,7 +50,7 @@ START
   2. `_backward_gradients`: 1 LLM-вызов по батчу → текстовый «градиент» на каждую виноватую ноду;
   3. `optimize_role` для КАЖДОЙ виноватой ноды её градиентом → проверка плейсхолдеров + LLM-судья → `ParamStore`.
 - **Реестр параметров** (`improve/prompt_store.py`, `data/params.json`): prompt-override + few-shots + описания тулов на ноду. Обратимо, версионируется, не трогает исходники.
-- Обучаемые ноды: goal, reflexion, decompose, fast_answer, reason, step_executor.
+- Обучаемые ноды: goal, reflexion, decompose, fast_answer, reason, step_executor, review.
 - Батч больше → надёжнее карта вины и богаче few-shots → systematic improvement.
 
 ## Конфиг / окружение
@@ -62,6 +66,8 @@ START
 - `python -m src.maintenance` — авто-апдейт зависимостей.
 
 ## Известные границы (TODO)
+
+- Песочница навыков — процессная (rlimits+kill), не syscall-уровня (gVisor/seccomp); кроссплатформенность device/app-навыков (сейчас macOS) — в плане.
 
 - Backward = 1 агрегированный вызов по батчу (аппроксимация GEPA); «чистый» textual gradient вдоль рёбер трейса нода→нода — следующий уровень (нужен захват выходов нод в трейс).
 - Оркестрация = выбор 1 из 4 фикс-путей; свободная композиция модулей — дальше.

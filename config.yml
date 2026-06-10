@@ -1,9 +1,13 @@
 provider: openrouter  # | ollama  (сейчас локально, бесплатно)
-model:
-  name: google/gemini-2.5-flash-lite-preview-09-2025
+# Тиры low-cost (цены проверены живьём через /api/v1/models, июнь 2026):
+model:                                  # роутинг/валидация/extraction — дёшево и быстро
+  name: google/gemini-2.5-flash-lite    # $0.10 in / $0.40 out, ctx 1M
   temperature: 0
-code_model:
-  name: google/gemini-3-flash-preview
+code_model:                             # агентское исполнение шагов / код
+  name: deepseek/deepseek-v4-flash      # $0.098 in / $0.197 out, ctx 1M
+  temperature: 0
+deep_model:                             # ТОЛЬКО heavy-ревью и редкое глубокое мышление
+  name: deepseek/deepseek-v4-pro        # $0.435 in / $0.87 out (промо), ~Opus-уровень агентики
   temperature: 0
 ollama:
   base_url: http://localhost:11434/v1
@@ -19,6 +23,10 @@ agent:
   max_subtasks: 6
   ambiguity_gate: 0.6        # ambiguity >= порога → переспросить (clarify), а не гадать
   consensus_validation: true  # финальную валидацию подтверждают 2 модели (мульти-модельный консенсус)
+  require_confirmation: true  # human-in-the-loop: side-effect навыки (skills.confirm) требуют подтверждения
+  max_revisions: 1            # heavy-режим: сколько раундов «сквозной ревью → доработка» после сборки
+  retry_confidence: 0.5       # полный ретрай пайплайна только если conf ниже (или is_valid=false); 0.5–0.7 принимаем
+  step_iter_limit: 16         # потолок витков ReAct-цикла одного шага (анти-разгон токенов)
 checkpointer:
   backend: sqlite
   sqlite_path: data/checkpoints.db
@@ -45,7 +53,13 @@ skills:
   - app_control
   - ax_control
   - phone_control
+  confirm:                   # side-effect навыки: вызов тула требует подтверждения человека (HITL)
+  - device_control
+  - app_control
+  - ax_control
+  - phone_control
   autosync: true
+  temp_ttl_days: 7           # временные (не принятые в библиотеку) навыки старше TTL чистятся при старте
 mcp:
   auto_trust_discovered: false
   discover_limit: 8

@@ -14,9 +14,11 @@ from __future__ import annotations
 from typing import Callable, Optional
 
 from langchain_core.tools import StructuredTool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
+from .improve.prompt_store import get_prompt
 from .llm import chat
+from .prompts import OPTIMIZABLE_PROMPTS
 from .tools import get_all_loaded_skill_tools
 
 
@@ -35,7 +37,7 @@ def react_subagent_tool(name: str, description: str, system: str,
     """Оборачивает ReAct-под-агента (со своим промптом и набором навыков) в инструмент."""
     llm = chat("code")
     tools = get_all_loaded_skill_tools(skill_names) if skill_names else []
-    agent = create_react_agent(llm, tools, prompt=system)
+    agent = create_agent(llm, tools, system_prompt=system)
 
     async def _run(task: str) -> str:
         r = await agent.ainvoke({"messages": [("user", task)]}, config={"recursion_limit": 25})
@@ -46,17 +48,13 @@ def react_subagent_tool(name: str, description: str, system: str,
 
 
 # Каталог под-агентов (фабрики, чтобы строить лениво — без LLM на импорте).
-_RESEARCHER_PROMPT = (
-    "Ты — под-агент-исследователь. Делай agentic-поиск: формулируй запросы, ищи "
-    "(search_web), читай лучшие ссылки (read_url), синтезируй краткий ответ С ИСТОЧНИКАМИ. "
-    "Не выдумывай — опирайся на найденное."
-)
-
+# Промпт researcher — обучаемый параметр: дефолт в OPTIMIZABLE_PROMPTS,
+# override берётся из ParamStore в момент сборки.
 SUBAGENT_CATALOG: dict[str, Callable[[], StructuredTool]] = {
     "researcher": lambda: react_subagent_tool(
         "run_researcher",
         "Глубокий веб-исследователь (под-агент): сам ищет, читает страницы и синтезирует ответ с источниками.",
-        _RESEARCHER_PROMPT,
+        get_prompt("researcher", OPTIMIZABLE_PROMPTS["researcher"]),
         skill_names=["web_search"],
     ),
 }

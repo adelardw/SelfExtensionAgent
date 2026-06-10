@@ -9,4 +9,7 @@ wheels/
 # Virtual environments
 .venv
 logs
-src/eval
+
+# Secrets / runtime data
+.env
+data/

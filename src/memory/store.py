@@ -222,10 +222,15 @@ class MemoryStore:
         tags: Optional[list[str]] = None,
     ) -> int:
         """Upsert по (user_id, key): новый факт перезаписывает старое. Возвращает id факта."""
-        existing = self._conn.execute(
-            "SELECT id FROM facts WHERE user_id=? AND lower(key)=lower(?)",
-            (user_id, key),
-        ).fetchone()
+        # Регистр сравниваем в Python: sqlite lower() — ASCII-only, кириллицу не берёт.
+        existing = next(
+            (
+                row
+                for row in self._conn.execute("SELECT id, key FROM facts WHERE user_id=?", (user_id,))
+                if row["key"].lower() == key.lower()
+            ),
+            None,
+        )
         emb = self._emb_json(f"{key}: {value}")
         tags_json = json.dumps(tags or [], ensure_ascii=False)
         if existing:
@@ -353,6 +358,27 @@ class MemoryStore:
         return self._conn.execute(
             "SELECT * FROM episodes WHERE outcome='ok' AND confidence>0 ORDER BY ts DESC LIMIT ?", (n,)
         ).fetchall()
+
+    def mode_stats(self, user_id: Optional[str] = None) -> dict:
+        """
+        Распределение режимов мышления по эпизодам: сколько запросов реально ушло
+        в fast/reason/deliberate/clarify. Ключевая метрика бюджета: доля fast —
+        это запросы, НЕ заплатившие за дорогой deliberate-путь (12–20 LLM-вызовов).
+        """
+        q = "SELECT mode, COUNT(*) AS c FROM episodes WHERE mode != ''"
+        params: tuple = ()
+        if user_id:
+            q += " AND user_id=?"
+            params = (user_id,)
+        rows = self._conn.execute(q + " GROUP BY mode", params).fetchall()
+        modes = {r["mode"]: int(r["c"]) for r in rows}
+        total = sum(modes.values())
+        return {
+            "total": total,
+            "modes": modes,
+            "fast_share": round(modes.get("fast", 0) / total, 3) if total else 0.0,
+            "cheap_share": round((modes.get("fast", 0) + modes.get("clarify", 0)) / total, 3) if total else 0.0,
+        }
 
     def failure_count(self) -> int:
         row = self._conn.execute(

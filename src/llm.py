@@ -9,7 +9,10 @@ import json
 import os
 import urllib.request
 
+from dotenv import load_dotenv
 from omegaconf import OmegaConf
+
+load_dotenv()  # ключи доступны и при прямом использовании (media.py и т.п.), не только через agent
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
@@ -62,16 +65,20 @@ def provider() -> str:
 
 
 def model_for(role: str) -> str:
-    """Имя модели для роли при активном провайдере. role: fast | code | embed."""
+    """Имя модели для роли при активном провайдере. role: fast | code | deep | embed.
+    'deep' — редкие тяжёлые вызовы (heavy-ревью); фолбэк на code-модель."""
     if provider() == "ollama":
         oll = _cfg.get("ollama", {})
-        if _override["model"] and role in ("fast", "code"):
+        if _override["model"] and role in ("fast", "code", "deep"):
             return _override["model"]  # модель, выбранная из CLI
         fast = oll.get("model", "llama3.1")
         return {"fast": fast, "code": oll.get("code_model") or fast,
+                "deep": oll.get("deep_model") or oll.get("code_model") or fast,
                 "embed": oll.get("embed_model", "nomic-embed-text")}.get(role, fast)
     if role == "code":
         return _cfg.get("code_model", {}).get("name", "gpt-4o-mini")
+    if role == "deep":
+        return (_cfg.get("deep_model", {}) or {}).get("name") or _cfg.get("code_model", {}).get("name", "gpt-4o-mini")
     if role == "embed":
         return _cfg.get("memory", {}).get("embedding_model", "openai/text-embedding-3-small")
     return _cfg.get("model", {}).get("name", "gpt-4o-mini")

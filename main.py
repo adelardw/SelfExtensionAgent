@@ -19,7 +19,10 @@ from rich.table import Table
 from rich.text import Text
 
 from src.agent import build_graph, config, memory_store, rebuild_llms
+from src.hitl import set_confirmer
 from src.llm import active_summary, set_provider
+from src.media import AUDIO_EXTS, IMAGE_EXTS, TEXT_EXTS, attachment_context, transcribe_audio
+from src.progress import stream_with_progress
 from src.tracing import diagnose, trace_store
 from src.usage import TokenTracker, add_alltime, cost_of, load_alltime
 
@@ -30,6 +33,7 @@ MODE_STYLE = {
     "fast": ("⚡ FAST", "bold green"),
     "reason": ("🧠 REASON", "bold cyan"),
     "deliberate": ("🛠 DELIBERATE", "bold yellow"),
+    "heavy": ("🏗 HEAVY", "bold red"),
     "clarify": ("❓ CLARIFY", "bold magenta"),
 }
 
@@ -55,7 +59,8 @@ def banner() -> None:
     body = Text.from_markup(
         f"Активно: [cyan]{active_summary()}[/]\n"
         f"Режимы: {legend}\n"
-        f"Команды: [dim]/model /help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]"
+        f"Команды: [dim]/model /voice /help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]\n"
+        f"Вложения: [dim]упомяни путь к файлу/картинке в запросе — подхвачу автоматически[/]"
     )
     console.print(Panel(body, title="🤖 Self-Extension Agent", border_style="bright_blue", expand=False))
 
@@ -122,6 +127,10 @@ def cmd_diagnose(user_id: str) -> None:
     style = "green" if rep["healthy"] else "red"
     console.print(Panel("\n".join(rep["findings"]) or "Проблем не найдено.",
                         title="🩺 Самодиагностика", border_style=style, expand=False))
+    md = rep.get("mode_distribution") or {}
+    if md.get("total"):
+        console.print(f"[dim]Режимы ({md['total']} эпизодов): {md['modes']} · "
+                      f"дёшево (fast/clarify): {md['cheap_share']:.0%}[/]")
     cmd_traces()
 
 
@@ -180,7 +189,66 @@ async def cmd_improve() -> None:
     console.print(Panel(str(res), title="🔧 Self-learning", border_style="magenta", expand=False))
 
 
+async def _record_voice() -> str:
+    """
+    Голосовой ввод в CLI: запись с микрофона (ffmpeg avfoundation) до Enter,
+    затем расшифровка fast-моделью. Терминалу нужен доступ к микрофону
+    (System Settings → Privacy → Microphone) — macOS спросит при первом запуске.
+    """
+    import shutil as _shutil
+    import subprocess as _sp
+    import tempfile as _tmp
+
+    if not _shutil.which("ffmpeg"):
+        console.print("[red]Нужен ffmpeg: brew install ffmpeg[/]")
+        return ""
+    wav = Path(_tmp.mkstemp(suffix=".wav")[1])
+    proc = _sp.Popen(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "avfoundation", "-i", ":0",
+         "-ac", "1", "-ar", "16000", str(wav)],
+        stdin=_sp.DEVNULL, stderr=_sp.PIPE,
+    )
+    console.print("[bold red]● Запись…[/] говори, [bold]Enter[/] — стоп")
+    await asyncio.to_thread(input)
+    proc.terminate()
+    proc.wait(timeout=10)
+    if not wav.exists() or wav.stat().st_size < 1000:
+        err = (proc.stderr.read().decode(errors="ignore") if proc.stderr else "")[:200]
+        console.print(f"[red]Запись пуста. Проверь доступ терминала к микрофону. {err}[/]")
+        return ""
+    with console.status("[cyan]Расшифровываю…"):
+        text = await asyncio.to_thread(transcribe_audio, str(wav))
+    wav.unlink(missing_ok=True)
+    return text.strip()
+
+
+def _augment_attachments(query: str) -> str:
+    """
+    Вложения в REPL: если в запросе упомянут существующий файл (картинка/текст/аудио),
+    подкладываем его содержимое/vision-описание в контекст запроса.
+    """
+    known = IMAGE_EXTS | TEXT_EXTS | AUDIO_EXTS
+    paths = [
+        t for t in query.replace("'", " ").replace('"', " ").split()
+        if Path(t).expanduser().suffix.lower() in known and Path(t).expanduser().exists()
+    ]
+    if not paths:
+        return query
+    console.print(f"[dim]📎 вложения: {', '.join(Path(p).name for p in paths)}[/]")
+    ctx = attachment_context([str(Path(p).expanduser()) for p in paths], query)
+    return f"{query}\n\n=== ВЛОЖЕНИЯ ===\n{ctx}"
+
+
+async def _repl_confirm(description: str) -> bool:
+    """Human-in-the-loop: подтверждение side-effect действия прямо в терминале."""
+    console.print(Panel(description, title="⚠️  Агент просит разрешение на действие",
+                        border_style="red", expand=False))
+    ans = await asyncio.to_thread(input, "Разрешить? [y/N] ")
+    return ans.strip().lower() in ("y", "yes", "да", "д")
+
+
 async def main():
+    set_confirmer(_repl_confirm)
     async with make_checkpointer() as checkpointer:
         graph = build_graph(checkpointer)
         thread_id = str(uuid.uuid4())
@@ -226,15 +294,29 @@ async def main():
                 await cmd_improve(); continue
             if low == "/usage":
                 cmd_usage(tracker); continue
+            if low == "/voice":
+                query = await _record_voice()
+                if not query:
+                    continue
+                console.print(f"[bold]🎙 «{query}»[/]")
+                low = query.lower()
 
             pre_in, pre_out, pre_calls = tracker.snapshot()
             try:
-                with console.status("[cyan]Думаю…", spinner="dots"):
-                    result = await graph.ainvoke(
-                        {"query": query, "user_id": user_id,
+                with console.status("[cyan]Думаю…", spinner="dots") as status:
+                    full_query = await asyncio.to_thread(_augment_attachments, query)
+
+                    def _show(label: str) -> None:
+                        spent = tracker.total - pre_in - pre_out
+                        status.update(f"[cyan]{label}[/] [dim]· 🧮 {_k(spent)} tok[/]")
+
+                    result = await stream_with_progress(
+                        graph,
+                        {"query": full_query, "user_id": user_id,
                          "chat_history": chat_history + [{"role": "user", "content": query}]},
                         config={"configurable": {"thread_id": thread_id}, "recursion_limit": 50,
                                 "callbacks": [tracker]},
+                        on_label=_show,
                     )
             except Exception as e:  # noqa: BLE001
                 console.print(Panel(f"{type(e).__name__}: {e}", title="Ошибка", border_style="red"))

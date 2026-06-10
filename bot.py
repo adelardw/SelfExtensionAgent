@@ -3,11 +3,14 @@ warnings.filterwarnings("ignore", message="Pydantic serializer warnings", catego
 warnings.filterwarnings("ignore", message="urllib3")
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
 import sqlite3
+import time
 import uuid
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters.command import Command
@@ -15,7 +18,11 @@ from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite import SqliteSaver
 
 from src.agent import build_graph, memory_store
+from src.hitl import set_confirmer
+from src.media import attachment_context, transcribe_audio
+from src.progress import stream_with_progress
 from src.tracing import diagnose
+from src.usage import TokenTracker, add_alltime, cost_of
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -31,8 +38,52 @@ dp = Dispatcher()
 conn = sqlite3.connect("data/checkpoints.db", check_same_thread=False)
 agent_app = build_graph(checkpointer=SqliteSaver(conn))
 
-MODE_EMOJI = {"fast": "⚡ fast", "reason": "🧠 reason", "deliberate": "🛠 deliberate", "clarify": "❓ clarify"}
+MODE_EMOJI = {"fast": "⚡ fast", "reason": "🧠 reason", "deliberate": "🛠 deliberate",
+              "heavy": "🏗 heavy", "clarify": "❓ clarify"}
 _threads: dict[str, str] = {}  # user_id → thread_id (для /new)
+
+# ── Human-in-the-loop: подтверждение side-effect действий inline-кнопками ──
+_current_msg: contextvars.ContextVar[types.Message | None] = contextvars.ContextVar("hitl_msg", default=None)
+_pending_confirms: dict[str, asyncio.Future] = {}
+HITL_TIMEOUT_S = 120
+
+
+async def _bot_confirm(description: str) -> bool:
+    """Шлёт в текущий чат запрос с кнопками; нет ответа за таймаут → отказ."""
+    message = _current_msg.get()
+    if message is None:
+        return False
+    cid = uuid.uuid4().hex[:12]
+    fut: asyncio.Future = asyncio.get_running_loop().create_future()
+    _pending_confirms[cid] = fut
+    kb = types.InlineKeyboardMarkup(inline_keyboard=[[
+        types.InlineKeyboardButton(text="✅ Разрешить", callback_data=f"hitl:{cid}:y"),
+        types.InlineKeyboardButton(text="⛔ Отклонить", callback_data=f"hitl:{cid}:n"),
+    ]])
+    await message.answer(f"⚠️ Агент просит разрешение на действие:\n`{description}`",
+                         reply_markup=kb, parse_mode="Markdown")
+    try:
+        return await asyncio.wait_for(fut, timeout=HITL_TIMEOUT_S)
+    except asyncio.TimeoutError:
+        return False
+    finally:
+        _pending_confirms.pop(cid, None)
+
+
+@dp.callback_query(F.data.startswith("hitl:"))
+async def hitl_callback(cb: types.CallbackQuery):
+    _, cid, ans = cb.data.split(":", 2)
+    fut = _pending_confirms.get(cid)
+    if fut is not None and not fut.done():
+        fut.set_result(ans == "y")
+    await cb.answer("Разрешено" if ans == "y" else "Отклонено")
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+set_confirmer(_bot_confirm)
 
 
 def _thread(user_id: str) -> str:
@@ -48,7 +99,8 @@ async def _send_long(message: types.Message, text: str) -> None:
 async def cmd_start(message: types.Message):
     await message.answer(
         "Привет! Я саморасширяющийся ассистент с памятью, навыками и доступом к устройству.\n"
-        "Просто пиши задачу. Команды: /facts /goal /diagnose /new"
+        "Пиши задачу текстом, голосом 🎙, кидай картинки 🖼 и файлы 📎.\n"
+        "Команды: /facts /goal /diagnose /new"
     )
 
 
@@ -89,14 +141,44 @@ async def cmd_diagnose(message: types.Message):
     await message.answer("🩺 Самодиагностика:\n" + body)
 
 
-@dp.message(F.text)
-async def handle_message(message: types.Message):
+UPLOADS = Path("data/uploads")
+UPLOADS.mkdir(parents=True, exist_ok=True)
+
+
+async def _download(file_id: str, name: str) -> Path:
+    dest = UPLOADS / f"{uuid.uuid4().hex[:8]}_{name}"
+    await bot.download(file_id, destination=dest)
+    return dest
+
+
+def _k(n: int) -> str:
+    return f"{n/1000:.1f}k" if n >= 1000 else str(n)
+
+
+async def _process(message: types.Message, query: str) -> None:
+    """Общий пайплайн: прогон графа со стримингом прогресса + расход токенов."""
     uid = str(message.from_user.id)
+    _current_msg.set(message)  # канал для human-in-the-loop подтверждений
     status = await message.answer("🤔 Думаю…")
+    tracker = TokenTracker()
+    last_edit = {"ts": 0.0, "text": ""}
+
+    async def _on_label(label: str) -> None:
+        # промежуточные результаты: что агент делает сейчас + сколько токенов сожжено
+        text = f"{label}\n🧮 {_k(tracker.total)} tok · ~${tracker.cost():.4f}"
+        if text != last_edit["text"] and time.monotonic() - last_edit["ts"] > 1.5:
+            last_edit.update(ts=time.monotonic(), text=text)
+            try:
+                await status.edit_text(text)
+            except Exception:  # noqa: BLE001 — телеграм мог не принять edit, не критично
+                pass
+
     try:
-        cfg = {"configurable": {"thread_id": _thread(uid)}, "recursion_limit": 50}
-        result = await agent_app.ainvoke(
-            {"query": message.text, "user_id": uid, "chat_history": []}, config=cfg
+        cfg = {"configurable": {"thread_id": _thread(uid)}, "recursion_limit": 50,
+               "callbacks": [tracker]}
+        result = await stream_with_progress(
+            agent_app, {"query": query, "user_id": uid, "chat_history": []},
+            config=cfg, on_label=_on_label,
         )
         answer = result.get("final_answer") or "Не смог сформировать ответ."
 
@@ -108,6 +190,8 @@ async def handle_message(message: types.Message):
             head += f"\n🎯 {result['aim']}"
         if tools:
             head += f"\n🔧 {', '.join(tools)}"
+        head += f"\n🧮 {_k(tracker.input)} in + {_k(tracker.output)} out · ~${tracker.cost():.4f}"
+        add_alltime(tracker.input, tracker.output, tracker.calls)
 
         await status.delete()
         await message.answer(head)
@@ -115,6 +199,57 @@ async def handle_message(message: types.Message):
     except Exception as e:
         logger.error(f"agent error: {e}")
         await status.edit_text(f"⚠ Ошибка: {e}")
+
+
+@dp.message(F.voice | F.audio)
+async def handle_voice(message: types.Message):
+    """Голосовой ввод: скачиваем → расшифровка fast-моделью → обычный пайплайн."""
+    media = message.voice or message.audio
+    note = await message.answer("🎙 Расшифровываю…")
+    try:
+        path = await _download(media.file_id, "voice.ogg")
+        text = await asyncio.to_thread(transcribe_audio, str(path))
+        await note.edit_text(f"🎙 «{text}»")
+    except Exception as e:
+        await note.edit_text(f"⚠ Не смог расшифровать: {e}")
+        return
+    await _process(message, text)
+
+
+@dp.message(F.photo)
+async def handle_photo(message: types.Message):
+    """Картинка: vision-описание fast-моделью → в контекст запроса."""
+    caption = message.caption or "Проанализируй изображение."
+    note = await message.answer("🖼 Смотрю на изображение…")
+    try:
+        path = await _download(message.photo[-1].file_id, "photo.jpg")
+        ctx = await asyncio.to_thread(attachment_context, [str(path)], caption)
+        await note.delete()
+    except Exception as e:
+        await note.edit_text(f"⚠ Не смог обработать изображение: {e}")
+        return
+    await _process(message, f"{caption}\n\n=== ВЛОЖЕНИЯ ===\n{ctx}")
+
+
+@dp.message(F.document)
+async def handle_document(message: types.Message):
+    """Файл-вложение: картинки → vision, текст → инлайн, прочее → путь для навыков."""
+    doc = message.document
+    caption = message.caption or f"Обработай приложенный файл {doc.file_name}."
+    note = await message.answer(f"📎 Скачиваю {doc.file_name}…")
+    try:
+        path = await _download(doc.file_id, doc.file_name or "file.bin")
+        ctx = await asyncio.to_thread(attachment_context, [str(path)], caption)
+        await note.delete()
+    except Exception as e:
+        await note.edit_text(f"⚠ Не смог обработать файл: {e}")
+        return
+    await _process(message, f"{caption}\n\n=== ВЛОЖЕНИЯ ===\n{ctx}")
+
+
+@dp.message(F.text)
+async def handle_message(message: types.Message):
+    await _process(message, message.text)
 
 
 async def main():

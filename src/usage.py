@@ -13,9 +13,10 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 USAGE_FILE = Path("data/usage.json")
 
-# Грубые цены $/1M токенов (≈ gpt-4o-mini) — только для оценки.
-PRICE_IN = 0.15
-PRICE_OUT = 0.60
+# Грубые цены $/1M токенов (≈ текущий рабочий тир: gemini-2.5-flash-lite /
+# deepseek-v4-flash, $0.098–0.10 in / $0.197–0.40 out) — только для оценки.
+PRICE_IN = 0.10
+PRICE_OUT = 0.30
 
 
 class TokenTracker(BaseCallbackHandler):

@@ -29,6 +29,7 @@ def diagnose(memory_store=None, user_id: str = "default", since_hours: float = 2
             f"— возможно, плохой done_check или невыполнимый подшаг."
         )
 
+    mode_distribution: dict = {}
     if memory_store is not None:
         trend = memory_store.quality_trend(user_id)
         if trend["trend"] == "declining":
@@ -36,9 +37,17 @@ def diagnose(memory_store=None, user_id: str = "default", since_hours: float = 2
                 f"Деградация качества: уверенность {trend['prev_avg']} → {trend['recent_avg']} "
                 f"(по {trend['n']} валидированным ответам)."
             )
+        # Бюджет-метрика: какой % запросов реально уходит в дешёвый fast-путь.
+        mode_distribution = memory_store.mode_stats(user_id)
+        if mode_distribution["total"] >= 20 and mode_distribution["cheap_share"] < 0.2:
+            findings.append(
+                f"Лишь {mode_distribution['cheap_share']:.0%} запросов идут дешёвым путём (fast/clarify) "
+                f"при {mode_distribution['total']} эпизодах — проверь пороги reflexion-роутера (латентность/бюджет)."
+            )
 
     return {
         "findings": findings,
         "node_stats": [dict(s) for s in stats],
+        "mode_distribution": mode_distribution,
         "healthy": len(findings) == 0,
     }

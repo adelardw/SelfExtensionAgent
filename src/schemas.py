@@ -20,7 +20,8 @@ class GeneralGraphState(TypedDict):
     goal_rubric: list[str]    # критерии успеха активной цели (DeepAgents-style rubric)
 
     # ── Self-Reflexion Choice (meta-controller) ──
-    mode: str                 # "fast" | "deliberate" | "clarify" — режим взаимодействия
+    mode: str                 # "fast" | "reason" | "deliberate" | "heavy" | "clarify" — тип мышления
+    revision_rounds: int      # heavy: сколько раундов «сквозной ревью → доработка» уже прошло
 
     # ── Capabilities ──
     active_tools: list[str]      # имена локальных инструментов навыков в execution
