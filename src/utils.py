@@ -216,6 +216,63 @@ def run_tool_sandboxed(py_file: Path, tool_name: str, test_input: dict,
     return False, f"Песочница завершилась без результата (rc={proc.returncode}): {err}"
 
 
+# ── Вычислительный слой: исполнение произвольного Python в песочнице ──────────────
+# Агент с исполнением кода кратно способнее: считать/агрегировать/парсить данные,
+# которые нашёл research (статистика, числа, фильтры). Код идёт в ИЗОЛИРОВАННЫЙ
+# подпроцесс (rlimits CPU/mem/FSIZE + опц. syscall-изоляция + wall-kill) — НЕ в процессе
+# агента. Это закрывает «вычислительный» пробел held-out (rain-probability, числовые GAIA).
+_PYEXEC_RUNNER = r"""
+import json, sys, io, contextlib
+def _limits():
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_CPU, (15, 15))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (20 * 1024 * 1024,) * 2)
+        try: resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 ** 3,) * 2)
+        except (ValueError, OSError): pass
+    except Exception: pass
+_limits()
+code = open(sys.argv[1], encoding="utf-8").read()
+buf = io.StringIO(); ok = True; err = ""
+try:
+    with contextlib.redirect_stdout(buf):
+        exec(code, {"__name__": "__main__"})
+except Exception as e:
+    ok = False; err = f"{type(e).__name__}: {e}"
+print("__PYEXEC__" + json.dumps({"ok": ok, "stdout": buf.getvalue()[:4000], "error": err}, ensure_ascii=False))
+"""
+
+
+def run_python_sandboxed(code: str, timeout: int = 12) -> tuple[bool, str]:
+    """Исполняет произвольный Python в ИЗОЛИРОВАННОМ подпроцессе. (ok, stdout|ошибка)."""
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as fh:
+        fh.write(code)
+        path = fh.name
+    base = [sys.executable, "-c", _PYEXEC_RUNNER, path]
+    cmd = _syscall_sandbox_prefix() + base
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        proc = subprocess.run(base, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return False, f"Код завис (таймаут {timeout}с) — процесс убит"
+    except Exception as e:  # noqa: BLE001
+        return False, f"Песочница не запустилась: {type(e).__name__}: {e}"
+    finally:
+        try:
+            os.unlink(path)
+        except Exception:  # noqa: BLE001
+            pass
+    for line in reversed(proc.stdout.splitlines()):
+        if line.startswith("__PYEXEC__"):
+            p = json.loads(line[len("__PYEXEC__"):])
+            if p["ok"]:
+                return True, (p["stdout"].strip() or "(код отработал, но ничего не вывел — используй print())")
+            return False, p["error"]
+    return False, (proc.stderr or "").strip()[-400:] or "нет результата от песочницы"
+
+
 def _run_smoke_test(skill_name: str, tool_name: str, test_input: dict) -> tuple[bool, str]:
     """
     Smoke-тест навыка В ПЕСОЧНИЦЕ: подпроцесс + resource-лимиты + таймаут.

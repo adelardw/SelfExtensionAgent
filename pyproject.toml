@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "bm25s>=0.3.9",
     "cloakbrowser>=0.3.31",
     "deepagents>=0.6.8",
     "dotenv>=0.9.9",

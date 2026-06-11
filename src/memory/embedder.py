@@ -57,7 +57,8 @@ class OpenAIEmbedder:
                 self._client = None
                 try:
                     from openai import OpenAI
-                    self._client = OpenAI(api_key=self._key, base_url=self._base)
+                    self._client = OpenAI(api_key=self._key, base_url=self._base,
+                                          timeout=10, max_retries=0)
                 except Exception:  # noqa: BLE001
                     self.enabled = False
                 return
@@ -81,8 +82,12 @@ class OpenAIEmbedder:
             try:
                 from openai import OpenAI
 
+                # таймаут+0 ретраев: sync embed-вызов блокирует event loop, без потолка
+                # он морозил весь прогон на дефолтные 600с (видно в eval как «зомби»).
+                _kw = dict(timeout=10, max_retries=0)
                 self._client = (
-                    OpenAI(api_key=self._key, base_url=self._base) if self._base else OpenAI(api_key=self._key)
+                    OpenAI(api_key=self._key, base_url=self._base, **_kw) if self._base
+                    else OpenAI(api_key=self._key, **_kw)
                 )
             except Exception as e:  # noqa: BLE001
                 print(f"[Embedder] init failed, fallback to keyword search: {e}")

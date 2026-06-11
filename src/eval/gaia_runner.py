@@ -18,6 +18,7 @@ import time
 
 os.environ.setdefault("AGENT_DRY_RUN", "1")
 os.environ.setdefault("AGENT_SYSCALL_SANDBOX", "0")
+os.environ.setdefault("AGENT_EVAL_MODE", "1")  # не загрязнять глобальные few-shots бенч-запросами
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -25,7 +26,7 @@ warnings.filterwarnings("ignore")
 from dotenv import load_dotenv
 load_dotenv()
 
-SCENARIO_TIMEOUT = 240
+SCENARIO_TIMEOUT = 600 if os.getenv("AGENT_UNLEASH") == "1" else 240
 
 
 # ── GAIA-style scorer (нормализация как в официальном question_scorer) ──
@@ -84,24 +85,45 @@ def _extract_final(answer: str) -> str:
     return m.group(1).strip() if m else (answer or "")
 
 
-def _load_tasks(n: int, with_files: bool = True) -> list[dict]:
+def _wilson(k: int, n: int) -> tuple[float, float]:
+    """95% Wilson доверительный интервал для доли k/n."""
+    if n == 0:
+        return 0.0, 0.0
+    z = 1.96
+    p = k / n
+    denom = 1 + z * z / n
+    center = (p + z * z / (2 * n)) / denom
+    half = (z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5)) / denom
+    return max(0.0, center - half), min(1.0, center + half)
+
+
+def _load_tasks(n: int, levels: tuple = (1, 2, 3)) -> list[dict]:
+    """Грузит ВСЕ уровни validation (репрезентативно). n<=0 → весь набор."""
     import pandas as pd
     from huggingface_hub import hf_hub_download
 
     tok = os.getenv("HF_TOKEN")
-    p = hf_hub_download("gaia-benchmark/GAIA", "2023/validation/metadata.level1.parquet",
-                        repo_type="dataset", token=tok)
-    df = pd.read_parquet(p)
-    qcol = "Question" if "Question" in df.columns else next(c for c in df.columns if "question" in c.lower())
-    acol = "Final answer" if "Final answer" in df.columns else next(c for c in df.columns if "answer" in c.lower())
-    fcol = "file_name" if "file_name" in df.columns else None
-    rows = []
-    for _, r in df.iterrows():
-        fname = str(r.get(fcol) or "").strip() if fcol else ""
-        if fname and not with_files:
-            continue
-        rows.append({"q": str(r[qcol]), "a": str(r[acol]), "file": fname})
-    return rows[:n]
+    per_level: dict[int, list[dict]] = {}
+    for lvl in levels:
+        p = hf_hub_download("gaia-benchmark/GAIA", f"2023/validation/metadata.level{lvl}.parquet",
+                            repo_type="dataset", token=tok)
+        df = pd.read_parquet(p)
+        qcol = "Question" if "Question" in df.columns else next(c for c in df.columns if "question" in c.lower())
+        acol = "Final answer" if "Final answer" in df.columns else next(c for c in df.columns if "answer" in c.lower())
+        fcol = "file_name" if "file_name" in df.columns else None
+        per_level[lvl] = [{"q": str(r[qcol]), "a": str(r[acol]),
+                           "file": str(r.get(fcol) or "").strip() if fcol else "", "level": lvl}
+                          for _, r in df.iterrows()]
+    if n <= 0:
+        return [r for lvl in levels for r in per_level[lvl]]
+    # РЕПРЕЗЕНТАТИВНО: round-robin по уровням, чтобы срез из n охватывал все сложности
+    rows, i = [], 0
+    while len(rows) < n and any(i < len(per_level[lvl]) for lvl in levels):
+        for lvl in levels:
+            if i < len(per_level[lvl]) and len(rows) < n:
+                rows.append(per_level[lvl][i])
+        i += 1
+    return rows
 
 
 def _attach_file(task: dict) -> str:
@@ -115,7 +137,13 @@ def _attach_file(task: dict) -> str:
         p = hf_hub_download("gaia-benchmark/GAIA", f"2023/validation/{task['file']}",
                             repo_type="dataset", token=os.getenv("HF_TOKEN"))
         content = read_file(p, 10000)
-        return f"{task['q']}\n\n=== ПРИЛОЖЕННЫЙ ФАЙЛ ({task['file']}) ===\n{content}"
+        hint = ""
+        # PDF может содержать ФИГУРУ, где и лежит ответ (текст её не видит) → даём агенту путь
+        # и подсказку прочитать фигуры через vision-тул read_pdf_figures.
+        if str(task["file"]).lower().endswith(".pdf"):
+            hint = (f"\n\n(Файл доступен по пути: {p} — если ответ в ФИГУРЕ/графике/диаграмме, "
+                    f"а не в тексте выше, прочитай его инструментом read_pdf_figures.)")
+        return f"{task['q']}\n\n=== ПРИЛОЖЕННЫЙ ФАЙЛ ({task['file']}) ===\n{content}{hint}"
     except Exception as e:  # noqa: BLE001
         return f"{task['q']}\n\n(файл {task['file']} не удалось прочитать: {e})"
 
@@ -127,8 +155,9 @@ async def run(n: int = 8) -> None:
     tasks = _load_tasks(n)
     graph = build_graph()
     nfiles = sum(1 for t in tasks if t.get("file"))
-    print(f"\n{'='*100}\nGAIA validation Level 1 (held-out, {len(tasks)} задач, из них с файлами: {nfiles})\n{'='*100}")
+    print(f"\n{'='*100}\nGAIA validation (held-out, ВСЕ уровни, {len(tasks)} задач, с файлами: {nfiles})\n{'='*100}")
     correct, tot_cost = 0, 0.0
+    by_lvl: dict = {1: [0, 0], 2: [0, 0], 3: [0, 0]}  # level → [correct, total]
     for i, t in enumerate(tasks, 1):
         query = _attach_file(t) + GAIA_PROTOCOL  # файл (если есть) + протокол FINAL ANSWER
         tr = TokenTracker()
@@ -146,16 +175,26 @@ async def run(n: int = 8) -> None:
         final = _extract_final(ans)
         ok = gaia_score(final, t["a"])
         correct += ok
+        lvl = t.get("level", 1)
+        by_lvl[lvl][0] += ok
+        by_lvl[lvl][1] += 1
         cost = cost_of(tr.input, tr.output)
         tot_cost += cost
         tag = "📎" if t.get("file") else "  "
-        print(f"\n[{i}]{tag}{'✅' if ok else '❌'} mode={mode} | gold={t['a']!r} | финал={final[:40]!r} | {round(time.monotonic()-t0)}с | ~${cost:.4f}")
-        print(f"    Q: {t['q'][:110]}")
+        print(f"[{i}]{tag}L{lvl}{'✅' if ok else '❌'} gold={t['a'][:25]!r} финал={final[:25]!r} {round(time.monotonic()-t0)}с ${cost:.4f}",
+              flush=True)
+    n_tot = len(tasks)
+    lo, hi = _wilson(correct, n_tot)
     print(f"\n{'='*100}")
-    print(f"GAIA Level 1 accuracy: {correct}/{len(tasks)} = {correct/len(tasks):.0%}  ·  стоимость ${tot_cost:.4f}")
+    print(f"GAIA validation (все уровни): {correct}/{n_tot} = {correct/n_tot:.1%}  "
+          f"[95% Wilson CI: {lo:.1%}–{hi:.1%}]  ·  стоимость ${tot_cost:.4f}")
+    for lvl in (1, 2, 3):
+        c, tnum = by_lvl[lvl]
+        if tnum:
+            print(f"  Level {lvl}: {c}/{tnum} = {c/tnum:.0%}")
     print("=" * 100)
 
 
 if __name__ == "__main__":
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 8
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 0  # 0 = весь validation (165)
     asyncio.run(run(n))

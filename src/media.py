@@ -22,10 +22,11 @@ from langchain_core.messages import HumanMessage
 
 from .llm import chat
 
-IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".heic"}
 AUDIO_EXTS = {".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aiff", ".flac"}
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".gif"}  # кадры→vision + аудио→транскрипт
 TEXT_EXTS = {".txt", ".md", ".csv", ".json", ".yml", ".yaml", ".py", ".log", ".html", ".xml"}
-DOC_EXTS = {".pdf", ".xlsx", ".xls", ".docx"}  # документы — извлекаем текст/таблицы
+DOC_EXTS = {".pdf", ".xlsx", ".xls", ".docx", ".pptx"}  # документы — извлекаем текст/таблицы
 
 MAX_INLINE_TEXT = 6000  # сколько символов текстового файла инлайнить в контекст
 
@@ -106,6 +107,66 @@ def read_docx(path: Path, max_chars: int = 12000) -> str:
     return "\n".join(p.text for p in d.paragraphs)[:max_chars]
 
 
+def read_pptx(path: Path, max_chars: int = 12000) -> str:
+    """Текст всех слайдов .pptx (python-pptx): заголовки, буллеты, текст фигур, заметки."""
+    from pptx import Presentation
+
+    prs = Presentation(str(path))
+    out = []
+    for i, slide in enumerate(prs.slides, 1):
+        parts = [shape.text.strip() for shape in slide.shapes
+                 if shape.has_text_frame and shape.text.strip()]
+        if parts:
+            out.append(f"[Слайд {i}]\n" + "\n".join(parts))
+    return "\n\n".join(out)[:max_chars] or "[презентация без текста]"
+
+
+def _ffmpeg_frames(path: Path, n: int = 3) -> list[Path]:
+    """Сэмпл до n кадров из видео/gif через ffmpeg (равномерно по времени)."""
+    if not shutil.which("ffmpeg"):
+        return []
+    out_dir = Path(tempfile.mkdtemp())
+    # один кадр раз в ~5с, максимум n — дёшево и репрезентативно для «о чём ролик»
+    pat = str(out_dir / "f_%02d.png")
+    try:
+        subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vf", "fps=1/5",
+                        "-frames:v", str(n), pat], check=True, timeout=60)
+    except Exception:  # noqa: BLE001
+        return []
+    return sorted(out_dir.glob("f_*.png"))
+
+
+def read_video(path: Path, question: str = "") -> str:
+    """
+    Универсальный разбор видео/gif БЕЗ спец-сервисов: сэмпл кадров → vision-описание +
+    транскрипт аудио-дорожки (если есть). Кадры и звук стоят те же копейки (fast-тир).
+    """
+    frames = _ffmpeg_frames(path, n=3)
+    parts = []
+    for fr in frames:
+        try:
+            parts.append(describe_image(fr, question))
+        except Exception:  # noqa: BLE001
+            pass
+    visual = "\n".join(f"- кадр {i+1}: {d}" for i, d in enumerate(parts)) if parts \
+        else "(кадры не извлечены — нужен ffmpeg)"
+    # аудио-дорожка → транскрипт (видео часто без звука — тогда пропускаем)
+    audio_txt = ""
+    if shutil.which("ffmpeg") and path.suffix.lower() != ".gif":
+        wav = Path(tempfile.mktemp(suffix=".mp3"))
+        try:
+            subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-vn", "-ac", "1", str(wav)],
+                           check=True, timeout=120)
+            if wav.exists() and wav.stat().st_size > 1000:
+                audio_txt = transcribe_audio(wav)
+        except Exception:  # noqa: BLE001
+            pass
+    res = f"[Видео {path.name}] Кадры:\n{visual}"
+    if audio_txt:
+        res += f"\n\n[Аудио-дорожка]:\n{audio_txt}"
+    return res
+
+
 def read_file(path: str | Path, max_chars: int = 12000) -> str:
     """
     Универсальный ридер вложения по расширению: документ→текст/таблицы, картинка→vision,
@@ -122,6 +183,10 @@ def read_file(path: str | Path, max_chars: int = 12000) -> str:
             return read_excel(p, max_chars)
         if ext == ".docx":
             return read_docx(p, max_chars)
+        if ext == ".pptx":
+            return read_pptx(p, max_chars)
+        if ext in VIDEO_EXTS:        # видео/gif — раньше image (gif шёл одним кадром)
+            return read_video(p)
         if ext in IMAGE_EXTS:
             return describe_image(p)
         if ext in AUDIO_EXTS:
@@ -152,6 +217,58 @@ def describe_image(path: str | Path, question: str = "") -> str:
     ])
     resp = chat("fast").invoke([msg])
     return resp.content if hasattr(resp, "content") else str(resp)
+
+
+def read_pdf_visual(path: str | Path, question: str = "", max_pages: int = 5) -> str:
+    """
+    VISION-чтение PDF: рендер страниц в картинки → описание ФИГУР/графиков/диаграмм через
+    vision. Закрывает пробел, где ответ в ФИГУРЕ (оси, метки, графики), а не в тексте
+    (GAIA L2/L3 с фигурами). Текстовый _pdf_pymupdf фигуры не видит — этот читает визуально.
+    """
+    import fitz  # pymupdf
+
+    doc = fitz.open(str(path))
+    parts = []
+    for i in range(min(max_pages, doc.page_count)):
+        page = doc.load_page(i)
+        pix = page.get_pixmap(dpi=140)  # достаточно для чтения меток на осях/графиках
+        tmp = Path(tempfile.mkstemp(suffix=".png")[1])
+        pix.save(str(tmp))
+        try:
+            focus = (question or "") + " Особое внимание: ФИГУРЫ, графики, диаграммы — оси, "\
+                    "метки на концах осей, подписи, числа, легенды. Перепиши их точно."
+            parts.append(f"[Стр. {i + 1}]\n" + describe_image(tmp, focus))
+        except Exception as e:  # noqa: BLE001
+            parts.append(f"[Стр. {i + 1}: vision не сработал: {e}]")
+        finally:
+            try:
+                tmp.unlink()
+            except Exception:  # noqa: BLE001
+                pass
+    doc.close()
+    return "\n\n".join(parts) or "[PDF без страниц]"
+
+
+def make_pdf_vision_tool():
+    """Тул read_pdf_figures: VISION-чтение фигур/графиков в PDF (ответ в картинке, не тексте)."""
+    from langchain_core.tools import StructuredTool
+    from pydantic import BaseModel, Field
+
+    class _Q(BaseModel):
+        path: str = Field(description="Путь к PDF-файлу")
+        question: str = Field(description="Что искать в фигурах/графиках (метки осей, числа…)", default="")
+
+    def _run(path: str, question: str = "") -> str:
+        try:
+            return read_pdf_visual(path, question)
+        except Exception as e:  # noqa: BLE001
+            return f"[не удалось прочитать фигуры PDF: {type(e).__name__}: {e}]"
+
+    return StructuredTool.from_function(
+        func=_run, name="read_pdf_figures", args_schema=_Q,
+        description="VISION-read FIGURES/charts/diagrams in a PDF (axis labels, values, legends) when "
+                    "the answer is in an image, not the text. Use after plain text extraction misses it.",
+    )
 
 
 def _to_mp3(path: Path) -> Path:
@@ -202,8 +319,14 @@ def attachment_context(paths: list[str | Path], question: str = "") -> str:
                 blocks.append(f"[Изображение {p.name} (путь: {p}) — vision не сработал: {e}]")
         elif ext in DOC_EXTS:
             content = read_file(p, MAX_INLINE_TEXT)
-            kind = {"pdf": "PDF", "xlsx": "Excel", "xls": "Excel", "docx": "Word"}.get(ext.lstrip("."), "Документ")
+            kind = {"pdf": "PDF", "xlsx": "Excel", "xls": "Excel", "docx": "Word",
+                    "pptx": "Презентация"}.get(ext.lstrip("."), "Документ")
             blocks.append(f"[{kind} {p.name} (путь: {p})]\n{content}")
+        elif ext in VIDEO_EXTS:
+            try:
+                blocks.append(f"[Видео {p.name} (путь: {p})]\n{read_video(p, question)}")
+            except Exception as e:  # noqa: BLE001
+                blocks.append(f"[Видео {p.name} — разбор не сработал: {e}]")
         elif ext in AUDIO_EXTS:
             try:
                 blocks.append(f"[Аудио {p.name} (путь: {p})]\nТранскрипт:\n{transcribe_audio(p)}")

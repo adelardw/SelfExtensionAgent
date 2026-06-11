@@ -139,18 +139,47 @@ def get_user_fewshots(user_id: str, role: str, k: int = 3) -> list[dict]:
     return (_load_users().get(user_id, {}).get(role, []) if user_id else [])[:k]
 
 
+# ДВУХЪЯРУСНЫЕ few-shots (CLAUDE.md стр.91): встроенный НЕИЗМЕНЯЕМЫЙ baseline (пол
+# качества, есть всегда, даже у нового юзера без истории) + поверх ОБУЧАЕМЫЕ
+# персональные/глобальные. Baseline — общие ПРИНЦИПЫ маршрутизации, не eval-фразы
+# (анти-оверфит): иллюстрируют классы, а не конкретные сценарии.
+BASE_FEWSHOTS: dict[str, list[dict]] = {
+    "reflexion": [
+        {"query": "приветствие или простой вопрос из памяти", "answer": "fast"},
+        {"query": "задача на расчёт/логику, где все данные в самом запросе", "answer": "reason"},
+        {"query": "нужны свежие/внешние данные или действие с устройством/файлом", "answer": "deliberate"},
+        {"query": "размытый запрос без конкретики (что именно нужно — неясно)", "answer": "clarify"},
+    ],
+}
+
+
 def format_fewshots(role: str, k: int = 3, user_id: str = "") -> str:
     """
-    Примеры для инъекции: сначала ПЕРСОНАЛЬНЫЕ (этого пользователя), затем глобальные
-    добивают до k. Так агент сначала опирается на то, что заходило именно этому человеку.
+    Примеры для инъекции, по приоритету: ПЕРСОНАЛЬНЫЕ (этого юзера) → глобальные обучаемые →
+    встроенный baseline (неизменяемый пол). Так у нового юзера без истории всё равно есть
+    базовые принципы, а с опытом сверху ложится то, что заходит ИМЕННО ему.
     """
-    shots = list(get_user_fewshots(user_id, role, k))
-    seen = {s["query"].strip()[:60].lower() for s in shots}
-    for s in get_fewshots(role, k):
-        if len(shots) >= k:
-            break
-        if s["query"].strip()[:60].lower() not in seen:
-            shots.append(s)
+    base = BASE_FEWSHOTS.get(role, [])
+    # Резервируем слоты под baseline (гарантированный ПОЛ), чтобы обучаемые/глобальные —
+    # которые могут быть зашумлены (в т.ч. eval-запросами) — не вытеснили принципы полностью.
+    base_quota = min(len(base), max(1, k // 2)) if base else 0
+    learn_k = k - base_quota
+
+    shots: list[dict] = []
+    seen: set[str] = set()
+
+    def _add(pool: list[dict], target: int) -> None:
+        for s in pool:
+            if len(shots) >= target:
+                return
+            key = s["query"].strip()[:60].lower()
+            if key not in seen:
+                shots.append(s)
+                seen.add(key)
+
+    _add(get_user_fewshots(user_id, role, learn_k), learn_k)  # персональные (приоритет)
+    _add(get_fewshots(role, learn_k), learn_k)                # обучаемые глобальные
+    _add(base, k)                                             # встроенный baseline — гарантированный пол
     if not shots:
         return "Примеров пока нет."
     return "\n\n".join(f"Пример {i+1}:\nЗапрос: {s['query']}\nХороший ответ: {s['answer']}" for i, s in enumerate(shots))

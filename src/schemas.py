@@ -67,3 +67,4 @@ class GeneralGraphState(TypedDict):
     validation_passed: bool
     validation_feedback: str
     global_retries: int
+    web_research_used: bool  # был дисциплинированный agentic research (факты уже верифицированы)

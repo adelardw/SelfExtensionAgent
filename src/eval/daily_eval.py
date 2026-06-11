@@ -20,6 +20,7 @@ import time
 
 os.environ.setdefault("AGENT_DRY_RUN", "1")          # device-действия не трогают реальный Mac
 os.environ.setdefault("AGENT_SYSCALL_SANDBOX", "0")  # eval без syscall-обёртки
+os.environ.setdefault("AGENT_EVAL_MODE", "1")        # не загрязнять глобальные few-shots
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -231,12 +232,13 @@ async def _judge(rubric: str, query: str, answer: str) -> float:
         return 0.0
 
 
-async def run() -> None:
+async def run(n: int = 0) -> None:
     graph = build_graph()
     rows = []
-    print(f"\n{'='*100}\nПОВСЕДНЕВНЫЙ EVAL (dry-run для device, живой веб-поиск)\n{'='*100}")
+    scenarios = SCENARIOS if n <= 0 else SCENARIOS[:n]
+    print(f"\n{'='*100}\nПОВСЕДНЕВНЫЙ EVAL ({len(scenarios)} сценариев, dry-run для device, живой веб-поиск)\n{'='*100}")
 
-    for sc in SCENARIOS:
+    for sc in scenarios:
         tr = TokenTracker()
         t0 = time.monotonic()
         try:
@@ -308,4 +310,6 @@ def _summary(rows: list[dict]) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    import sys
+    n = int(sys.argv[1]) if len(sys.argv) > 1 else 0  # N сценариев (0 = все)
+    asyncio.run(run(n))

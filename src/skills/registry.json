@@ -51,30 +51,6 @@
     "version": 1,
     "protected": true
   },
-  "web_search_pro": {
-    "description": "A comprehensive web search skill that scrapes search results (news, images, videos) from public search engines without requiring an API key. It provides international results and direct links.",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-03-09T11:57:04.718963",
-    "updated_at": "2026-03-09T11:57:17.599893",
-    "version": 3
-  },
-  "project_explorer": {
-    "description": "Этот навык позволяет рекурсивно исследовать структуру проекта и читать файлы из любых поддиректорий. \nИспользуйте его для:\n1. Получения полного дерева проекта (все папки и файлы).\n2. Поиска файлов по ",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-08T22:54:29.528522",
-    "updated_at": "2026-06-08T22:54:29.528533",
-    "version": 1
-  },
-  "link_parser_pro": {
-    "description": "[SYSTEM SKILL - DO NOT DELETE]\nЭтот навык парсит ссылки, предоставленные пользователем, для извлечения релевантной информации, эффективно обрабатывая большие контексты. Поддерживает методы гибридного ",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-08T22:54:29.528762",
-    "updated_at": "2026-06-08T22:54:29.528765",
-    "version": 1
-  },
   "web_search": {
     "description": "# Skill: web_search (core)\n\nНормальный веб-поиск и чтение страниц через stealth-браузер **cloakbrowser**\n(drop-in замена Playwright, проходит антибот-детект). Базовый защищённый навык.\n\n## Когда испол",
     "has_tools": true,
@@ -135,14 +111,6 @@
     "has_system_prompt": true,
     "created_at": "2026-06-09T03:21:41.139871",
     "updated_at": "2026-06-09T03:21:41.139903",
-    "version": 1
-  },
-  "macos_launcher_v2": {
-    "description": "Skill to launch macOS applications using subprocess.",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-09T03:23:52.136173",
-    "updated_at": "2026-06-09T03:23:52.136182",
     "version": 1
   },
   "generate_pptx": {

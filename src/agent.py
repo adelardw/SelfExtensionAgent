@@ -64,15 +64,21 @@ from .memory import (
     MemoryStore, build_embedder, detect_implicit_feedback,
     feedback_is_negative, feedback_strip_marker,
 )
-from .improve import get_prompt as get_prompt_override, maybe_auto_improve
+from .improve import get_prompt as get_prompt_override, maybe_auto_improve, maybe_improve_user
+from .improve.safety import sanitize_tool_output
 from .improve.prompt_store import format_fewshots, add_fewshot, add_user_fewshot
 from .external import get_external_context, format_external_context
-from .mcp_client import suggest_server, get_mcp_tools, discover_mcp, approve_server
+from .mcp_client import suggest_server, get_mcp_tools, discover_mcp, approve_server, try_connect_discovered
 from .subagents import get_subagent_tools
+from .memory_tools import make_memory_tools, clear_scratch
+from .research import make_deep_research_tool, agentic_research
+from .compute import make_compute_tool
+from .media import make_pdf_vision_tool
 from .tracing import traced, new_run, current_run, trace_store, diagnose
 from .tools import get_manager_tools, get_all_loaded_skill_tools, get_skill_runtime_prompts, sync_registry
 from .tools.skill_creation import (
     get_skills_for_prompt,
+    get_relevant_skills_for_prompt,
     read_skill,
     load_skill_tools,
     delete_skill,
@@ -93,6 +99,11 @@ MAX_SUBTASK_RETRIES: int = config.agent.get("max_subtask_retries", 2)
 MAX_SUBTASKS: int = config.agent.get("max_subtasks", 6)
 AMBIGUITY_GATE: float = config.agent.get("ambiguity_gate", 0.6)
 CLARIFY_SOFT_GATE: float = config.agent.get("clarify_soft_gate", 0.3)
+# Гейт ОБОСНОВАННОСТИ (анти-галлюцинация): если reflexion выбрал ответ-из-знаний (reason/fast),
+# но САМ не уверен, что есть надёжная база (grounding ниже порога) — заземляем через инструменты
+# (deliberate), а не гадаем. Порог НИЗКИЙ: срабатывает только когда модель честно признаёт
+# слабую базу — чтобы НЕ вернуть над-эскалацию, с которой боролись.
+GROUNDING_GATE: float = config.agent.get("grounding_gate", 0.4)
 CONSENSUS_VALIDATION: bool = config.agent.get("consensus_validation", True)
 MAX_REVISIONS: int = config.agent.get("max_revisions", 1)
 RETRY_CONF: float = config.agent.get("retry_confidence", 0.5)
@@ -108,6 +119,25 @@ MAX_RUN_TOKENS: int = config.agent.get("max_run_tokens", 120000)
 # по времени ИЛИ по токенам — что раньше. Держим заметно ниже 5 мин ради UX.
 MAX_RUN_SECONDS: float = config.agent.get("max_run_seconds", 150)
 CAP_RESEARCH_TIMEOUT: float = config.agent.get("cap_research_timeout", 30)  # потолок веб-поиска способа
+STEP_DEADLINE_CAP: float = config.agent.get("step_deadline_cap", 45)  # макс. секунд на ОДИН шаг (анти-монополия)
+RESEARCH_STEP_DEADLINE: float = config.agent.get("research_step_deadline", 90)  # веб-research не ретраится → больше времени на multi-hop
+
+# ── UNLEASH-режим (eval само-расширения) ───────────────────────────────────
+# AGENT_UNLEASH=1 снимает гейты, душащие discover→connect→use, и раздувает бюджеты,
+# чтобы цепочка само-расширения отработала ПОЛНОСТЬЮ. Песочница (rlimits/bwrap) и
+# AGENT_DRY_RUN остаются — это безопасность РАНТАЙМА, а не ограничение исследования.
+# Цель: честно измерить концепцию, а не зажатый прогон. Не для прода.
+UNLEASH: bool = os.getenv("AGENT_UNLEASH") == "1"
+if UNLEASH:
+    MAX_STEPS_PER_RUN = int(os.getenv("AGENT_UNLEASH_STEPS", 24))      # 8 → 24
+    MAX_RUN_TOKENS = int(os.getenv("AGENT_UNLEASH_TOKENS", 600000))   # 120k → 600k
+    MAX_RUN_SECONDS = float(os.getenv("AGENT_UNLEASH_SECONDS", 600))  # 150 → 600
+    STEP_ITER_LIMIT = int(os.getenv("AGENT_UNLEASH_ITER", 24))        # 10 → 24
+    CAP_RESEARCH_TIMEOUT = float(os.getenv("AGENT_UNLEASH_RESEARCH", 60))  # 30 → 60
+    STEP_DEADLINE_CAP = float(os.getenv("AGENT_UNLEASH_STEP_CAP", 120))    # 45 → 120 (само-расширение длиннее)
+    print(f"[UNLEASH] само-расширение разгерметизировано: steps={MAX_STEPS_PER_RUN} "
+          f"tokens={MAX_RUN_TOKENS} secs={MAX_RUN_SECONDS} iter={STEP_ITER_LIMIT} "
+          f"auto_trust_MCP=ON (песочница/dry-run сохранены)")
 
 RECALL_K: int = config.get("memory", {}).get("recall_k", 5)
 REFLECT_EVERY: int = config.get("memory", {}).get("reflect_every", 5)
@@ -203,6 +233,7 @@ async def recall_node(state: GeneralGraphState) -> dict:
     clarify.reset_ledger()  # чистый реестр уточнений на этот прогон
     runbudget.reset()       # обнуляем токен-бюджет прогона
     user_id = state.get("user_id") or "default"
+    clear_scratch(user_id)  # временный (runtime) ярус памяти живёт только в рамках прогона
     query = state["query"]
 
     memory_context = memory_store.recall(user_id, query, k=RECALL_K, budget=RECALL_BUDGET)
@@ -310,10 +341,18 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
         mem = state.get("memory_context", "") or ""
         need = decision.missing_info or "уточни, что именно нужно"
         return {"mode": "clarify", "memory_context": f"⚠ Неясно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}"}
+    # Гейт ОБОСНОВАННОСТИ (ход юзера: reflexion проверяет, может ли ДОСТОВЕРНО ответить сам).
+    # reason/fast без надёжной базы знаний легко выдумывает → заземляем через инструменты.
+    mode = decision.mode
+    if mode in ("reason", "fast") and decision.grounding < GROUNDING_GATE:
+        print(f"[Reflexion] grounding {decision.grounding:.0%} < {GROUNDING_GATE:.0%}: "
+              f"{mode}→deliberate (нет надёжной базы — заземляюсь, не гадаю)")
+        mode = "deliberate"
+
     # Средняя неоднозначность на путях с инструментами → не гадать молча, а собрать
     # батч уточнений ПЕРЕД исполнением (clarify_gate). Низкая — пропускаем (нулевая цена).
     soft = CLARIFY_SOFT_GATE <= decision.ambiguity < AMBIGUITY_GATE
-    return {"mode": decision.mode, "needs_clarify_gate": soft}
+    return {"mode": mode, "needs_clarify_gate": soft}
 
 
 async def fast_answer_node(state: GeneralGraphState) -> dict:
@@ -560,8 +599,14 @@ def _existing_stashes() -> str:
 
 
 async def skill_selector_node(state: GeneralGraphState) -> dict:
-    """Выбирает релевантные навыки из реестра."""
-    available = get_skills_for_prompt.invoke({})
+    """Выбирает релевантные навыки из реестра (ToolSearch при большой библиотеке)."""
+    # ToolSearch: при росте библиотеки селектор не захлёбывается полным списком —
+    # ему отдаётся BM25-retrieval топ-релевантных навыков под запрос (иначе все).
+    try:
+        available = get_relevant_skills_for_prompt(state["query"])
+    except Exception as e:  # noqa: BLE001 — ToolSearch не должен ронять прогон
+        print(f"[ToolSearch] retrieval сбой ({type(e).__name__}) → пустой список навыков")
+        available = ""
 
     # Crash-safe: парс-сбой → пустой выбор (capability_research добавит web_search).
     try:
@@ -586,33 +631,29 @@ async def capability_research_node(state: GeneralGraphState) -> dict:
     инструментами по найденному способу. Создание навыка — крайняя мера.
     """
     selected = list(state.get("selected_skills", []))
-    # Если навык под задачу выбран (в т.ч. device_control/app_control) — НЕ лезем в веб.
-    if selected:
+    # ПЕРВОКЛАССНАЯ ДЕТЕКЦИЯ ПРОБЕЛА. Сигнал «способность есть» = подобран СПЕЦИАЛИЗИРОВАННЫЙ
+    # локальный навык (device_control/app_control/stash/…). web_search — catch-all fallback:
+    # его наличие НЕ значит, что у агента есть нужная способность. Раньше «выбран хоть один
+    # навык» (а селектор почти всегда хватал web_search) глушило discovery → само-расширение
+    # не срабатывало ПОЧТИ НИКОГДА. Теперь пробел = нет специализированного навыка → агент
+    # активно ищет недостающую способность (MCP-реестр) ВСЕГДА, а не как зарытый last-resort.
+    specialized = [s for s in selected if s != "web_search"]
+    if specialized:
         return {"selected_skills": selected, "capability_gap": False, "capability_hint": "Навык под задачу есть."}
 
-    # Реальный пробел (ничего не подошло) — только тогда подключаем поиск и ищем способ.
-    selected = ["web_search"]
+    # Пробел: специализированной способности нет → веб-поиск способа + поиск готового MCP.
+    if "web_search" not in selected:
+        selected.append("web_search")
     gap = True
 
-    # Реальный пробел: гуглим «как это делается» — но ОГРАНИЧЕННО по времени (синхронный
-    # веб-поиск мог висеть 60-120с и упирать прогон в таймаут, eval ловил это на загадке).
+    # Раньше тут был синхронный «как сделать»-веб-поиск (до 30с) с впрыском 1200 символов
+    # в контекст — это И тормозило (×каждый research-таск), И РАЗДУВАЛО контекст. Убрано:
+    # у исполнителя есть web_search + deep_research (дисциплинированный multi-hop с
+    # верификацией) — он сам найдёт и проверит факты. Подсказка — лёгкая, без веб-вызова.
     query = state["query"]
-    parts = []
-    try:
-        tools = {t.name: t for t in get_all_loaded_skill_tools(["web_search"])}
-        search = tools.get("search_web")
-        if search:
-            how = await asyncio.wait_for(
-                asyncio.to_thread(search.invoke, {"query": f"как сделать: {query[:120]}", "max_results": 3}),
-                timeout=CAP_RESEARCH_TIMEOUT,
-            )
-            parts.append("[Как это делается — из поиска]\n" + str(how)[:1200])
-    except asyncio.TimeoutError:
-        parts.append("(поиск способа прерван по таймауту — собери из общих инструментов)")
-    except Exception as e:  # noqa: BLE001
-        parts.append(f"(поиск способа не удался: {e})")
-
-    hint = "\n\n".join(parts) or "Готового способа не нашёл — собери из общих инструментов."
+    hint = ("Готового специализированного навыка нет. Для фактов из веба используй "
+            "deep_research (многошаговый поиск с проверкой) или web_search+browse; "
+            "остальное собери из общих инструментов.")
 
     # MCP: сначала доверенный каталог (авто-подключение), иначе discovery в реестре.
     mcp_servers: list[str] = []
@@ -621,14 +662,30 @@ async def capability_research_node(state: GeneralGraphState) -> dict:
         mcp_servers = [trusted]
         hint = f"[Доверенный MCP: {trusted} — инструменты будут доступны]\n\n" + hint
     else:
-        cand = discover_mcp(query, limit=config.get("mcp", {}).get("discover_limit", 8))
-        if cand:
-            auto = config.get("mcp", {}).get("auto_trust_discovered", False)
-            if auto:
-                top = cand[0]
-                approve_server(top["name"], top["spec"])
-                mcp_servers = [top["name"]]
-                hint = f"[Найден и авто-подключён MCP: {top['name']} ({top['package']})]\n\n" + hint
+        auto = UNLEASH or config.get("mcp", {}).get("auto_trust_discovered", False)
+        if auto:
+            # САМО-РАСШИРЕНИЕ К ДАННЫМ: discover → подключаемся к ПЕРВОМУ ЖИВОМУ из нескольких
+            # кандидатов (реестр полон мёртвых; remote-first, без uvx). Доказано: movie-MCP
+            # pipeworx даёт 34 тула. Это реальный доступ к структурным данным под задачу.
+            try:
+                name, mtools = await asyncio.wait_for(try_connect_discovered(query, max_try=3), timeout=45)
+            except Exception:  # noqa: BLE001
+                name, mtools = None, []
+            if name:
+                mcp_servers = [name]
+                hint = f"[Подключён ЖИВОЙ MCP под задачу: {name} ({len(mtools)} инструментов)]\n\n" + hint
+            else:
+                hint = "[MCP под задачу не нашёл живого сервера — решай общими инструментами]\n\n" + hint
+        else:
+            try:
+                cand = await asyncio.wait_for(
+                    asyncio.to_thread(discover_mcp, query, config.get("mcp", {}).get("discover_limit", 8)),
+                    timeout=8)
+            except Exception:  # noqa: BLE001
+                cand = []
+            if cand:  # без auto-trust — только предлагаем (human-gate)
+                lst = "; ".join(f"{c['name']}" for c in cand[:4])
+                hint = f"[Найдены MCP под задачу (нужно подтверждение): {lst}]\n\n" + hint
             else:
                 lst = "; ".join(f"{c['name']} ({c['package']})" for c in cand[:4])
                 hint = (f"[Найдены MCP-серверы под задачу (нужно подтверждение пользователя для подключения): "
@@ -731,6 +788,7 @@ def _compress_tools(tools: list, cap: int = TOOL_OUTPUT_CAP) -> list:
         async def _run(__t=t, **kwargs):
             r = await __t.ainvoke(kwargs)
             s = r if isinstance(r, str) else str(r)
+            s, _flag = sanitize_tool_output(s, source=__t.name)  # обезвредить инъекции в выводе
             return s if len(s) <= cap else s[:cap] + f"\n…(обрезано, всего {len(s)} симв.)"
         wrapped.append(StructuredTool(
             name=t.name, description=t.description, args_schema=t.args_schema, coroutine=_run,
@@ -773,13 +831,37 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float) -> 
             except Exception as e:  # noqa: BLE001
                 out = f"(ошибка инструмента: {type(e).__name__}: {e})"
         s = out if isinstance(out, str) else str(out)
+        s, _flag = sanitize_tool_output(s, source=tc.get("name", "инструмент"))  # анти-инъекция
         msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
     final = await asyncio.wait_for(code_llm.ainvoke(msgs), timeout=deadline)
     return (final.content if hasattr(final, "content") else str(final)), msgs + [final]
 
 
 async def _exec_research(system: str, goal: str, tools: list, deadline: float) -> tuple[str, list]:
-    """research-шаг: итеративная работа с инструментами — ограниченный ReAct + СЖАТЫЕ тулы."""
+    """
+    research-шаг. Для ВЕБ-шагов сначала ДИСЦИПЛИНИРОВАННЫЙ agentic_research (план под-вопросов
+    → поиск+чтение нашим экстрактом → ВЕРИФИКАЦИЯ факта → синтез) — на multi-hop он надёжнее
+    наивного ReAct (живой тест: даёт верный ответ там, где ReAct пасовал). Фолбэк — ReAct.
+    """
+    names = {t.name for t in tools}
+    # Веб-research-шаг = есть deep_research ИЛИ любой поисковый тул → идём дисциплинированным
+    # agentic_research (а не наивным ReAct), независимо от того, какой именно веб-навык выбран.
+    if "deep_research" in names or any("search" in n for n in names):
+        try:
+            # agentic_research САМ укладывается в deadline (возвращает частичное) — поэтому
+            # НЕ нужен ReAct-фолбэк по таймауту (он давал удвоение времени). Жёсткий wait_for —
+            # лишь страховка от зависшего browse. max_subq по запасу времени.
+            max_subq = 4 if deadline >= 80 else (3 if deadline >= 50 else 2)
+            res = await asyncio.wait_for(
+                agentic_research(goal, max_subq=max_subq, deadline=deadline * 0.9),
+                timeout=deadline)
+            if res.get("answer", "").strip():
+                return res["answer"], []
+        except asyncio.TimeoutError:
+            pass  # страховка сработала → ReAct соберёт что сможет
+        except Exception:  # noqa: BLE001
+            pass
+
     agent = create_agent(code_llm, _compress_tools(tools), system_prompt=system)
     result = await asyncio.wait_for(
         agent.ainvoke({"messages": [("human", goal)]}, config={"recursion_limit": STEP_ITER_LIMIT}),
@@ -816,6 +898,26 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     for sa in get_subagent_tools():
         tools.append(sa)
         subagent_names.append(sa.name)
+
+    # Память-как-TOOL: агент САМ решает подтянуть память/восстановить полную историю
+    # (drill-back), а не только получать авто-впрыск. Привязаны к user_id прогона.
+    tools.extend(make_memory_tools(memory_store, state.get("user_id") or "default"))
+
+    # Вычислительный слой: точные расчёты/агрегация над найденными данными (LLM-арифметика
+    # ненадёжна). Доступен всегда — вычисления универсальны для любой задачи.
+    tools.append(make_compute_tool())
+    # Vision-чтение фигур в PDF — ТОЛЬКО когда в задаче реально есть PDF (анти-bloat
+    # контекста: не вешать на каждый шаг тул, который без файла бесполезен).
+    _ctx = (state.get("query", "") + " " + state.get("memory_context", "")).lower()
+    if ".pdf" in _ctx or "приложенный файл" in _ctx:
+        tools.append(make_pdf_vision_tool())
+
+    # Deep research: дисциплинированный многошаговый поиск с верификацией фактов — для
+    # сложных цепочек (найти→отфильтровать→сопоставить), где наивный поиск пасует.
+    # Подцепляем при ЛЮБОМ веб-навыке (web_search, web_search_pro, link_parser…), не только
+    # core «web_search» — иначе селектор, выбрав самосозданный дубль, лишал агента research-слоя.
+    if any(("search" in s or "web" in s or "link" in s) for s in selected):
+        tools.append(make_deep_research_tool())
 
     # Догон-уточнение: исполнитель может спросить пользователя, упёршись в развилку.
     tools.append(clarify.make_ask_user_tool())
@@ -867,13 +969,21 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # страховка от зависания; но основную экономию даёт сам выбор lean-пути для direct/compose.
     kind = step.get("kind", "research")
     refused = False
-    step_deadline = max(15.0, MAX_RUN_SECONDS - runbudget.elapsed())
+    # Веб-фактосбор → ВСЕГДА дисциплинированный agentic research, даже если decompose
+    # пометил 'direct'. Признак — поисковый/deep_research тул.
+    _names = {t.name for t in tools}
+    _is_web = ("deep_research" in _names) or any("search" in n for n in _names)
+    # Дедлайн шага: остаток бюджета, НО не больше потолка. Веб-research НЕ ретраится и
+    # сам ограничен по времени → даём ему БОЛЬШЕ (полный multi-hop: 3-4 под-вопроса),
+    # обычным шагам — STEP_DEADLINE_CAP (анти-монополия). Wall-clock всё равно общий потолок.
+    _cap = RESEARCH_STEP_DEADLINE if _is_web else STEP_DEADLINE_CAP
+    step_deadline = min(_cap, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
     try:
-        if kind == "compose" or not tools:
+        if (kind == "compose" or not tools) and not _is_web:
             output, msgs = await _exec_compose(system, step["goal"], step_deadline)
-        elif kind == "direct":
+        elif kind == "direct" and not _is_web:
             output, msgs = await _exec_direct(system, step["goal"], tools, step_deadline)
-        else:  # research — ограниченный ReAct со сжатыми тулами
+        else:  # research, ИЛИ любой веб-шаг → agentic research (план→верификация→синтез)
             output, msgs = await _exec_research(system, step["goal"], tools, step_deadline)
         # Маркер отказа живёт в TOOL-сообщении, а финальное его перефразирует —
         # ищем по ВСЕЙ цепочке сообщений шага.
@@ -899,7 +1009,10 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     blocked = refused or REFUSAL_MARK in output
     retries = state.get("step_retries", 0)
     executed = state.get("steps_executed", 0) + 1  # глобальный счётчик исполнений шага
-    if not passed and not blocked and retries < MAX_SUBTASK_RETRIES:
+    # ВЕБ-research НЕ ретраим: agentic_research уже верифицировал факты ВНУТРИ (план→поиск→
+    # проверка), повтор лишь жжёт бюджет/время (eval ловил 9× исполнений = 164с). Ретраи —
+    # только для не-веб шагов, где повтор реально может исправить.
+    if not passed and not blocked and not _is_web and retries < MAX_SUBTASK_RETRIES:
         return {"step_retries": retries + 1, "step_feedback": note, "steps_executed": executed}
 
     # принимаем шаг (пройден / заблокирован пользователем / исчерпали ретраи) и идём дальше
@@ -913,6 +1026,7 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         "step_retries": 0,
         "step_feedback": "",
         "active_mcp_tools": mcp_names,
+        "web_research_used": _is_web or state.get("web_research_used", False),
         "user_blocked": state.get("user_blocked", False) or blocked,
         "steps_executed": executed,
     }
@@ -936,10 +1050,17 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         "step_results": results_text,
     })
     answer = (resp.content if hasattr(resp, "content") else str(resp)) or ""
-    # Guard от пустого финала: упасть на лучший результат шага, чем отдать пусто.
-    if not answer.strip():
-        answer = next((r["result"] for r in reversed(results) if (r.get("result") or "").strip()),
-                      "Не удалось собрать ответ из шагов.")
+    # Guard от пустого/протёкшего финала. НЕ отдаём сырой текст шага, если он похож на
+    # ПЛАН/ПРОЦЕСС («[Шаг N]…», «Navigate to…», «Найти/Открыть…») — это не ответ
+    # (AB вскрыл: финал = «[Шаг 3] Navigate to Zillow…»). Лучше честный отказ.
+    def _looks_like_process(t: str) -> bool:
+        t = (t or "").strip().lower()
+        return (t.startswith(("[шаг", "[step", "navigate", "search for", "go to")) or
+                t.startswith(("найти ", "найди ", "открыть ", "перейти", "шаг ")))
+    if not answer.strip() or _looks_like_process(answer):
+        best = next((r["result"] for r in reversed(results)
+                     if (r.get("result") or "").strip() and not _looks_like_process(r["result"])), "")
+        answer = best or "Не удалось определить ответ — доступные шаги не дали нужных данных."
     return {"final_answer": answer}
 
 
@@ -1076,9 +1197,14 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     # (кросс-юзерная генерализация). «Принят» = валидирован (conf>=LOW_CONF) И этот ход не
     # был реакцией на прошлый плохой ответ (нет негативного implicit feedback).
     reacted_negative = feedback_is_negative(state.get("implicit_feedback", "") or "")
+    # АНТИ-ОВЕРФИТ: в eval-режиме (AGENT_EVAL_MODE=1) НЕ пишем в ГЛОБАЛЬНЫЙ стор — иначе
+    # бенч-запросы (GAIA и пр.) протекают во few-shots всех юзеров. Персональный стор
+    # изолирован по user_id (gaia_N) → его пишем всегда.
+    eval_mode = os.getenv("AGENT_EVAL_MODE") == "1"
     if mode in ("deliberate", "heavy") and confidence >= LOW_CONF and answer and not reacted_negative:
         try:
-            add_fewshot("step_execution", query, answer, confidence)            # глобальный
+            if not eval_mode:
+                add_fewshot("step_execution", query, answer, confidence)        # глобальный
             add_user_fewshot(user_id, "step_execution", query, answer, confidence)  # персональный
         except Exception:  # noqa: BLE001
             pass
@@ -1089,7 +1215,8 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     if outcome == "ok" and not reacted_negative and query:
         try:
             score = confidence if confidence > 0 else 0.5
-            add_fewshot("reflexion", query, mode, score)
+            if not eval_mode:
+                add_fewshot("reflexion", query, mode, score)
             add_user_fewshot(user_id, "reflexion", query, mode, score)
         except Exception:  # noqa: BLE001
             pass
@@ -1191,8 +1318,10 @@ async def reflect_node(state: GeneralGraphState) -> dict:
             except Exception as e:  # noqa: BLE001
                 if dbg:
                     print(f"[Reflect-bg] maintenance failed: {e}")
+        declining = trend["trend"] == "declining"
         try:
-            maybe_auto_improve(memory_store, degrading=(trend["trend"] == "declining"))
+            maybe_auto_improve(memory_store, degrading=declining)            # глобальный backward
+            maybe_improve_user(memory_store, user_id, degrading=declining)  # PER-USER backward (сердце)
         except Exception as e:  # noqa: BLE001
             if dbg:
                 print(f"[Reflect-bg] auto-improve failed: {e}")
@@ -1279,7 +1408,12 @@ def route_after_validation(state: GeneralGraphState) -> str:
     # Бюджет/время исчерпаны → не перезапускаем весь пайплайн (ретрай дороже всего), принимаем как есть.
     if runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
         return "reflect"
-    if (invalid or conf < RETRY_CONF) and state.get("global_retries", 0) < MAX_GLOBAL_RETRIES:
+    # Веб-research уже верифицировал факты ВНУТРИ (план→поиск→проверка) и НЕ ретраился
+    # по-шагово — полный ретрай его лишь жжёт бюджет (eval ловил 4× исполнения/140с) ради
+    # маржинального прироста. Поэтому при использованном research ретраим ТОЛЬКО реально
+    # невалидный ответ, не «низкую уверенность валидатора».
+    retry_on_lowconf = (conf < RETRY_CONF) and not state.get("web_research_used", False)
+    if (invalid or retry_on_lowconf) and state.get("global_retries", 0) < MAX_GLOBAL_RETRIES:
         return "router"
     return "reflect"
 

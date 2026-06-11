@@ -20,11 +20,35 @@ from langchain_core.tools import tool
 
 _BROWSE_HARD_TIMEOUT = 35  # сек: жёсткий потолок одного браузерного чтения (анти-зависание)
 
+
+def _run_bounded(fn, *args, timeout):
+    """
+    Sync fn в отдельном потоке с ЖЁСТКИМ таймаутом, БЕЗ ожидания зависшего потока.
+    КРИТИЧНО: раньше использовался `with ThreadPoolExecutor() as ex:` — его __exit__ зовёт
+    shutdown(wait=True) и БЛОКИРУЕТ прогон НАВСЕГДА, если поток залип на Chromium (sync
+    Playwright). result(timeout) бросал таймаут, а shutdown всё равно ждал → дедлок всего
+    агента (event loop idle, asyncio-executor исчерпан). shutdown(wait=False) — бросаем поток.
+    """
+    from concurrent.futures import ThreadPoolExecutor as _TPE
+    ex = _TPE(max_workers=1)
+    fut = ex.submit(fn, *args)
+    try:
+        return fut.result(timeout=timeout)
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
+
 try:
     from cloakbrowser import launch
 
     _CLOAK = True
 except Exception:  # noqa: BLE001
+    _CLOAK = False
+
+# cloakbrowser спавнит Chromium-подпроцессы, которые накапливаются/виснут (leaked semaphores,
+# asyncio _do_waitpid) и давали 240с-таймауты в eval (гарантированные 0 на L2/L3, $0.0011 =
+# блокировка в sync, не работа). В eval/без-браузер режиме отключаем cloak полностью —
+# SearXNG/urllib дают факты без Chromium. AGENT_NO_BROWSER=1 — то же для прода при желании.
+if os.getenv("AGENT_EVAL_MODE") == "1" or os.getenv("AGENT_NO_BROWSER") == "1":
     _CLOAK = False
 
 # SearXNG — приватный self-host метапоиск ($0 API, свежесть через time_range,
@@ -111,22 +135,35 @@ def _search_cloak(query: str, max_results: int, recency: str = "") -> list[dict]
 
 
 def _search_fallback(query: str, max_results: int, recency: str = "") -> list[dict]:
-    """urllib-фолбэк через html.duckduckgo.com (без браузера)."""
+    """
+    urllib-фолбэк через DuckDuckGo html (без браузера). ВАЖНО: GET (?q=) теперь БЛОКИРУЕТСЯ
+    антиботом DDG (отдаёт пустую страницу) — используем POST (form data), он работает и
+    возвращает результаты. Это надёжный поиск БЕЗ cloak/Chromium, не зависит от флакающего
+    SearXNG (раньше при падении SearXNG поиск отдавал 0 → research не стартовал).
+    """
+    data = urllib.parse.urlencode({"q": query}).encode()
     req = urllib.request.Request(
-        "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(query) + _freshness(recency),
+        "https://html.duckduckgo.com/html/", data=data,
         headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"},
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
         html = resp.read().decode("utf-8", "ignore")
     out = []
-    for m in re.finditer(r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, re.S):
-        out.append({
-            "title": _clean(re.sub("<[^>]+>", "", m.group(2))),
-            "url": _ddg_redirect(m.group(1)),
-            "snippet": "",
-        })
+    # Основной паттерн результата DDG.
+    for m in re.finditer(r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', html, re.S):
+        out.append({"title": _clean(re.sub("<[^>]+>", "", m.group(2))),
+                    "url": _ddg_redirect(m.group(1)), "snippet": ""})
         if len(out) >= max_results:
             break
+    if not out:  # фолбэк: прямые внешние ссылки (разметка DDG могла измениться)
+        seen = set()
+        for u in re.findall(r'href="(https?://[^"]+)"', html):
+            if "duckduckgo.com" in u or u in seen:
+                continue
+            seen.add(u)
+            out.append({"title": "", "url": u, "snippet": ""})
+            if len(out) >= max_results:
+                break
     return out
 
 
@@ -168,9 +205,8 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
             except Exception:  # noqa: BLE001
                 results = []
             if not results and _CLOAK:
-                # cloak-поиск тоже в потоке с жёстким таймаутом (sync-Playwright может зависнуть)
-                with ThreadPoolExecutor(max_workers=1) as ex:
-                    results = ex.submit(_search_cloak, query, max_results, recency).result(timeout=_BROWSE_HARD_TIMEOUT)
+                # cloak-поиск в потоке с жёстким таймаутом БЕЗ ожидания зависшего потока (дедлок)
+                results = _run_bounded(_search_cloak, query, max_results, recency, timeout=_BROWSE_HARD_TIMEOUT)
                 engine = "cloakbrowser"
         if not results:
             return f"Ничего не найдено по запросу: {query}"
@@ -187,36 +223,131 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
             return f"Ошибка поиска: {e}; fallback: {e2}"
 
 
-def _relevant_chunks(text: str, find: str, budget: int = 3500) -> str:
-    """
-    Прицельная выжимка: режем текст на абзацы, ранжируем по пересечению с запросом
-    (token-overlap, без LLM — дёшево) и собираем самые релевантные в пределах budget.
-    Так агент получает ИМЕННО нужный факт, а не 50к символов шума.
-    """
+# ── Контекстный инжиниринг ПОИСКА: полную страницу НИКОГДА не кормим агенту ──────
+# Пайплайн (grounded в исследовании, см. CLAUDE.md): чистка (trafilatura) → чанкинг →
+# BM25S (лексический отсев, до 500× быстрее rank_bm25) → vector-rerank (OpenRouter
+# embeddings, только топ-кандидатов = дёшево) → сборка в пределах budget. Каждый слой
+# с graceful-фолбэком: нет bm25s → token-overlap; нет ключа эмбеддингов → только BM25S.
+try:
+    import bm25s
+    _BM25 = True
+except Exception:  # noqa: BLE001
+    _BM25 = False
+
+_CHUNK_CANDIDATES = 20   # сколько топ-чанков отдаём из BM25S на vector-rerank
+
+
+def _chunk(text: str, target: int = 500) -> list[str]:
+    """Связные куски ~target символов по границам абзацев/предложений."""
+    chunks: list[str] = []
+    for p in (p.strip() for p in re.split(r"\n{2,}", text) if len(p.strip()) > 30):
+        if len(p) <= target * 2:
+            chunks.append(p)
+            continue
+        buf = ""
+        for s in re.split(r"(?<=[.!?])\s+", p):
+            if len(buf) + len(s) > target and buf:
+                chunks.append(buf.strip())
+                buf = s
+            else:
+                buf = f"{buf} {s}" if buf else s
+        if buf.strip():
+            chunks.append(buf.strip())
+    return chunks or ([text[:target]] if text else [])
+
+
+def _token_overlap_top(chunks: list[str], find: str, top: int) -> list[int]:
+    """Фолбэк-ранкер (без BM25S): пересечение токенов + бонус за числа."""
     qtokens = {w for w in re.findall(r"\w+", find.lower()) if len(w) > 2}
-    if not qtokens:
-        return text[:budget]
-    chunks = [c.strip() for c in re.split(r"\n{2,}|\. (?=[A-ZА-Я])", text) if len(c.strip()) > 30]
     scored = []
     for i, c in enumerate(chunks):
         ctokens = set(re.findall(r"\w+", c.lower()))
         overlap = len(qtokens & ctokens)
         if overlap:
-            # бонус за плотность совпадений и за наличие чисел (факты часто числовые)
             density = overlap / (1 + len(ctokens) ** 0.5)
-            num_bonus = 0.5 if re.search(r"\d", c) else 0
-            scored.append((overlap + density + num_bonus, i, c))
+            scored.append((overlap + density + (0.5 if re.search(r"\d", c) else 0), i))
     scored.sort(reverse=True)
-    out, used = [], 0
-    for _, i, c in scored:
-        if used + len(c) > budget:
+    return [i for _, i in scored[:top]] or list(range(min(top, len(chunks))))
+
+
+def _bm25_top(chunks: list[str], find: str, top: int) -> list[int]:
+    """
+    Лексический отсев BM25S → индексы РЕЛЕВАНТНЫХ кандидатов (score>0), в порядке ранга.
+    Языко-агностичная токенизация (stopwords/stemmer off) — корректно для рус/смешанного.
+    Нулевые кандидаты НЕ возвращаем, иначе бы они забивали budget шумом. Фолбэк — token-overlap.
+    """
+    if not _BM25:
+        return _token_overlap_top(chunks, find, top)
+    try:
+        tok = dict(stopwords=None, stemmer=None, show_progress=False)
+        retr = bm25s.BM25()
+        retr.index(bm25s.tokenize(chunks, **tok), show_progress=False)
+        results, scores = retr.retrieve(bm25s.tokenize(find, **tok),
+                                        k=min(top, len(chunks)), show_progress=False)
+        idx = [int(i) for i, sc in zip(results[0], scores[0]) if sc > 0]
+        return idx or _token_overlap_top(chunks, find, top)
+    except Exception:  # noqa: BLE001
+        return _token_overlap_top(chunks, find, top)
+
+
+def _embed_batch(texts: list[str]) -> list | None:
+    """Батч-эмбеддинги через OpenRouter (openai/text-embedding-3-small) — один вызов."""
+    key = os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not key:
+        return None
+    try:
+        from openai import OpenAI
+        if os.getenv("OPEN_ROUTER_API_KEY"):
+            client = OpenAI(api_key=key, base_url="https://openrouter.ai/api/v1", timeout=10, max_retries=0)
+            model = "openai/text-embedding-3-small"
+        else:
+            client, model = OpenAI(api_key=key, timeout=10, max_retries=0), "text-embedding-3-small"
+        resp = client.embeddings.create(model=model, input=[t[:4000] for t in texts])
+        return [d.embedding for d in resp.data]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    na = sum(x * x for x in a) ** 0.5
+    nb = sum(y * y for y in b) ** 0.5
+    return dot / (na * nb) if na and nb else 0.0
+
+
+def _relevant_chunks(text: str, find: str, budget: int = 3500) -> str:
+    """
+    Прицельная выжимка БЕЗ скармливания всей страницы: чанкинг → BM25S → vector-rerank →
+    сборка в budget. В контекст агента попадают граммы релевантного, не килобайты шума.
+    """
+    if not find:
+        return text[:budget]
+    chunks = _chunk(text)
+    if len(chunks) <= 1:
+        return text[:budget]
+    # 1) лексический отсев → кандидаты
+    cand_idx = _bm25_top(chunks, find, _CHUNK_CANDIDATES)
+    cand = [chunks[i] for i in cand_idx]
+    # 2) семантический ре-ранк кандидатов (только их → дёшево); фолбэк — порядок BM25S
+    order = list(range(len(cand)))
+    vecs = _embed_batch([find] + cand)
+    if vecs and len(vecs) == len(cand) + 1:
+        sims = sorted(((_cosine(vecs[0], vecs[i + 1]), i) for i in range(len(cand))), reverse=True)
+        order = [i for _, i in sims]
+    # 3) собираем в пределах budget, возвращаем в порядке исходного текста (связность)
+    picked, used = [], 0
+    for oi in order:
+        c = cand[oi]
+        if used + len(c) > budget and picked:
             continue
-        out.append((i, c))
+        picked.append((cand_idx[oi], c))
         used += len(c) + 2
         if used >= budget:
             break
-    out.sort()  # вернуть в исходном порядке (связность)
-    return "\n\n".join(c for _, c in out) if out else text[:budget]
+    picked.sort()
+    return "\n\n".join(c for _, c in picked) if picked else text[:budget]
 
 
 def _page_text_urllib(url: str) -> tuple[str, str]:
@@ -224,6 +355,16 @@ def _page_text_urllib(url: str) -> tuple[str, str]:
     with urllib.request.urlopen(req, timeout=20) as resp:
         html = resp.read().decode("utf-8", "ignore")
     title = _clean((re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I) or [None, ""])[1])
+    # ЧИСТКА: trafilatura извлекает основной текст (убирает меню/футер/скрипты/реклама),
+    # отдаёт читаемый контент с таблицами — намного чище наивного strip-тегов.
+    try:
+        import trafilatura
+        extracted = trafilatura.extract(html, include_comments=False, include_tables=True,
+                                         favor_recall=True)
+        if extracted and len(extracted) > 100:
+            return title, _clean(extracted)
+    except Exception:  # noqa: BLE001
+        pass
     body = re.sub(r"<(script|style|nav|footer|header)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I)
     return title, _clean(re.sub("<[^>]+>", " ", body))
 
@@ -240,22 +381,32 @@ def _page_text_cloak(url: str) -> tuple[str, str]:
         browser.close()
 
 
+_FAST_ENOUGH = 600  # символов чистого текста с urllib-пути достаточно → не будим браузер
+
+
 def _page_text(url: str) -> tuple[str, str]:
     """
-    (title, ПОЛНЫЙ чистый текст). cloakbrowser в ОТДЕЛЬНОМ ПОТОКЕ с жёстким таймаутом:
-    sync-Playwright может ЗАВИСНУТЬ и заблокировать event loop так, что внешний
-    asyncio.wait_for его не отменит (eval ловил прогоны на 240с). future.result(timeout)
-    даёт нам «бросить» зависший браузер и уйти на urllib, не дожидаясь его.
+    (title, чистый текст). БЫСТРЫЙ ПУТЬ ПЕРВЫМ: urllib + trafilatura (~0.8с, чистый текст
+    с таблицами). cloakbrowser (Chromium, 2–35с, sync-Playwright МОЖЕТ ЗАВИСНУТЬ и
+    заблокировать event loop) — ТОЛЬКО фолбэк, когда быстрый путь дал мало (бот-стена,
+    JS-рендер). Раньше cloak шёл первым → лишние секунды и риск 35с-зависания на КАЖДОЙ
+    странице. Браузер запускаем в отдельном потоке с жёстким таймаутом (можно «бросить»).
     """
+    try:
+        title, text = _page_text_urllib(url)
+    except Exception:  # noqa: BLE001
+        title, text = "", ""
+    if len(text) >= _FAST_ENOUGH:
+        return title, text
+    # мало текста → вероятно бот-стена/JS → пробуем браузер (ограниченно по времени)
     if _CLOAK:
         try:
-            with ThreadPoolExecutor(max_workers=1) as ex:
-                title, text = ex.submit(_page_text_cloak, url).result(timeout=_BROWSE_HARD_TIMEOUT)
-            if text:
-                return title, text
-        except Exception:  # noqa: BLE001 — таймаут/сбой браузера → простой ридер
+            c_title, c_text = _run_bounded(_page_text_cloak, url, timeout=_BROWSE_HARD_TIMEOUT)
+            if len(c_text) > len(text):
+                return c_title or title, c_text
+        except Exception:  # noqa: BLE001 — таймаут/сбой браузера → что есть с urllib
             pass
-    return _page_text_urllib(url)
+    return title, text
 
 
 @tool

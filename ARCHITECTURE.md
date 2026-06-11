@@ -35,12 +35,13 @@ START
 
 | Слой | Файлы | Суть |
 |---|---|---|
-| Когниция / мета-контроль | `agent.py` (goal/reflexion/reason/decompose/step/synthesize ноды) | 4 типа мышления (fast/reason/deliberate/clarify), целеполагание, декомпозиция, по-пунктовое исполнение |
-| Память | `memory/store.py` (SQLite), `embedder.py`, `vector_index.py` (TurboVec), `feedback.py` | эпизоды/факты(+тэги)/выводы/цели/саммари + граф-рёбра; recall recency+relevance+importance с бюджетом; implicit feedback |
-| Навыки | `tools/skill_creation.py`, `skills/*` | реестр, защита core-навыков, автосинк, динамическая загрузка; `web_search`(SearXNG→cloakbrowser), `device_control` |
-| Самообучение | `improve/` | forward-харвест few-shots; backward: дифф-credit-assignment по трейсу → per-node textual gradients → multi-node оптимизация промптов (TextGrad/Reflexion) → валидация → ParamStore |
+| Когниция / мета-контроль | `agent.py` (goal/reflexion/reason/decompose/step/synthesize ноды) | **5 типов мышления** (fast/reason/deliberate/heavy/clarify) + **reflexion-grounding** (оценка «могу ли достоверно ответить сам» → заземление, анти-галлюцинация); целеполагание, декомпозиция, по-пунктовое исполнение |
+| Память | `memory/store.py` (SQLite), `embedder.py`, `vector_index.py` (TurboVec), `feedback.py`, **`memory_tools.py`** | эпизоды/факты(+тэги)/выводы/цели/саммари + граф-рёбра; recall с бюджетом; implicit feedback. **Память-как-tool (3 яруса)**: глобальная (`search_memory`), drill-back полной истории (`recall_history`), временная runtime-scratch (`note_to_self`) — агент сам решает, что подтянуть |
+| Навыки | `tools/skill_creation.py`, `skills/*`, **`retrieval.py`** | реестр, защита core, автосинк; **ToolSearch** (BM25S-retrieval навыков при росте библиотеки); `web_search` с контекстным инжинирингом (trafilatura→чанки→BM25S→vector-rerank, полную страницу не кормит); `device_control` |
+| Способности-инструменты | **`research.py`** · **`compute.py`** · **`media.py`** · **`mcp_client.py`** | дисциплинированный **research** (план под-вопросов→поиск+сниппеты+чтение→ВЕРИФИКАЦИЯ факта→синтез, зависимая цепочка); **вычислительный слой** `python_exec` (точный счёт в песочнице — rlimits/kill); **vision-чтение фигур PDF** `read_pdf_figures` (рендер→vision, гейт по наличию PDF); **data-MCP само-расширение** `try_connect_discovered` (домен→discover→фильтр релевантности→первый ЖИВОЙ remote-MCP; movie/finance/weather подключаются живьём) |
+| Самообучение | `improve/` | forward-харвест few-shots (глоб+**пер-юзер**, двухъярусно с baseline); backward: дифф-credit-assignment → per-node gradients → оптимизация промптов; **per-user backward** (`graph_backward_user`: уроки из неудач юзера → его few-shots); **измеримый accept/revert** (прогон ДО/ПОСЛЕ на кейсах) → ParamStore |
 | Трейсинг/диагностика | `tracing/` | спаны по нодам (data/traces.db), самодиагностика, ротация |
-| Безопасность | `utils_validation.py` (AST-гейт), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop) | генерируемый код: AST-запреты на записи + smoke в изолированном процессе (rlimits/kill); side-effect тулы — подтверждение человеком, deny by default без канала |
+| Безопасность | `utils_validation.py` (AST-гейт), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | генерируемый код: AST-запреты + smoke в изолированном процессе (rlimits/kill); side-effect тулы — подтверждение, deny by default; **анти-injection в выводах тулов/MCP/поиска** (`sanitize_tool_output`); запреты обучения (не менять архитектуру/промпты, не учиться на взломе) |
 | Внешнее | `external/context.py` | контекст A2A/MCP в состоянии (слот + плумбинг) |
 | Обслуживание | `maintenance/dep_update.py` | безопасный авто-апдейт зависимостей с health-check и откатом |
 | Интерфейсы | `main.py` (REPL), `bot.py` (Telegram), `server.py` (FastAPI) | общий граф + общая память |
@@ -57,7 +58,8 @@ START
 - **Backward** (`improve/graph_learn.py`):
   1. дифференциальная вина: `blame = failRate − successRate` (срабатывающие всегда ноды не виноваты);
   2. `_backward_gradients`: 1 LLM-вызов по батчу → текстовый «градиент» на каждую виноватую ноду;
-  3. `optimize_role` для КАЖДОЙ виноватой ноды её градиентом → проверка плейсхолдеров + LLM-судья → `ParamStore`.
+  3. `optimize_role` для КАЖДОЙ виноватой ноды → проверка плейсхолдеров + LLM-судья + **измеримый ДО/ПОСЛЕ** (прогон на кейсах неудач, сохраняем только при реальном улучшении, иначе откат) → `ParamStore`.
+- **Per-user backward** (`graph_backward_user`): из неудач КОНКРЕТНОГО юзера + того, КТО он (профиль/роли), синтезирует корректирующие УРОКИ → его персональные few-shots (ядро заморожено; пишет только в стор этого юзера). Триггер при per-user деградации. Это «оптимизация под пользователя» как метод.
 - **Реестр параметров** (`improve/prompt_store.py`, `data/params.json`): prompt-override + few-shots + описания тулов на ноду. Обратимо, revert одной командой, не трогает исходники.
 - **Политика оптимизации** (что backward вправе менять):
   - системные промпты КЛЮЧЕВЫХ нод (goal/reflexion/decompose/fast_answer/reason/step_executor/review/clarify_gate) — **ЗАМОРОЖЕНЫ** (это дизайн поведения; `improve.optimize_core_prompts: false`);
@@ -93,3 +95,5 @@ START
 - Syscall-песочница опциональна и зависит от наличия bwrap/firejail; полноценный gVisor/контейнер на каждый smoke — следующий уровень.
 - Работа с УЖЕ ОТКРЫТЫМИ окнами (keystroke/scroll/AX, phone/adb) — пока только macOS; кроссплатформенный UI-automation слой — дальше.
 - Оркестрация = выбор 1 из 5 фикс-путей (fast/reason/deliberate/heavy/clarify); свободная динамическая композиция когнитивных модулей — дальше.
+- **History-masking** длинного ReAct-контекста (старые наблюдения → заглушки) — отложено: историей сообщений владеет LangGraph `create_agent`, маскинг там = хрупкий хак. Сейчас: сжатие вывода тула (cap) + urllib-first чтение страниц.
+- **GraphRAG/LightRAG** для глобальной памяти (level-3 retrieval) — в очереди; сейчас recall recency+relevance+importance + TurboVec-ANN.

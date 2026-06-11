@@ -177,3 +177,72 @@ def graph_backward(memory_store: MemoryStore, min_batch: int = 6, accept: bool =
 # Обратная совместимость: batch_optimize == graph_backward.
 def batch_optimize(memory_store: MemoryStore, min_batch: int = 6, accept: bool = True) -> dict:
     return graph_backward(memory_store, min_batch=min_batch, accept=accept)
+
+
+def _user_blame(memory_store: MemoryStore, user_id: str, fails: list) -> dict:
+    """Вина нод на прогонах ИМЕННО этого пользователя (failRate − successRate)."""
+    sucs = memory_store.get_successes(n=40, user_id=user_id)
+
+    def rid(e):
+        return e["run_id"] if "run_id" in e.keys() else ""
+
+    fr = _node_rates(trace_store.nodes_for_runs([rid(f) for f in fails if rid(f)]))
+    sr = _node_rates(trace_store.nodes_for_runs([rid(s) for s in sucs if rid(s)]))
+    blame = {n: round(fr.get(n, 0.0) - sr.get(n, 0.0), 3) for n in OPTIMIZABLE}
+    blame = {n: v for n, v in blame.items() if v > 0}
+    return blame or {"step_executor": 1.0}
+
+
+def graph_backward_user(memory_store: MemoryStore, user_id: str, min_batch: int = 3,
+                        accept: bool = True, max_nodes: int = 3) -> dict:
+    """
+    PER-USER backward — СЕРДЦЕ «оптимизации под пользователя» (полезен ИМЕННО этому человеку).
+    Из НЕУДАЧ конкретного юзера + того, КТО он (профиль/роли), синтезирует корректирующие
+    УРОКИ и кладёт их как ПЕРСОНАЛЬНЫЕ few-shots для виноватых нод. Ядро НЕ трогаем
+    (системные промпты заморожены) — few-shots это разрешённый обратимый канал. Пишет ТОЛЬКО
+    в user_fewshots этого пользователя (изоляция). Безопасность: джейлбрейки исключены из батча.
+    """
+    import os as _os
+
+    from ..llm import chat, provider
+    from ..prompts import user_backward_prompt
+    from ..structured_outputs import UserLessons
+    from .prompt_store import add_user_fewshot
+    from .safety import is_unsafe_to_learn
+
+    if not user_id:
+        return {"status": "skipped", "reason": "нет user_id"}
+    if provider() == "openrouter" and not (_os.getenv("OPEN_ROUTER_API_KEY") or _os.getenv("OPENAI_API_KEY")):
+        return {"status": "error", "reason": "нет API-ключа"}
+
+    fails = [f for f in memory_store.get_failures(n=40, user_id=user_id) if not is_unsafe_to_learn(f["query"])]
+    if len(fails) < min_batch:
+        return {"status": "skipped", "reason": f"мало неудач у пользователя ({len(fails)}/{min_batch})"}
+
+    blame = _user_blame(memory_store, user_id, fails)
+    blamed = sorted(blame, key=blame.get, reverse=True)[:max_nodes]
+    profile = memory_store.format_profile(user_id) or "Профиль пуст."
+    failures = [
+        {"query": f["query"], "answer": f["answer"], "feedback": (f["feedback"] if "feedback" in f.keys() else "")}
+        for f in fails
+    ]
+    failures_text = _format_failure_chains(fails, failures)
+    catalog = "\n".join(f"- {n} ({OPTIMIZABLE[n]}): {NODE_DESC.get(n, '')}" for n in blamed)
+
+    chain = user_backward_prompt | chat("fast", 0).with_structured_output(UserLessons)
+    try:
+        lessons = chain.invoke({"profile": profile, "node_catalog": catalog,
+                                "blamed": ", ".join(blamed), "failures": failures_text}).lessons
+    except Exception as e:  # noqa: BLE001
+        return {"status": "failed", "reason": f"уроки не сгенерированы: {e}"}
+
+    stored = []
+    if accept:
+        for l in lessons:
+            if l.node in OPTIMIZABLE:
+                # урок → персональный few-shot нужной ноды (high score: приоритетнее общих)
+                add_user_fewshot(user_id, OPTIMIZABLE[l.node], l.trigger, l.lesson, score=0.9)
+                stored.append({"node": l.node, "trigger": l.trigger[:60]})
+    return {"status": "done", "user_id": user_id, "blame": blame, "blamed_nodes": blamed,
+            "batch_size": len(fails), "lessons_stored": stored,
+            "lessons": [{"node": l.node, "lesson": l.lesson[:120]} for l in lessons]}

@@ -29,6 +29,29 @@ from src.usage import TokenTracker, add_alltime, cost_of, load_alltime
 
 console = Console()
 
+# Ссылка на активный спиннер прогресса. Запрос ввода (HITL-подтверждение, уточнения)
+# ДОЛЖЕН останавливать спиннер: Rich Live владеет терминалом и затирает строку ввода,
+# из-за чего пользователь физически не может ответить (баг: подтверждение не проходило).
+_live_status = None
+
+
+async def _paused_input(prompt: str = "") -> str:
+    """Ввод с паузой спиннера прогресса (иначе Rich Live перебивает запрос → ввод не проходит)."""
+    st = _live_status
+    if st is not None:
+        try:
+            st.stop()
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        return await asyncio.to_thread(input, prompt)
+    finally:
+        if st is not None:
+            try:
+                st.start()
+            except Exception:  # noqa: BLE001
+                pass
+
 # Цвета режимов мышления (Self-Reflexion Choice).
 MODE_STYLE = {
     "fast": ("⚡ FAST", "bold green"),
@@ -253,13 +276,13 @@ async def _repl_clarify(items: list[dict]) -> list[str]:
             console.print(f"[bold]{i}. {q}[/]")
             for j, o in enumerate(opts, 1):
                 console.print(f"   [cyan]{j}[/]) {o}")
-            raw = (await asyncio.to_thread(input, "   выбор (номер или свой текст): ")).strip()
+            raw = (await _paused_input("   выбор (номер или свой текст): ")).strip()
             if raw.isdigit() and 1 <= int(raw) <= len(opts):
                 answers.append(opts[int(raw) - 1])
             else:
                 answers.append(raw)  # свой текст или пусто → допущение
         else:
-            raw = (await asyncio.to_thread(input, f"[{i}] {q}\n   ")).strip()
+            raw = (await _paused_input(f"[{i}] {q}\n   ")).strip()
             answers.append(raw)
     return answers
 
@@ -268,7 +291,7 @@ async def _repl_confirm(description: str) -> bool:
     """Human-in-the-loop: подтверждение side-effect действия прямо в терминале."""
     console.print(Panel(description, title="⚠️  Агент просит разрешение на действие",
                         border_style="red", expand=False))
-    ans = await asyncio.to_thread(input, "Разрешить? [y/N] ")
+    ans = await _paused_input("Разрешить? [y/N] ")  # пауза спиннера, иначе ввод не пройдёт
     return ans.strip().lower() in ("y", "yes", "да", "д")
 
 
@@ -329,7 +352,9 @@ async def main():
 
             pre_in, pre_out, pre_calls = tracker.snapshot()
             try:
+                global _live_status
                 with console.status("[cyan]Думаю…", spinner="dots") as status:
+                    _live_status = status  # чтобы HITL/уточнения могли поставить спиннер на паузу
                     full_query = await asyncio.to_thread(_augment_attachments, query)
 
                     def _show(label: str) -> None:
@@ -347,6 +372,8 @@ async def main():
             except Exception as e:  # noqa: BLE001
                 console.print(Panel(f"{type(e).__name__}: {e}", title="Ошибка", border_style="red"))
                 continue
+            finally:
+                _live_status = None
 
             answer = result.get("final_answer", "")
             chat_history += [{"role": "user", "content": query}, {"role": "assistant", "content": answer}]

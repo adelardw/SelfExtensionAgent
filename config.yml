@@ -17,7 +17,7 @@ ollama:
   #num_ctx: 16384              # ВАЖНО: промпты агента ~6–8k токенов → контекст ≥8k обязателен
 agent:
   max_create_retries: 2
-  max_global_retries: 2
+  max_global_retries: 1   # full-retry пере-запускает дорогой research → 1 ретрая хватает на реальный сбой
   low_confidence_threshold: 0.7
   max_subtask_retries: 2
   max_subtasks: 6
@@ -72,6 +72,8 @@ improve:
   auto: false
   optimizer: textgrad
   min_failures: 3
+  min_failures_user: 3   # порог неудач ОДНОГО юзера для per-user backward (оптимизация под него)
+  measure_before_after: true  # accept промпта только если внутренний прогон ДО/ПОСЛЕ показал улучшение
   idle_seconds: 900
   optimize_core_prompts: false  # системные промпты ключевых нод заморожены (политика);
                                 # backward правит только промпты саб-агентов-тулов + few-shots

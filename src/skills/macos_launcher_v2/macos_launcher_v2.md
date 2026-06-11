@@ -1,1 +1,0 @@
-Skill to launch macOS applications using subprocess.

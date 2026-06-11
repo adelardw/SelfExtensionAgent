@@ -10,6 +10,7 @@ CATALOG — каталог известных надёжных серверов,
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import urllib.parse
@@ -45,6 +46,7 @@ def suggest_server(query: str) -> Optional[str]:
 
 
 _tools_cache: dict[frozenset, list] = {}
+_MCP_CACHE_MAX = 8  # потолок кэша MCP-соединений (анти-накопление в долгой сессии)
 
 
 async def get_mcp_tools(servers: Optional[list[str]] = None) -> list:
@@ -64,9 +66,21 @@ async def get_mcp_tools(servers: Optional[list[str]] = None) -> list:
         return _tools_cache[key]
     try:
         client = MultiServerMCPClient(cfg)
-        tools = await client.get_tools()
+        # ЖЁСТКИЙ ТАЙМАУТ: get_tools() спавнит uvx (ставит пакет с pypi) и может ВИСНУТЬ
+        # на сети 100+ сек, упирая прогон в scenario-timeout (eval ловил 240с/$0.0003) и
+        # морозя CLI на локальных задачах. Не подключились за MCP_CONNECT_TIMEOUT — идём
+        # дальше общими инструментами, не ждём сеть.
+        import os as _os
+        timeout = float(_os.getenv("MCP_CONNECT_TIMEOUT", 20))
+        tools = await asyncio.wait_for(client.get_tools(), timeout=timeout)
+        # LRU-кап кэша: разные задачи → разные MCP → соединения копились бы безгранично.
+        if len(_tools_cache) >= _MCP_CACHE_MAX:
+            _tools_cache.pop(next(iter(_tools_cache)), None)  # выкидываем самый старый
         _tools_cache[key] = tools
         return tools
+    except asyncio.TimeoutError:
+        print(f"[mcp] connect timeout ({timeout:.0f}с) — иду дальше без MCP")
+        return []
     except Exception as e:  # noqa: BLE001
         print(f"[mcp] connect failed: {e}")
         return []
@@ -137,6 +151,58 @@ def approve_server(name: str, spec: dict) -> str:
     """Human-gate: явно одобрить найденный сервер → добавить в trusted (станет авто-подключаемым)."""
     TRUSTED_SERVERS[name] = spec
     return name
+
+
+async def _extract_domain(query: str) -> str:
+    """Дешёвый LLM-вызов: ОДНО главное слово домена данных под запрос (movies/weather/
+    geolocation/finance/…). Реестр MCP ищется по домену, а не по случайным словам запроса."""
+    from .llm import chat
+    try:
+        prompt = ("Какой ОДИН домен данных нужен, чтобы ответить? Верни РОВНО ОДНО английское "
+                  "слово-домен (movies, weather, geolocation, finance, books, sports…). Только слово.\n\n"
+                  f"Вопрос: {query[:300]}")
+        r = await asyncio.wait_for(chat("fast", 0).ainvoke(prompt), timeout=10)
+        w = re.findall(r"[A-Za-z]+", (r.content if hasattr(r, "content") else str(r)))
+        return w[0].lower() if w else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _relevance(c: dict, terms: set) -> int:
+    """Совпадение домена/запроса с именем+описанием кандидата (общий фильтр от мусора —
+    не подключать sales-MCP под вопрос о фильмах). Универсально, не под конкретный сценарий."""
+    text = (c.get("name", "") + " " + (c.get("description") or "")).lower()
+    return len(set(re.findall(r"[a-z]{3,}", text)) & terms)
+
+
+async def try_connect_discovered(query: str, max_try: int = 3) -> tuple[Optional[str], list]:
+    """
+    САМО-РАСШИРЕНИЕ К ДАННЫМ (общая способность, НЕ под бенч): извлечь ДОМЕН → discover →
+    отсеять НЕрелевантных кандидатов (по смыслу описания) → подключиться к первому ЖИВОМУ
+    РЕЛЕВАНТНОМУ (реестр полон мёртвых/мусорных). REMOTE приоритетнее uvx (без установки).
+    """
+    domain = await _extract_domain(query)
+    cand = await asyncio.wait_for(asyncio.to_thread(discover_mcp, domain or query, 8), timeout=10)
+    if not cand and domain:  # фолбэк на исходный запрос
+        cand = await asyncio.wait_for(asyncio.to_thread(discover_mcp, query, 8), timeout=10)
+    if not cand:
+        return None, []
+    # РЕЛЕВАНТНОСТЬ: только кандидаты, чьё описание реально про домен/запрос (отсев мусора).
+    terms = set(re.findall(r"[a-z]{3,}", (domain + " " + query).lower()))
+    scored = [(c, _relevance(c, terms)) for c in cand]
+    scored = [(c, r) for c, r in scored if r > 0] or scored  # если совпадений 0 — берём как есть
+    # сорт: релевантность ↓, затем remote-first (без uvx)
+    scored.sort(key=lambda cr: (-cr[1], 0 if cr[0]["spec"].get("transport") in ("streamable_http", "sse") else 1))
+    for c, _r in scored[:max_try]:
+        approve_server(c["name"], c["spec"])
+        try:
+            tools = await asyncio.wait_for(get_mcp_tools([c["name"]]), timeout=20)
+            if tools:
+                print(f"[mcp] self-extension: подключён ЖИВОЙ {c['name']} ({len(tools)} тулов)", flush=True)
+                return c["name"], tools
+        except Exception:  # noqa: BLE001
+            continue  # мёртвый/несовместимый → следующий кандидат
+    return None, []
 
 
 def propose_untrusted(name: str, spec: dict) -> dict:

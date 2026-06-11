@@ -1,5 +1,5 @@
-from .graph_learn import batch_optimize, credit_assignment, graph_backward
-from .pipe import SelfLearningPipe, maybe_auto_improve
+from .graph_learn import batch_optimize, credit_assignment, graph_backward, graph_backward_user
+from .pipe import SelfLearningPipe, maybe_auto_improve, maybe_improve_user
 from .prompt_store import (
     add_fewshot,
     format_fewshots,
@@ -12,8 +12,10 @@ from .prompt_store import (
 __all__ = [
     "SelfLearningPipe",
     "maybe_auto_improve",
+    "maybe_improve_user",
     "batch_optimize",
     "graph_backward",
+    "graph_backward_user",
     "credit_assignment",
     "get_prompt",
     "save_override",

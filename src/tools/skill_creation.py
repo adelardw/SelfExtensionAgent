@@ -432,6 +432,41 @@ def get_skills_for_prompt() -> str:
     return "\n\n---\n\n".join(sections)
 
 
+# Порог: пока навыков мало — показываем все (дёшево). При росте библиотеки селектор
+# захлёбывается полным списком → включаем ToolSearch (retrieval топ-релевантных).
+TOOLSEARCH_THRESHOLD = 12
+TOOLSEARCH_TOP = 8
+
+
+def get_relevant_skills_for_prompt(query: str, top: int = TOOLSEARCH_TOP) -> str:
+    """
+    ToolSearch: BM25-retrieval НАВЫКОВ по запросу (вместо показа ВСЕХ селектору). Масштабирует
+    выбор инструментов при росте библиотеки. Reuse канонического ранкера (src.retrieval).
+    Если навыков мало (< порога) или нет совпадений — фолбэк на полный список.
+    """
+    registry = _load_registry()
+    if not registry or len(registry) < TOOLSEARCH_THRESHOLD:
+        return get_skills_for_prompt.invoke({})  # это @tool, не функция
+
+    from ..retrieval import bm25_rank
+
+    names, docs, sections = [], [], []
+    for name, meta in registry.items():
+        md_file = SKILLS_DIR / name / f"{name}.md"
+        if not md_file.exists():
+            continue
+        content = md_file.read_text(encoding="utf-8")
+        status = "tools ready" if meta.get("has_tools") else "no tools yet"
+        names.append(name)
+        docs.append(f"{name} {content}")
+        sections.append(f"### Skill: {name} ({status})\n{content}")
+
+    idx = bm25_rank(docs, query, top)
+    if not idx:
+        return get_skills_for_prompt.invoke({})  # это @tool, не функция
+    return "\n\n---\n\n".join(sections[i] for i in idx)
+
+
 
 
 def get_skill_runtime_prompts(names: list[str]) -> str:

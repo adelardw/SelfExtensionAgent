@@ -99,8 +99,11 @@ def chat(role: str = "fast", temperature: float = 0.0):
     from .runbudget import callback
 
     base, key = _base_and_key()
+    # ЖЁСТКИЙ ТАЙМАУТ + мало ретраев: зависший API-вызов не должен морозить агента на
+    # дефолтные 600с × ретраи (это плодило «зомби на 0% CPU» в eval и фризы в проде).
     return ChatOpenAI(api_key=key or "x", base_url=base, model=model_for(role),
-                      temperature=temperature, callbacks=[callback()])
+                      temperature=temperature, callbacks=[callback()],
+                      timeout=90, max_retries=1)
 
 
 def active_summary() -> str:
