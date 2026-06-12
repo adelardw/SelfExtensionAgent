@@ -1,4 +1,4 @@
-provider: openrouter  # | ollama  (сейчас локально, бесплатно)
+provider: openrouter  # | ollama
 # Тиры low-cost (цены проверены живьём через /api/v1/models, июнь 2026):
 model:                                  # роутинг/валидация/extraction — дёшево и быстро
   name: google/gemini-2.5-flash-lite    # $0.10 in / $0.40 out, ctx 1M

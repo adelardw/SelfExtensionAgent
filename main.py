@@ -136,6 +136,8 @@ def banner() -> None:
         f"Активно: [cyan]{active_summary()}[/]\n"
         f"Режим работы: [bold]{work}[/]  [dim](/config — настроить, /auto — переключить)[/]\n"
         f"Режимы мышления: {legend}\n"
+        f"Физический веб: [dim]просто скажи словами — «включи музыку <A>», «открой моё избранное», "
+        f"«поставь паузу», «найди фильм <X>», «закажи <еду>» — агент сам выберет сервис и сделает[/]\n"
         f"Команды: [dim]/config /model /auto /voice /help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]\n"
         f"Подтверждения: [dim]отвечай словами — «да» · «да, всегда» (больше не спрашивать) · «да, но …» · «нет, …» · или скажи, как сделать иначе[/]\n"
         f"Файлы: [dim]/attach <файл> — в сессию (tmp, мультимодал)  ·  /kb add|ls|mkdir|find — личная база знаний (граф)[/]\n"
@@ -674,16 +676,19 @@ async def main():
             finally:
                 _live_status = None
 
-            answer = result.get("final_answer", "")
-            chat_history += [{"role": "user", "content": query}, {"role": "assistant", "content": answer}]
-            chat_history = chat_history[-20:]
-            render_result(result)
-
-            # Расход токенов за этот запрос + персист all-time.
-            di, do = tracker.input - pre_in, tracker.output - pre_out
-            add_alltime(di, do, tracker.calls - pre_calls)
-            console.print(f"[dim]🧮 токены: {_k(di)} in + {_k(do)} out = {_k(di+do)} "
-                          f"(~${cost_of(di, do):.4f}) · сессия {_k(tracker.total)} · /usage[/]")
+            # Пост-обработка под защитой: сбой рендера/записи НЕ должен ронять весь CLI.
+            try:
+                answer = result.get("final_answer", "")
+                chat_history += [{"role": "user", "content": query},
+                                 {"role": "assistant", "content": answer}]
+                chat_history = chat_history[-20:]
+                render_result(result)
+                di, do = tracker.input - pre_in, tracker.output - pre_out
+                add_alltime(di, do, tracker.calls - pre_calls)
+                console.print(f"[dim]🧮 токены: {_k(di)} in + {_k(do)} out = {_k(di+do)} "
+                              f"(~${cost_of(di, do):.4f}) · сессия {_k(tracker.total)} · /usage[/]")
+            except Exception as e:  # noqa: BLE001
+                console.print(f"[red]пост-обработка: {type(e).__name__}: {e}[/]")
 
         clear_session(thread_id)  # ярус 3 не переживает выход из сессии
         console.print("[dim]Пока![/]")

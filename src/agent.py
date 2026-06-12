@@ -455,6 +455,27 @@ def _skills_for_act(query: str, top: int = 2) -> list[str]:
     return picked
 
 
+def _is_degenerate(text: str) -> bool:
+    """Вырожденный повтор в ответе (модель залипла: «I'm Sorry» ×58) — это галлюцинация,
+    не данные. Признак: большой объём при крошечной доле уникальных слов. Дешёвый детектор
+    без LLM, общий для любого финала (анти-галлюцинация — жёсткое требование проекта)."""
+    # Чистим нумерацию списка и пунктуацию: «57.», «(I'm», «Sorry)» не должны маскировать
+    # повтор уникальными номерами строк (иначе 1..58 раздували долю уникальных слов).
+    words = [w for w in re.sub(r"[\d().,\[\]]+", " ", text or "").split() if w]
+    if len(words) < 60:
+        return False
+    uniq = len({w.lower() for w in words})
+    return uniq / len(words) < 0.15
+
+
+def _service_domain(tool_texts: str) -> str:
+    """Домен сервиса из результатов browser_* (снапшот несёт location.href): «через что»
+    сделано действие. Едет в итоговый ответ → юзер видит выбор площадки и может поправить,
+    а memory_extraction запоминает это как сервисное предпочтение (implicit feedback)."""
+    doms = re.findall(r"https?://(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})", tool_texts or "", re.I)
+    return doms[-1] if doms else ""
+
+
 def _history_messages(state: GeneralGraphState, keep: int = 8) -> list:
     """chat_history (dict-реплики) → реальные Human/AIMessage для модели (MessagesPlaceholder-
     стиль). Отбрасываем хвостовое user-сообщение — это и есть текущий query (идёт отдельно)."""
@@ -528,7 +549,9 @@ async def act_node(state: GeneralGraphState) -> dict:
             if _is_playing(res or ""):
                 m = re.search(r"ИГРАЕТ\s*\(([^)]+)\)", res or "")  # реальное название из mediaSession
                 what = f": {m.group(1)}" if m else ""
-                return {"final_answer": f"Запустил, играет фоном{what}. 🎧 Вкладка в твоём браузере."}
+                dom = _service_domain(tool_texts + " " + str(res))
+                via = f" (через {dom})" if dom else ""
+                return {"final_answer": f"Запустил, играет фоном{what}{via}. 🎧 Вкладка в твоём браузере."}
             tool_texts = (tool_texts + " " + str(res))[-800:]
         except Exception as e:  # noqa: BLE001
             print(f"[Act] авто-плей не вышел: {type(e).__name__}")
@@ -1398,6 +1421,28 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         best = next((r["result"] for r in reversed(results)
                      if (r.get("result") or "").strip() and not _looks_like_process(r["result"])), "")
         answer = best or "Не удалось определить ответ — доступные шаги не дали нужных данных."
+
+    # АНТИ-ГАЛЛЮЦИНАЦИЯ: вырожденный повтор (модель залипла, выдумала список) → честный отказ,
+    # не отдаём мусор (живой баг: перечисление избранного выродилось в «I'm Sorry» ×58).
+    if _is_degenerate(answer):
+        answer = ("Не удалось достоверно прочитать данные со страницы (контент не загрузился "
+                  "или подгружается прокруткой). Открой нужный список и скажи точнее, что "
+                  "показать — перечислю только реально видимое, без выдумок.")
+
+    # АНТИ-ЛОЖЬ О ЗАВЕРШЕНИИ: если прогон ОБРЕЗАН бюджетом или есть НЕвыполненные подшаги,
+    # запрещаем заявлять «добавил/заказал/готово/включил» (живой баг: «я добавил в корзину»
+    # при 0% уверенности и исчерпанном бюджете). Честно говорим, что НЕ доведено.
+    subs = state.get("subtasks", []) or []
+    cut = runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS)
+    incomplete = cut or any(s.get("status") not in ("done", "blocked") for s in subs)
+    if incomplete and re.search(r"добавил|заказал|оформил|готово|включил|отправил|сделал|"
+                                r"в корзин|добавлен|включаю|добавляю|заказываю|оформляю|отправляю",
+                                answer.lower()):
+        done = [s["goal"] for s in subs if s.get("status") == "done"]
+        progress = ("Успел: " + "; ".join(done[:4])) if done else "Подтверждённого результата нет."
+        why = "бюджет прогона исчерпан" if cut else "не все шаги завершены"
+        answer = (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным. {progress}. "
+                  "Проверь и скажи, продолжить ли с места остановки.")
     return {"final_answer": answer}
 
 

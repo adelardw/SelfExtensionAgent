@@ -64,7 +64,9 @@ async def browser_open(url: str) -> str:
     Returns a snapshot: numbered interactive elements to click/type into.
 
     Args:
-        url: The SPECIFIC service page, e.g. music.yandex.ru/search?text=... or youtube.com/results?search_query=...
+        url: The SPECIFIC page of WHATEVER service fits (from the user's request or their
+            remembered preference) — typically its search page `<domain>/search?<param>=<query>`.
+            Don't default to one brand; pick the service that suits the user/domain/region.
     """
     return await _route("open_url", url)
 

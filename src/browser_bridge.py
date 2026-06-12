@@ -203,6 +203,24 @@ def connected() -> bool:
     return _client is not None
 
 
+def _last_profile() -> str:
+    """Последний использованный профиль Chrome (Local State). Запуск с явным
+    --profile-directory обходит ЭКРАН ВЫБОРА ПОЛЬЗОВАТЕЛЯ: иначе Chrome висит в
+    profile picker без окон → у расширения «No current window», у агента нет рук."""
+    try:
+        import json
+        if platform.system() == "Darwin":
+            ls = Path.home() / "Library/Application Support/Google/Chrome/Local State"
+        elif platform.system() == "Windows":
+            import os
+            ls = Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/User Data/Local State"
+        else:
+            ls = Path.home() / ".config/google-chrome/Local State"
+        return json.loads(ls.read_text(encoding="utf-8"))["profile"]["last_used"] or "Default"
+    except Exception:  # noqa: BLE001
+        return "Default"
+
+
 def launch_browser() -> bool:
     """Поднять системный браузер пользователя (закрыт → откроется, расширение
     автозагрузится и подключится к мосту). True — команда запуска отправлена."""
@@ -210,17 +228,22 @@ def launch_browser() -> bool:
     try:
         if sysname == "Darwin":
             # -g: открыть В ФОНЕ, не выносить Chrome на передний план (не красть фокус —
-            # юзер продолжает свою работу, музыка играет фоном).
-            subprocess.Popen(["open", "-g", "-a", "Google Chrome"],
+            # юзер продолжает свою работу, музыка играет фоном). --profile-directory:
+            # без него свежезапущенный Chrome показывает выбор пользователя и не даёт окон.
+            subprocess.Popen(["open", "-g", "-a", "Google Chrome", "--args",
+                              f"--profile-directory={_last_profile()}"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         elif sysname == "Windows":
-            subprocess.Popen(["cmd", "/c", "start", "chrome"],
+            subprocess.Popen(["cmd", "/c", "start", "chrome",
+                              f"--profile-directory={_last_profile()}"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             opener = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("xdg-open")
             if not opener:
                 return False
-            subprocess.Popen([opener], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            args = [opener] + ([f"--profile-directory={_last_profile()}"]
+                               if "chrome" in opener or "chromium" in opener else [])
+            subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -290,8 +313,28 @@ async def scroll(direction: str = "down") -> str:
     return await _send("scroll", direction=direction)
 
 
+def _unhide_chrome() -> None:
+    """Разскрыть Chrome (open -g прячет приложение целиком → страницы hidden, плееры не
+    стартуют звук). НЕ активируем: окна выходят из hidden-состояния, фокус остаётся у юзера
+    (а после команды _restore_front дополнительно вернёт его приложение наверх)."""
+    if platform.system() != "Darwin":
+        return
+    try:
+        subprocess.run(["osascript", "-e",
+                        'tell application "System Events" to set visible of process "Google Chrome" to true'],
+                       capture_output=True, timeout=3)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def media(action: str = "toggle") -> str:
+    if action in ("play", "toggle"):
+        await asyncio.to_thread(_unhide_chrome)  # старт звука требует видимой страницы
     return await _send("media", action=action)
+
+
+async def click_selector(selector: str) -> str:
+    return await _send("clicksel", selector=selector)
 
 
 async def read() -> str:
