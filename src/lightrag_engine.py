@@ -29,6 +29,21 @@ def lightrag_available() -> bool:
         return False
 
 
+def estimate_index_cost(text: str) -> dict:
+    """Прикидка цены индексации документа в граф ДО запуска (HITL: «/kb add стоит денег молча»).
+    LightRAG на каждый чанк (~1200 ток., overlap 100) делает extraction + gleaning-проход,
+    промпт извлечения с примерами ~3k токенов; плюс ~20% вызовов на merge-саммари сущностей.
+    Токены ≈ len/3 (смешанный рус/en токенизируется хуже английского). Это ОЦЕНКА порядка, не счёт."""
+    from .usage import cost_of
+
+    tokens = max(1, len(text) // 3)
+    chunks = max(1, -(-tokens // 1100))           # chunk 1200 − overlap 100
+    calls = round(chunks * 2.2)                   # extraction + gleaning + ~20% merge
+    usd = cost_of(calls * 4200, calls * 600)      # ~3k промпт + чанк на вход, ~600 на выход
+    usd += tokens / 1e6 * 0.02                    # эмбеддинги чанков (text-embedding-3-small)
+    return {"tokens": tokens, "chunks": chunks, "calls": calls, "usd": usd}
+
+
 _instances: dict[str, object] = {}
 _locks: dict[str, asyncio.Lock] = {}
 

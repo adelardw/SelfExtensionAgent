@@ -35,6 +35,16 @@ def _user_root(user_id: str) -> Path:
     return p
 
 
+def _safe_dir(user_id: str, folder: str) -> tuple[Path, str]:
+    """(директория, отн.путь) строго ВНУТРИ корня юзера — '..'/абсолютные пути не выводят наружу."""
+    root = _user_root(user_id).resolve()
+    rel = re.sub(r"\.\.+", ".", folder or "").strip("/")
+    p = (root / rel).resolve()
+    if not p.is_relative_to(root):
+        return root, ""
+    return p, str(p.relative_to(root)) if p != root else ""
+
+
 def _lrag_dir(user_id: str) -> Path:
     return _user_root(user_id) / "_lightrag"  # рабочая директория графа LightRAG юзера
 
@@ -69,21 +79,22 @@ def _chunk(text: str, target: int = 700) -> list[str]:
 
 def create_folder(user_id: str, folder: str) -> str:
     """Создать папку/подпапку в БЗ юзера (иерархия — реальные директории)."""
-    rel = re.sub(r"\.\.+", ".", folder).strip("/")
-    (_user_root(user_id) / rel).mkdir(parents=True, exist_ok=True)
+    d, rel = _safe_dir(user_id, folder)
+    d.mkdir(parents=True, exist_ok=True)
     return rel or "(корень)"
 
 
-async def add_document_async(user_id: str, src_path: str | Path, folder: str = "") -> str:
-    """Добавить документ в БЗ: копия в папку (иерархия) + LightRAG-граф + BM25-чанки (floor)."""
+async def add_document_async(user_id: str, src_path: str | Path, folder: str = "",
+                             use_graph: bool = True) -> str:
+    """Добавить документ в БЗ: копия в папку (иерархия) + BM25-чанки (floor) + опц. LightRAG-граф.
+    use_graph=False — юзер отказался платить за граф (HITL): только бесплатный BM25."""
     from .media import read_file
     from . import lightrag_engine as LR
 
     src = Path(src_path)
     if not src.exists():
         return f"[файл не найден: {src}]"
-    rel = re.sub(r"\.\.+", ".", folder).strip("/")
-    dst_dir = _user_root(user_id) / rel
+    dst_dir, rel = _safe_dir(user_id, folder)
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / src.name
     try:
@@ -100,6 +111,8 @@ async def add_document_async(user_id: str, src_path: str | Path, folder: str = "
     con.commit()
     con.close()
     # НАСТОЯЩИЙ LightRAG: граф сущностей+связей (best-effort; нет ключа → только BM25).
+    if not use_graph:
+        return f"Добавлено в БЗ: {doc_rel} ({len(chunks)} фрагментов, BM25 — граф пропущен по решению пользователя)"
     graphed = await LR.insert(_lrag_dir(user_id), f"[Документ: {doc_rel}]\n{text}")
     tag = " + граф LightRAG" if graphed else " (BM25; LightRAG недоступен)"
     return f"Добавлено в БЗ: {doc_rel} ({len(chunks)} фрагментов{tag})"
@@ -117,14 +130,18 @@ def list_kb(user_id: str) -> str:
     con.close()
     if not rows:
         return "База знаний пуста."
-    out = []
+    tree: dict[str, list[str]] = {}
     for folder, doc, n in rows:
-        out.append(f"  {doc} ({n} фрагм.)")
+        tree.setdefault(folder or "", []).append(f"{Path(doc).name} ({n} фрагм.)")
+    out = []
+    for folder in sorted(tree):
+        out.append(f"  📁 {folder or '(корень)'}/")
+        out.extend(f"      {d}" for d in tree[folder])
     return "База знаний:\n" + "\n".join(out)
 
 
-def _bm25_search(user_id: str, query: str, k: int, folder: Optional[str]) -> str:
-    """BM25-ФОЛБЭК по чанкам (когда LightRAG/ключ недоступен)."""
+def _bm25_search(user_id: str, query: str, k: int, folder: Optional[str]) -> Optional[str]:
+    """BM25-ФОЛБЭК по чанкам (когда LightRAG/ключ недоступен). None — пусто/нерелевантно."""
     con = _conn(user_id)
     if folder:
         rows = con.execute("SELECT doc, chunk FROM chunks WHERE folder LIKE ?", (folder + "%",)).fetchall()
@@ -132,23 +149,32 @@ def _bm25_search(user_id: str, query: str, k: int, folder: Optional[str]) -> str
         rows = con.execute("SELECT doc, chunk FROM chunks").fetchall()
     con.close()
     if not rows:
-        return "В базе знаний пользователя ничего нет (или папка пуста)."
+        return None
     idx = bm25_rank([r[1] for r in rows], query, k)
     if not idx:
-        return "В базе знаний не нашлось релевантного по запросу."
+        return None
     return "\n\n".join(f"[{rows[i][0]}]\n{rows[i][1][:700]}" for i in idx)
 
 
-async def search_kb_async(user_id: str, query: str, k: int = 5, folder: Optional[str] = None) -> str:
-    """Retrieval по БЗ: СНАЧАЛА граф LightRAG (гибрид граф+вектор, multi-hop по сущностям),
-    при недоступности → BM25-фолбэк. folder=None для графа (LightRAG индексирует всё)."""
+async def search_kb_raw(user_id: str, query: str, k: int = 5, folder: Optional[str] = None,
+                        use_graph: bool = True) -> Optional[str]:
+    """Retrieval по БЗ, структурный результат: None — пусто/нерелевантно (вызывающий сам
+    решает, что сказать). use_graph=True: СНАЧАЛА граф LightRAG (гибрид граф+вектор,
+    multi-hop), при недоступности → BM25. use_graph=False — только дешёвый BM25 без
+    LLM/эмбеддинг-вызовов (для авто-впрыска recall на КАЖДЫЙ запрос: граф там жёг бы бюджет)."""
     from . import lightrag_engine as LR
 
-    if not folder:  # граф ведётся по всей БЗ юзера; folder-скоуп → BM25
+    if use_graph and not folder:  # граф ведётся по всей БЗ юзера; folder-скоуп → BM25
         g = await LR.query(_lrag_dir(user_id), query, mode="hybrid")
         if g:
             return g
     return _bm25_search(user_id, query, k, folder)
+
+
+async def search_kb_async(user_id: str, query: str, k: int = 5, folder: Optional[str] = None) -> str:
+    """Как search_kb_raw (граф-first), но с человекочитаемым ответом вместо None."""
+    res = await search_kb_raw(user_id, query, k, folder)
+    return res if res is not None else "В базе знаний пользователя ничего релевантного не нашлось (или она пуста)."
 
 
 def search_kb(user_id: str, query: str, k: int = 5, folder: Optional[str] = None) -> str:
@@ -234,17 +260,23 @@ def session_has_files(session_id: str) -> bool:
         return False
 
 
-def search_session(session_id: str, query: str, k: int = 5) -> str:
-    """Retrieval по файлам, приложенным в ЭТОЙ сессии."""
+def search_session_raw(session_id: str, query: str, k: int = 5) -> Optional[str]:
+    """Retrieval по файлам, приложенным в ЭТОЙ сессии. None — пусто/нерелевантно."""
     con = _sess_conn(session_id)
     rows = con.execute("SELECT doc, chunk FROM chunks").fetchall()
     con.close()
     if not rows:
-        return "В этой сессии файлов не приложено."
+        return None
     idx = bm25_rank([r[1] for r in rows], query, k)
     if not idx:
-        return "В приложенных файлах не нашлось релевантного."
+        return None
     return "\n\n".join(f"[{rows[i][0]}]\n{rows[i][1][:700]}" for i in idx)
+
+
+def search_session(session_id: str, query: str, k: int = 5) -> str:
+    """Как search_session_raw, но с человекочитаемым ответом вместо None."""
+    res = search_session_raw(session_id, query, k)
+    return res if res is not None else "В приложенных в этой сессии файлах не нашлось релевантного (или они не приложены)."
 
 
 def clear_session(session_id: str) -> None:

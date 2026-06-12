@@ -61,15 +61,25 @@ def needs_confirmation(skill_name: str) -> bool:
 
 async def confirm(description: str) -> bool:
     """True — человек разрешил. Нет confirmer'а → deny by default."""
-    if _confirmer is None:
-        return False
-    try:
-        res = _confirmer(description)
-        if inspect.isawaitable(res):
-            res = await res
-        return bool(res)
-    except Exception:  # noqa: BLE001
-        return False
+    approved = False
+    if _confirmer is not None:
+        try:
+            res = _confirmer(description)
+            if inspect.isawaitable(res):
+                res = await res
+            approved = bool(res)
+        except Exception:  # noqa: BLE001
+            approved = False
+    # Решение человека — сигнал контура (implicit feedback): копится в журнале прогона,
+    # reflect пишет его в эпизод, отказы становятся фактами профиля. Кроме deny-by-default
+    # без канала (headless): это не выбор юзера — не учиться на нём.
+    if _confirmer is not None:
+        try:
+            from . import interaction
+            interaction.record_hitl(description, approved)
+        except Exception:  # noqa: BLE001
+            pass
+    return approved
 
 
 def wrap_with_confirmation(t, skill_name: str):

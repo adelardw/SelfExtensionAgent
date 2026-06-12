@@ -9,10 +9,15 @@ backward pass по этому трейсу.
 ```
 START
  └─ recall            память (эпизоды/факты/выводы/цели/саммари) + implicit feedback + external ctx
+                      + AutoRAG (БЗ юзера + вложения сессии, BM25 + sanitize) + сброс журнала взаимодействий
  └─ goal              целеполагание: aim + «стоящая» цель + rubric (держится в контексте)
  └─ reflexion         Self-Reflexion Choice: выбор ТИПА мышления по анализу задачи
+                      (+ бандит-прайор: Beta/Thompson по похожим эпизодам юзера, видит и неудачи)
       ├─ fast      → fast_answer ───────────────────────────────→ reflect → END   (System 1, дёшево)
       ├─ clarify   → fast_answer ───────────────────────────────→ reflect → END   (переспросить)
+      ├─ act       → act ───────────────────────────────────────→ reflect → END   (System 1 с руками:
+      │                ОДНО прямое действие 1–2 тулами (BM25-подбор навыка, HITL сохранён);
+      │                ни одного вызова тула / ESCALATE → эскалация в deliberate (→ goal)
       ├─ reason    → reason ─────────────────→ validation ──────→ reflect → END   (System 2, без тулов)
       └─ deliberate / heavy → [clarify_gate?] → router → (create_skill | skill_selector)
                        clarify_gate — при средней неоднозначности: батч уточнений
@@ -20,13 +25,19 @@ START
                        прогона, переиспользуются decompose/step/synthesize; нет ответа
                        → разумное допущение. Догон в шаге: инструмент ask_user.
                        skill_selector → decompose → skill_injection
-                          → step_executor⟲ (исполнение+валидация ПО ПУНКТАМ)
+                          (амортизация: при РЕЦЕПТЕ похожей успешной задачи селектор БЕЗ
+                           LLM-вызова; при sim≥0.7 и decompose БЕЗ LLM — план из рецепта)
+                          → step_executor⟲ (исполнение+валидация ПО ПУНКТАМ,
+                             валидатор видит РЕАЛЬНО вызванные тулы: текст ≠ действие)
                           → synthesize ─→ validation → reflect → END               (deliberate)
                                        └→ review (heavy: сквозной ревью deep-моделью)
                                             ├─ проблемы → fix-подшаги → step_executor⟲ → synthesize → validation
                                             └─ чисто → validation
- reflect              запись эпизода (trajectory), извлечение фактов(+тэги, рёбра),
-                      рефлексия, саммари, prune, трекинг деградации, авто-self-learning
+ reflect              запись эпизода (trajectory + журнал взаимодействий), harvest сигнала
+                      (HITL-отказ/clarify-ответ → факты профиля), компиляция РЕЦЕПТА и
+                      win/lose применённого, промоушен в коллективный пул, детекция привычки,
+                      извлечение фактов(+тэги, рёбра), рефлексия, саммари, prune,
+                      трекинг деградации, авто-self-learning
 ```
 
 `create_skill`-ветка: ReAct создаёт навык → SGR-ревью + smoke-тест → загрузка (L1 self-improvement, skill library).
@@ -35,17 +46,40 @@ START
 
 | Слой | Файлы | Суть |
 |---|---|---|
-| Когниция / мета-контроль | `agent.py` (goal/reflexion/reason/decompose/step/synthesize ноды) | **5 типов мышления** (fast/reason/deliberate/heavy/clarify) + **reflexion-grounding** (оценка «могу ли достоверно ответить сам» → заземление, анти-галлюцинация); целеполагание, декомпозиция, по-пунктовое исполнение |
-| Память | `memory/store.py` (SQLite), `embedder.py`, `vector_index.py` (TurboVec), `feedback.py`, **`memory_tools.py`** | эпизоды/факты(+тэги)/выводы/цели/саммари + граф-рёбра; recall с бюджетом; implicit feedback. **Память-как-tool (3 яруса)**: глобальная (`search_memory`), drill-back полной истории (`recall_history`), временная runtime-scratch (`note_to_self`) — агент сам решает, что подтянуть |
+| Когниция / мета-контроль | `agent.py` (goal/reflexion/act/reason/decompose/step/synthesize ноды) | **6 типов мышления** (fast/reason/act/deliberate/heavy/clarify; act = «System 1 с руками»: прямое действие без декомпозиции, тяжёлый пайплайн — только когда прямого действия не хватает) + **reflexion-grounding** (оценка «могу ли достоверно ответить сам» → заземление, анти-галлюцинация); целеполагание, декомпозиция, по-пунктовое исполнение |
+| Память | `memory/store.py` (SQLite), `embedder.py`, `vector_index.py` (TurboVec), `feedback.py`, **`memory_tools.py`**, **`interaction.py`** | эпизоды/факты(+тэги)/выводы/цели/саммари + граф-рёбра; recall с бюджетом; implicit feedback. **Журнал взаимодействий** (стадия «сигнал»): HITL-решения и clarify-ответы переживают прогон → в эпизод (`interactions`) + harvest без LLM (отказ → факт «не делать X без просьбы», ответ на уточнение → факт профиля — онбординг накопительный). **Память-как-tool (3 яруса)**: глобальная (`search_memory`), drill-back полной истории (`recall_history`), временная runtime-scratch (`note_to_self`) — агент сам решает, что подтянуть |
 | Навыки | `tools/skill_creation.py`, `skills/*`, **`retrieval.py`** | реестр, защита core, автосинк; **ToolSearch** (BM25S-retrieval навыков при росте библиотеки); `web_search` с контекстным инжинирингом (trafilatura→чанки→BM25S→vector-rerank, полную страницу не кормит); `device_control` |
-| База знаний юзера | **`knowledge_base.py`** · **`lightrag_engine.py`** | ДВА яруса: (1) ГЛОБАЛЬНАЯ БЗ — персональные документы в иерархии папок, граф на **настоящем LightRAG** (lightrag-hku: сущности+связи, гибридный multi-hop retrieval), BM25-фолбэк без ключа; (2) СЕССИОННЫЕ файлы (ярус 3, tmp/<session_id>) — мультимодальные (pdf/image/audio/video), чистятся в конце. **AutoRAG**: recall авто-подмешивает граф-контекст БЗ+сессии (провенанс «свои данные»); тулы `search_knowledge_base`/`search_attached_files` для глубокого поиска |
+| База знаний юзера | **`knowledge_base.py`** · **`lightrag_engine.py`** | ДВА яруса: (1) ГЛОБАЛЬНАЯ БЗ — персональные документы в иерархии папок, граф на **настоящем LightRAG** (lightrag-hku: сущности+связи, гибридный multi-hop retrieval), BM25-фолбэк без ключа; (2) СЕССИОННЫЕ файлы (ярус 3, tmp/<session_id>) — мультимодальные (pdf/image/audio/video), чистятся в конце. **AutoRAG**: recall авто-подмешивает релевантные куски БЗ+сессии через ДЕШЁВЫЙ BM25 (на каждый запрос; без LLM/эмбеддинг-трат), с провенансом «свои данные» И `sanitize_tool_output` (отравленный документ — данные, не команды); глубокий LightRAG-граф — за тулами `search_knowledge_base`/`search_attached_files`, когда агент сам решает копать; флаг `own_docs` в state глушит мнимый clarify |
 | Способности-инструменты | **`research.py`** · **`compute.py`** · **`media.py`** · **`mcp_client.py`** | дисциплинированный **research** (план под-вопросов→поиск+сниппеты+чтение→ВЕРИФИКАЦИЯ факта→синтез, зависимая цепочка); **вычислительный слой** `python_exec` (точный счёт в песочнице — rlimits/kill); **vision-чтение фигур PDF** `read_pdf_figures` (рендер→vision, гейт по наличию PDF); **data-MCP само-расширение** `try_connect_discovered` (домен→discover→фильтр релевантности→первый ЖИВОЙ remote-MCP; movie/finance/weather подключаются живьём) |
-| Самообучение | `improve/` | forward-харвест few-shots (глоб+**пер-юзер**, двухъярусно с baseline); backward: дифф-credit-assignment → per-node gradients → оптимизация промптов; **per-user backward** (`graph_backward_user`: уроки из неудач юзера → его few-shots); **измеримый accept/revert** (прогон ДО/ПОСЛЕ на кейсах) → ParamStore |
+| Самообучение / амортизация | `improve/`, **`habits.py`**, **`bandit.py`**, **`collective.py`**, `memory/store.py: recipes` | forward-харвест few-shots (глоб+**пер-юзер**, двухъярусно с baseline); backward: дифф-credit-assignment → per-node gradients → оптимизация промптов; **per-user backward** (`graph_backward_user`: уроки из неудач юзера → его few-shots); **измеримый accept/revert** (прогон ДО/ПОСЛЕ на кейсах) → ParamStore; **привычки** (`habits.py`: k похожих успешных дорогих прогонов → факт-директива → router создаёт навык → привычка закрывается ✅); **бандит-прайор режима** (`bandit.py`: Beta/Thompson по похожим эпизодам юзера, видит и НЕУДАЧИ — в few-shots их нет; прайор в memory_context reflexion, не диктат) |
 | Трейсинг/диагностика | `tracing/` | спаны по нодам (data/traces.db), самодиагностика, ротация |
 | Безопасность | `utils_validation.py` (AST-гейт), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | генерируемый код: AST-запреты + smoke в изолированном процессе (rlimits/kill); side-effect тулы — подтверждение, deny by default; **анти-injection в выводах тулов/MCP/поиска** (`sanitize_tool_output`); запреты обучения (не менять архитектуру/промпты, не учиться на взломе) |
 | Внешнее | `external/context.py` | контекст A2A/MCP в состоянии (слот + плумбинг) |
 | Обслуживание | `maintenance/dep_update.py` | безопасный авто-апдейт зависимостей с health-check и откатом |
 | Интерфейсы | `main.py` (REPL), `bot.py` (Telegram), `server.py` (FastAPI) | общий граф + общая память |
+
+## Архитектурный принцип: амортизированный агент
+
+У известных паттернов (ReAct, plan-execute, multi-agent) предельная стоимость задачи
+~постоянна. Здесь каждый успешный прогон оставляет артефакт, делающий похожие задачи
+ДЕШЕВЛЕ — лестница компиляции опыта: эпизод → few-shot → **рецепт** (план+навыки;
+`memory/store.py: recipes`) → привычка (`habits.py`) → навык (код). Похожая задача:
+селектор берёт навыки из рецепта БЕЗ LLM-вызова; при sim≥0.7 decompose тоже БЕЗ LLM
+(план из рецепта); win/lose-трекинг, проигрывающий рецепт самоудаляется. Исполнение —
+лестница с проверяемой эскалацией (act → deliberate → heavy; вверх только по
+заземлённому провалу).
+
+**Эмпирика** (`scripts/amortize_bench.py`: один список задач, cold vs warm проход одного
+user_id): тёплый проход **−13% токенов при росте
+качества conf 78%→98%** (проваленная холодная задача 18% решена на 95%). Ключевой урок,
+добытый отрицательными прогонами №1/№3: артефакт опыта должен **ЗАМЕНЯТЬ LLM-работу**
+(zero-LLM селектор/декомпозиция), а не аннотировать её — хинты/few-shots/прайоры раздувают
+контекст всех вызовов и покупают только надёжность. Оговорки: n=4, время шумит латентностью
+API, confidence — самооценка валидатора.
+**Коллективный ярус** (`collective.py`): проверенный личный рецепт (winrate-гейт) →
+best-practice инсталляции с отпечатком профиля источника; похожим юзерам — рекомендация
+(запрос-сходство + профиль-гейт), личное всегда приоритетнее, отрава/дрейф отсеиваются
+(инъекции не промоутятся, проигрывающий глобальный рецепт самоудаляется).
 
 ## Self-learning как «обучение графа»
 
@@ -81,6 +115,8 @@ START
 - `python -m src.improve --graph` — backward по графу (credit assignment + per-node оптимизация).
 - `python -m src.tracing` — самодиагностика.
 - `python -m src.maintenance` — авто-апдейт зависимостей.
+- `python scripts/amortize_bench.py` — проверка тезиса амортизации (платный живой прогон).
+- REPL: `/kb add|ls|mkdir|find` — база знаний (граф LightRAG, с прикидкой цены и HITL); `/attach <файл>` — вложение сессии (tmp, чистится).
 
 ## Сделано из прежнего TODO
 
@@ -95,6 +131,7 @@ START
 
 - Syscall-песочница опциональна и зависит от наличия bwrap/firejail; полноценный gVisor/контейнер на каждый smoke — следующий уровень.
 - Работа с УЖЕ ОТКРЫТЫМИ окнами (keystroke/scroll/AX, phone/adb) — пока только macOS; кроссплатформенный UI-automation слой — дальше.
-- Оркестрация = выбор 1 из 5 фикс-путей (fast/reason/deliberate/heavy/clarify); свободная динамическая композиция когнитивных модулей — дальше.
+- Оркестрация = выбор 1 из 6 фикс-путей; лестница эскалации (act→deliberate) даёт первую динамику, но свободная композиция когнитивных модулей — дальше.
 - **History-masking** длинного ReAct-контекста (старые наблюдения → заглушки) — отложено: историей сообщений владеет LangGraph `create_agent`, маскинг там = хрупкий хак. Сейчас: сжатие вывода тула (cap) + urllib-first чтение страниц.
-- **GraphRAG/LightRAG** для глобальной памяти (level-3 retrieval) — в очереди; сейчас recall recency+relevance+importance + TurboVec-ANN.
+- **LightRAG** работает для БЗ документов юзера (`knowledge_base.py`); граф-RAG для ГЛОБАЛЬНОЙ памяти (эпизоды/факты) — в очереди; сейчас recall recency+relevance+importance + TurboVec-ANN.
+- Амортизация: статистика n=4 (нужна серия с медианами); LLM-генерализация рецептов перед коллективным промоушеном (privacy в мульти-юзер деплое); наследование сильных MCP через before/after-сравнение.

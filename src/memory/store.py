@@ -115,6 +115,17 @@ class MemoryStore:
                 text      TEXT NOT NULL DEFAULT '',
                 updated_at REAL NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS recipes (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id   TEXT NOT NULL,
+                query     TEXT NOT NULL,
+                skills    TEXT NOT NULL,
+                plan      TEXT NOT NULL,
+                mode      TEXT,
+                ts        REAL NOT NULL,
+                uses      INTEGER DEFAULT 0,
+                wins      INTEGER DEFAULT 0
+            );
             CREATE TABLE IF NOT EXISTS memory_edges (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id   TEXT NOT NULL,
@@ -139,6 +150,11 @@ class MemoryStore:
             "ALTER TABLE episodes ADD COLUMN tags TEXT DEFAULT '[]'",
             "ALTER TABLE episodes ADD COLUMN run_id TEXT DEFAULT ''",
             "ALTER TABLE episodes ADD COLUMN mode TEXT DEFAULT ''",
+            # журнал взаимодействий прогона (HITL-решения, уточнения) — сырьё для
+            # per-user backward / бандитов; harvest фактов идёт отдельно в reflect
+            "ALTER TABLE episodes ADD COLUMN interactions TEXT DEFAULT '[]'",
+            # отпечаток профиля юзеров-источников коллективного рецепта (рекомендательный матчинг)
+            "ALTER TABLE recipes ADD COLUMN profile TEXT DEFAULT ''",
         ):
             try:
                 self._conn.execute(ddl)
@@ -182,12 +198,13 @@ class MemoryStore:
         feedback: str = "",
         run_id: str = "",
         mode: str = "",
+        interactions: Optional[list[dict]] = None,
     ) -> int:
         vec = self.embedder.embed(query) if self.embedder.enabled else None
         emb_json = json.dumps(vec) if vec else None
         cur = self._conn.execute(
-            "INSERT INTO episodes (user_id, ts, query, answer, route, skills, confidence, outcome, embedding, feedback, run_id, mode) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO episodes (user_id, ts, query, answer, route, skills, confidence, outcome, embedding, feedback, run_id, mode, interactions) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 user_id,
                 time.time(),
@@ -201,6 +218,7 @@ class MemoryStore:
                 feedback,
                 run_id,
                 mode,
+                json.dumps(interactions or [], ensure_ascii=False),
             ),
         )
         self._conn.commit()
@@ -470,6 +488,82 @@ class MemoryStore:
         else:
             trend = "stable"
         return {"trend": trend, "recent_avg": round(ra, 3), "prev_avg": round(pa, 3), "n": len(confs)}
+
+    # ── recipes: скомпилированный опыт (ступень-0 амортизации) ───────
+    # Успешный дорогой прогон оставляет РЕЦЕПТ (план+навыки). Похожая задача дальше
+    # переиспользует его: селектор без LLM-вызова, decompose с проверенным планом.
+    # Предельная стоимость повторяющихся задач юзера ПАДАЕТ с использованием.
+
+    def add_recipe(self, user_id: str, query: str, skills: list[str],
+                   plan: list[dict], mode: str = "deliberate", profile: str = "") -> int:
+        """Сохранить/обновить рецепт. Дедуп по похожести запроса (свежий план побеждает).
+        profile — отпечаток профиля источника (для коллективного матчинга «похожих людей»)."""
+        plan_slim = [{"goal": p.get("goal", ""), "done_check": p.get("done_check", ""),
+                      "kind": p.get("kind", "research")} for p in plan if p.get("goal")]
+        if not plan_slim:
+            return 0
+        existing = self.find_recipe(user_id, query, min_sim=0.6)
+        if existing:
+            self._conn.execute(
+                "UPDATE recipes SET query=?, skills=?, plan=?, mode=?, ts=?, profile=? WHERE id=?",
+                (query, json.dumps(skills, ensure_ascii=False),
+                 json.dumps(plan_slim, ensure_ascii=False), mode, time.time(),
+                 profile or existing["profile"], existing["id"]))
+            self._conn.commit()
+            return existing["id"]
+        cur = self._conn.execute(
+            "INSERT INTO recipes (user_id, query, skills, plan, mode, ts, profile) VALUES (?,?,?,?,?,?,?)",
+            (user_id, query, json.dumps(skills, ensure_ascii=False),
+             json.dumps(plan_slim, ensure_ascii=False), mode, time.time(), profile))
+        self._conn.commit()
+        return cur.lastrowid
+
+    def find_recipe(self, user_id: str, query: str, min_sim: float = 0.45) -> Optional[sqlite3.Row]:
+        """Самый похожий рецепт юзера (Jaccard ≥ min_sim) или None."""
+        rows = self._conn.execute(
+            "SELECT * FROM recipes WHERE user_id=? ORDER BY ts DESC LIMIT 100", (user_id,)).fetchall()
+        best, best_sim = None, min_sim
+        for r in rows:
+            sim = _overlap(query, r["query"])
+            if sim >= best_sim:
+                best, best_sim = r, sim
+        return best
+
+    def get_recipe(self, recipe_id: int) -> Optional[sqlite3.Row]:
+        return self._conn.execute("SELECT * FROM recipes WHERE id=?", (recipe_id,)).fetchone()
+
+    def recipe_feedback(self, recipe_id: int, win: bool) -> None:
+        """Исход применения рецепта. Систематически проигрывающий рецепт самоудаляется
+        (память не должна закреплять устаревший план)."""
+        self._conn.execute("UPDATE recipes SET uses=uses+1, wins=wins+? WHERE id=?",
+                           (1 if win else 0, recipe_id))
+        self._conn.commit()
+        row = self.get_recipe(recipe_id)
+        if row and row["uses"] >= 3 and row["wins"] / row["uses"] < 0.5:
+            self._conn.execute("DELETE FROM recipes WHERE id=?", (recipe_id,))
+            self._conn.commit()
+
+    def similar_episodes(self, user_id: str, query: str, min_sim: float = 0.35,
+                         scan: int = 300) -> list[sqlite3.Row]:
+        """Похожие эпизоды юзера ЛЮБОГО исхода/режима — свидетельства для бандит-прайора
+        выбора режима (few-shots переносят только успехи; здесь видны и неудачи)."""
+        rows = self._conn.execute(
+            "SELECT query, mode, outcome, confidence FROM episodes WHERE user_id=? "
+            "ORDER BY ts DESC LIMIT ?",
+            (user_id, scan),
+        ).fetchall()
+        return [r for r in rows if _overlap(query, r["query"]) >= min_sim]
+
+    def similar_successes(self, user_id: str, query: str, min_sim: float = 0.4,
+                          scan: int = 200) -> list[sqlite3.Row]:
+        """Успешные ДОРОГИЕ (deliberate/heavy) эпизоды юзера, похожие на запрос — детектор
+        привычки (повторяющейся задачи) для контура само-расширения. Без эмбеддингов: Jaccard."""
+        rows = self._conn.execute(
+            "SELECT id, query, ts, skills FROM episodes WHERE user_id=? AND outcome='ok' "
+            "AND mode IN ('deliberate','heavy') ORDER BY ts DESC LIMIT ?",
+            (user_id, scan),
+        ).fetchall()
+        return [r for r in rows if _overlap(query, r["query"]) >= min_sim]
 
     def episode_count(self, user_id: str) -> int:
         row = self._conn.execute(
