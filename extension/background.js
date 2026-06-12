@@ -135,6 +135,18 @@ async function trustedSoundNudge(tabId) {
       how += " → gesture-клик: " + (ev && ev.result ? String(ev.result.value) : "?");
       verdict = await runInTab(tabId, { action: "playing" });
     }
+    // ФИНАЛЬНЫЙ ФОЛБЭК — клик по САМОМУ ВИДЕО: кастомные плееры (jut.su и пр.) грузят источник
+    // только по клику на плеер-оверлей (нет семантической кнопки). Trusted-клик по центру
+    // <video>. Срабатывает ТОЛЬКО если звук всё ещё не пошёл → музыку/готовые плееры не трогает.
+    if (typeof verdict === "string" && verdict.includes("звук не пошёл")) {
+      const vloc = await runInTab(tabId, { action: "locatevideo" });
+      if (typeof vloc === "string" && vloc.includes(",")) {
+        const [vx, vy] = vloc.split(",").map(Number);
+        await cdpClick(target, vx, vy);
+        how += ` → клик по видео (${vx},${vy})`;
+        verdict = await runInTab(tabId, { action: "playing" });
+      }
+    }
     return verdict + (how ? " · " + how : "");
   } finally {
     try { await chrome.debugger.detach(target); } catch (e) {}
@@ -143,7 +155,7 @@ async function trustedSoundNudge(tabId) {
 
 async function handle(msg) {
   const a = msg.action, args = msg.args || {};
-  if (a === "ver") return "bg-v11 (no-spoof, gentle)";  // диагностика: какой воркер реально жив
+  if (a === "ver") return "bg-v12 (video-click)";  // диагностика: какой воркер реально жив
   if (a === "tclick") {  // диагностика: trusted-клик по явным координатам
     const tid = await ensureTab(null);
     const target = { tabId: tid };
@@ -176,7 +188,9 @@ async function handle(msg) {
       // дальше Spotify сам держит фоновое воспроизведение (как при ручном переключении).
       await chrome.tabs.update(tabId, { active: true });
       await chrome.windows.update(t.windowId, { focused: true, state: "normal" });
-      await new Promise(r => setTimeout(r, 600));  // дать странице стать видимой и дорисоваться
+      // Spotify дольше поднимает плеер (EME/DRM), чем ЯМ → даём больше времени до клика,
+      // иначе кликаем по неинициализированному плееру и звук не стартует.
+      await new Promise(r => setTimeout(r, 1200));
     } catch (e) {}
   }
   await chrome.scripting.executeScript({ target: { tabId }, files: ["content_actions.js"] });
@@ -192,6 +206,9 @@ async function handle(msg) {
       if (verdict) result = verdict;
     } catch (e) { result += " (trusted-клик не вышел: " + e.message + ")"; }
   }
+  // Дать звуку устаканиться, прежде чем уводить вкладку в фон (Spotify иначе может
+  // встать на первой же секунде). Возврат фокуса — НЕ пауза: юзер подтвердил, что фон играет.
+  if (wantSound) await new Promise(r => setTimeout(r, 700));
   // Вернуть юзера, откуда забрали (звук уже идёт; не выдёргиваем с его сайта):
   // его прежнюю ВКЛАДКУ в этом окне и его прежнее ОКНО, если фокус был в другом.
   if (prevTabId !== null) {

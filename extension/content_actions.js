@@ -266,6 +266,22 @@ globalThis.agentExec = function agentExec(req) {
       const r = best.getBoundingClientRect();
       return Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2);
     }
+    if (req.action === 'locatevideo') {
+      // Координаты центра САМОГО КРУПНОГО видимого <video> — для TRUSTED-клика по плееру.
+      // Общий приём для кастомных плееров (jut.su и пр.), которые грузят источник ТОЛЬКО по
+      // клику на сам плеер-оверлей (нет семантической кнопки) — не хардкод сайтов.
+      let best = null, bestArea = 0;
+      for (const v of document.querySelectorAll('video')) {
+        const r = v.getBoundingClientRect();
+        if (r.width < 80 || r.height < 60) continue;  // не считаем крошечные/превью
+        const area = r.width * r.height;
+        if (area > bestArea) { best = v; bestArea = area; }
+      }
+      if (!best) return '';
+      try { best.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) {}
+      const r = best.getBoundingClientRect();
+      return Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2);
+    }
     if (req.action === 'playing') {
       // Вердикт о звуке (после trusted-клика): формат совпадает с media — act_node его понимает.
       return new Promise(resolve => setTimeout(() => resolve(

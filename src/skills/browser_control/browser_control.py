@@ -58,17 +58,40 @@ async def _route(op: str, *args):
     return _install_hint()  # расширение реально не установлено
 
 
+def _looks_404(snapshot: str) -> bool:
+    """Открытая страница — ошибка/404 (часто из-за угаданного URL поиска)."""
+    head = (snapshot or "")[:300].lower()
+    return bool(__import__("re").search(r"\b404\b|страница не найдена|page not found|"
+                                        r"не найден[ао]|ничего не нашлось", head))
+
+
 @tool
 async def browser_open(url: str) -> str:
-    """Open a URL in YOUR browser (extension: your logins/tabs; else a controlled window).
+    """Open the service's page in YOUR browser (extension: your logins/tabs).
     Returns a snapshot: numbered interactive elements to click/type into.
 
+    PREFER opening the service's HOME (just its domain), then use browser_see + browser_type
+    into its on-page search box. Do NOT hand-craft search URLs (`/search?q=`, `/index.php?...`)
+    — formats differ per site and often 404. If a URL 404s, this tool auto-falls back to the
+    domain home so you can search there.
+
     Args:
-        url: The SPECIFIC page of WHATEVER service fits (from the user's request or their
-            remembered preference) — typically its search page `<domain>/search?<param>=<query>`.
-            Don't default to one brand; pick the service that suits the user/domain/region.
+        url: The service page to open (its domain/home, or a known content page). Pick the
+            service that suits the user/domain/region; don't default to one brand.
     """
-    return await _route("open_url", url)
+    res = await _route("open_url", url)
+    # ДЕТЕРМИНИРОВАННАЯ 404-RECOVERY: угаданный search-URL → 404. Не полагаемся на модель —
+    # сами открываем ГЛАВНУЮ домена (там есть строка поиска), возвращаем её снапшот с подсказкой.
+    if isinstance(res, str) and _looks_404(res):
+        import urllib.parse as _up
+        p = _up.urlsplit(url if "://" in url else "https://" + url)
+        root = f"{p.scheme or 'https'}://{p.netloc}/"
+        if p.netloc and root.rstrip("/") != (url.rstrip("/")):
+            home = await _route("open_url", root)
+            if isinstance(home, str) and not _looks_404(home):
+                return (f"[URL {url} дал 404 — открыл главную {root}. Найди тут строку поиска "
+                        f"(browser_see) и введи запрос через browser_type, не угадывай URL.]\n{home}")
+    return res
 
 
 @tool

@@ -41,6 +41,46 @@ def test_skill_md_has_universal_menu_navigation():
     assert "навигация по МЕНЮ" in md and "не угадывай URL" in md
 
 
+def test_act_always_has_web_search_and_browser():
+    """act-руки: всегда есть browser_control (физ) и web_search (headless-чтение) — LLM сам
+    выбирает read-vs-physical в лёгком browse-цикле, без keyword-форса режима."""
+    from src.agent import _skills_for_act
+    picked = _skills_for_act("найди обзоры наушников и перечисли варианты")
+    assert "web_search" in picked and "browser_control" in picked
+
+
+def test_reflexion_prompt_routes_browse_to_act():
+    """Принцип browse=act и grounding-честность зашиты в reflexion-промпт (не в регулярку)."""
+    from src.prompts import reflexion_prompt
+    text = "".join(str(m.prompt.template) for m in reflexion_prompt.messages)
+    assert "BROWSE = тоже act" in text
+    assert "grounding" in text.lower()
+
+
+def test_meta_ack_detected():
+    """Мета-ответ-заглушка («я перечислил/список выше») ловится → нужен ресинтез результата."""
+    from src.agent import _is_meta_ack
+    assert _is_meta_ack("Понял, задача выполнена. Я перечислил 7 названий видео.")
+    assert _is_meta_ack("Вот итог — список выше. Больше действий не требуется.")
+    assert _is_meta_ack("Всё готово.")
+    # настоящий результат со списком — НЕ мета-заглушка (длинный, есть содержимое)
+    real = ("Вот обзоры:\n1. ПОЛ ГОДА С Sony WH-1000XM5\n2. Big Review These Are GOOD\n"
+            "3. Топовые наушники Sony\n4. Флагманские с нюансами\n5. Самое подробное видео 2025")
+    assert not _is_meta_ack(real)
+    assert not _is_meta_ack("Включил Believer — Imagine Dragons, играет фоном.")
+
+
+def test_false_access_refusal_detected():
+    """Ложный отказ «нет доступа к аккаунтам» ловится (доступ есть через расширение)."""
+    from src.agent import _is_false_access_refusal
+    assert _is_false_access_refusal("Я не имею доступа к вашим личным аккаунтам и данным.")
+    assert _is_false_access_refusal("Sorry, I cannot access your personal Spotify account.")
+    assert _is_false_access_refusal("Моя функциональность ограничена доступом к данным.")
+    # нормальный честный ответ — НЕ ловится
+    assert not _is_false_access_refusal("Открыл твоё избранное в Spotify, вот треки: …")
+    assert not _is_false_access_refusal("Не нашёл такого исполнителя на этом сервисе.")
+
+
 def test_degenerate_repetition_detected():
     """Анти-галлюцинация: вырожденный повтор («I'm Sorry» ×58) ловится как мусор."""
     from src.agent import _is_degenerate
@@ -72,7 +112,7 @@ def test_act_confirmed_play_mentions_service(monkeypatch):
     from langchain_core.messages import AIMessage
     import src.agent as A
 
-    async def _fake_direct(system, goal, tools, deadline, history=None):
+    async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         ai = AIMessage(content="", tool_calls=[
             {"name": "browser_open", "args": {"url": "https://music.yandex.ru/search?text=x"},
              "id": "1"}])

@@ -420,6 +420,12 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
               f"{mode}→deliberate (нет надёжной базы — заземляюсь, не гадаю)")
         mode = "deliberate"
 
+    # ЗАЗЕМЛЕНИЕ ТЕКУЩЕГО ВЕБ-КОНТЕНТА (анти-выдумка, детерминированно поверх самооценки
+    # модели): запрос «НАЙДИ/ПОКАЖИ варианты» актуального каталога/выдачи (видео, обзоры,
+    # отзывы, товары, цены, фильмы, что есть/какие есть) НЕЛЬЗЯ отвечать из памяти — модель
+    # сочиняет правдоподобные, но ложные результаты (живой баг: выдумала 5 обзоров Sony XM5 с
+    # фейк-каналами). Такой запрос всегда идёт в реальное действие/исполнение, не fast/reason.
+
     # Средняя неоднозначность на путях с инструментами → не гадать молча, а собрать
     # батч уточнений ПЕРЕД исполнением (clarify_gate). Низкая — пропускаем (нулевая цена).
     soft = CLARIFY_SOFT_GATE <= decision.ambiguity < AMBIGUITY_GATE
@@ -447,12 +453,41 @@ def _skills_for_act(query: str, top: int = 2) -> list[str]:
         names.append(n)
         docs.append(f"{n} {doc}")
     picked = [names[i] for i in bm25_rank(docs, query, top)]
-    # Базовые «руки» добираются всегда: структурный браузер (треки/видео/сайты) и
-    # устройство (приложения/скриншот) — лексика запроса часто не пересекается с md.
-    for base in ("browser_control", "device_control"):
+    # Базовые «руки» ВСЕГДА: структурный браузер (визуал/воспроизведение/действие),
+    # устройство (приложения/скриншот) и web_search (headless-чтение выдачи). Так в лёгком
+    # browse-цикле LLM сам выбирает read-vs-physical (читать дёшево headless vs действовать в
+    # физ-браузере), не угадываем лексикой запроса — md часто не пересекается с формулировкой.
+    for base in ("browser_control", "device_control", "web_search"):
         if base in registry and base not in picked:
             picked.append(base)
     return picked
+
+
+_FALSE_REFUSAL_RE = re.compile(
+    r"не имею доступа|нет доступа к|не могу получить доступ|cannot access|"
+    r"don'?t have access|ограничен[ао].{0,30}(доступ|данны)|"
+    r"не имею возможности.{0,20}доступ", re.I)
+
+
+_META_ACK_RE = re.compile(
+    r"список\s+выше|выше\s+привед\?н|как\s+(сказано|указано|перечислено)\s+(выше|ранее)|"
+    r"я\s+(перечислил|нашёл и перечислил|вывел|привёл)|задача\s+выполнена|всё\s+готово|"
+    r"я\s+это\s+сделал|см\.\s+выше", re.I)
+
+
+def _is_meta_ack(text: str) -> bool:
+    """Мета-ответ-заглушка вместо результата: «я перечислил / список выше / задача выполнена»
+    — данные остались в ToolMessage, юзеру не видны. Короткий ответ с такими маркерами и без
+    самого содержимого → нужен ресинтез результата целиком."""
+    t = (text or "").strip()
+    return bool(_META_ACK_RE.search(t)) and len(t) < 400
+
+
+def _is_false_access_refusal(text: str) -> bool:
+    """Ложный отказ «нет доступа к аккаунтам/данным/вебу» — жёстко запрещён: доступ ЕСТЬ
+    через расширение. Модель срывается в него под давлением бюджета/неудачи (живой баг
+    на Spotify Liked Songs). Ловим, чтобы заменить честным статусом."""
+    return bool(_FALSE_REFUSAL_RE.search(text or ""))
 
 
 def _is_degenerate(text: str) -> bool:
@@ -466,6 +501,20 @@ def _is_degenerate(text: str) -> bool:
         return False
     uniq = len({w.lower() for w in words})
     return uniq / len(words) < 0.15
+
+
+_PLAY_VERB = ("включи", "поставь", "запусти", "вруби", "сыграй", "play", "смотреть", "посмотреть")
+_PLAY_NOUN = ("трек", "песн", "музык", "видео", "альбом", "плейлист", "подборк", "radio", "клип",
+              "фильм", "сериал", "аниме", "мультфильм", "мультик", "сери", "сезон", "эпизод",
+              "трейлер", "шоу")
+
+
+def _is_play_intent(query: str) -> bool:
+    """Запрос на ВОСПРОИЗВЕДЕНИЕ медиа (играть/смотреть + трек/видео/фильм/аниме/…). Для
+    БЮДЖЕТА (playback-навигация длиннее: поиск→результат→плеер→ретрай) и АНТИ-ЛЖИ (успех =
+    реальный звук). Это эвристика бюджета/энфорсмента, НЕ маршрутизация режима."""
+    q = (query or "").lower()
+    return any(v in q for v in _PLAY_VERB) and any(n in q for n in _PLAY_NOUN)
 
 
 def _service_domain(tool_texts: str) -> str:
@@ -508,9 +557,16 @@ async def act_node(state: GeneralGraphState) -> dict:
     sys_text = act_system_prompt.format(
         memory_context=state.get("memory_context", "Память пуста."))
     history = _history_messages(state)  # реальные Human/AIMessage диалога (контекст «любую/да»)
-    deadline = min(STEP_DEADLINE_CAP, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
+    # PLAYBACK длиннее обычного act (поиск→результат→плеер→ретрай по источникам, юзер просил
+    # «искать пока не запустится») → больше раундов, больше толчков персистентности, длиннее
+    # дедлайн. Обычное действие — лёгкий бюджет (дёшево). Эвристика бюджета, не маршрутизация.
+    play = _is_play_intent(query)
+    cap = STEP_DEADLINE_CAP * (2 if play else 1)
+    deadline = min(cap, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
+    rounds_cap, nudges = (12, 4) if play else (None, 1)
     try:
-        output, msgs = await _exec_direct(sys_text, query, tools, deadline, history=history)
+        output, msgs = await _exec_direct(sys_text, query, tools, deadline, history=history,
+                                          rounds_cap=rounds_cap, max_nudges=nudges)
     except Exception as e:  # noqa: BLE001
         print(f"[Act] failed → deliberate: {type(e).__name__}: {e}")
         return {"mode": "deliberate"}
@@ -529,18 +585,43 @@ async def act_node(state: GeneralGraphState) -> dict:
     # ЗАЗЕМЛЕНИЕ ВОСПРОИЗВЕДЕНИЯ: на просьбу «включи/поставь/запусти трек/видео/музыку»
     # успех = РЕАЛЬНЫЙ звук, подтверждённый результатом тула («ЗВУК ИГРАЕТ»/«играет N»),
     # а не слова модели и не общая заглушка. Иначе — честный статус + последний снапшот.
-    q_low = query.lower()
-    play_intent = (any(w in q_low for w in ("включи", "поставь", "запусти", "вруби", "сыграй", "play")) and
-                   any(w in q_low for w in ("трек", "песн", "музык", "видео", "альбом", "плейлист", "подборк", "radio", "клип")))
+    play_intent = _is_play_intent(query)
     tool_msgs = [m for m in msgs if m.__class__.__name__ == "ToolMessage"]
     tool_texts = " ".join(m.content for m in tool_msgs if isinstance(getattr(m, "content", ""), str))
-    _is_playing = lambda t: ("ЗВУК ИГРАЕТ" in t) or bool(re.search(r"играет\s+[1-9]", t))
+    # СТРАНИЦА-ОШИБКА: на 404/«не найдена» нельзя заявлять воспроизведение, даже если
+    # isPlaying() обмануло (остаточный media-элемент/pause-кнопка) — это ложный успех
+    # (живой баг: «играет фоном: 404 - Страница не найдена»). Заземление вердикта.
+    _is_error = lambda t: bool(re.search(r"\b404\b|страница не найдена|page not found|"
+                                         r"ничего не нашлось|не найден[ао]", t or "", re.I))
+    _is_playing = lambda t: (("ЗВУК ИГРАЕТ" in t) or bool(re.search(r"играет\s+[1-9]", t))) and not _is_error(t)
     confirmed = _is_playing(tool_texts)
     low = (output or "").lower()
     claims_playing = any(w in low for w in ("играет", "включил", "запустил", "воспроизвод"))
 
     # ДЕТЕРМИНИРОВАННЫЙ ДОЖИМ ПЛЕЯ: дешёвая модель открывает страницу и бросает, не нажав
     # «Воспроизведение» (живой лог: кнопки [39..] в снапшоте, но клика нет). На play-intent
+    # СТЕНА ПОДПИСКИ/ВХОДА: контент платный/закрыт (нет смысла жать плей — заиграет мусор;
+    # живой баг на Кинопоиске: автоплей кликнул «Загрузить в Google Play»). Честный отказ.
+    # ОБОБЩЁННЫЙ детект подписочной/входной стены (любой сервис): premium-гейт (jut.su+, Plus),
+    # «для просмотра необходимо», «только для подписчиков», апгрейд тира, вход в аккаунт.
+    _PAYWALL_RE = (r"расширить подписку|оформить подписк|смотреть по подписке|подключить подписк|"
+                   r"оформить подписку|войти в аккаунт|необходимо наличие|для просмотра[^.]{0,40}"
+                   r"(необходим|нужн|подписк|оформи)|только для подписчиков|нужна подписк|"
+                   r"требуется подписк|купить|арендовать|оформить|premium|премиум|"
+                   r"[\wа-я.]{2,12}\+\b.{0,20}(подписк|смотр|доступ)|подписк.{0,20}[\wа-я.]{2,12}\+")
+    def _paywall_answer() -> dict:
+        dom = _service_domain(tool_texts)
+        where = f" на {dom}" if dom else ""
+        return {"final_answer": (
+            f"Этот контент{where} требует подписки или входа в аккаунт — без них воспроизведение "
+            "недоступно, а оформлять подписку/покупку сам я не буду (это платно и за тобой). "
+            "Могу включить трейлер или поискать, где доступно бесплатно/в твоей подписке.")}
+
+    # Стена подписки/входа ВИДНА УЖЕ В СНАПШОТЕ → ранний честный отказ (не жмём плей по мусору;
+    # живой баг на Кинопоиске: автоплей кликнул «Загрузить в Google Play»).
+    if play_intent and not confirmed and re.search(_PAYWALL_RE, tool_texts, re.I):
+        return _paywall_answer()
+
     # нода САМА жмёт плей через browser_media('play') (он кликает первую кнопку play) —
     # не полагаясь на модель. Одна попытка, потом честный статус.
     if play_intent and not confirmed and browser_bridge.connected():
@@ -557,12 +638,20 @@ async def act_node(state: GeneralGraphState) -> dict:
             print(f"[Act] авто-плей не вышел: {type(e).__name__}")
 
     if (play_intent or claims_playing) and not _is_playing(tool_texts):
-        last = tool_texts[-400:].strip()
-        tail = f"\n\nЧто сейчас на странице:\n{last}" if last else ""
+        # Не пошло даже после дожима → проверим СТЕНУ ПОДПИСКИ в ТЕКСТЕ страницы (сигнал часто
+        # в оверлее плеера, не в снапшоте: jut.su «Для просмотра серии необходимо наличие Jut.su+»).
+        if play_intent and browser_bridge.connected():
+            try:
+                page = await browser_bridge.read()
+                if isinstance(page, str) and re.search(_PAYWALL_RE, page, re.I):
+                    tool_texts = (tool_texts + " " + page)[-2000:]
+                    return _paywall_answer()
+            except Exception:  # noqa: BLE001
+                pass
         return {"final_answer": (
-            "Открыл нужную страницу, но воспроизведение пока НЕ пошло (возможно, нужно войти "
-            "в аккаунт в этом окне или нажать плей на нужном результате). Скажи «нажми плей» — "
-            "доведу." + tail)}
+            "Открыл нужную страницу, но воспроизведение пока НЕ пошло — возможно, нужно войти "
+            "в аккаунт в этом окне, выбрать конкретный результат или контент требует подписки. "
+            "Скажи «нажми плей» или уточни, что включить — доведу.")}
     return {"final_answer": output}
 
 
@@ -1082,7 +1171,8 @@ _DIRECT_ROUNDS = 6  # максимум раундов «вызов → инст�
 
 
 async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
-                       history: list | None = None) -> tuple[str, list]:
+                       history: list | None = None, rounds_cap: int | None = None,
+                       max_nudges: int = 1) -> tuple[str, list]:
     """
     direct-шаг: лёгкая петля «вызов → инструменты» (≤_DIRECT_ROUNDS раундов, вывод сжат) —
     1–2 LLM-вызова в типовом случае. Тулы привязаны и в продолжениях: живой прогон показал,
@@ -1099,25 +1189,33 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
     llm_t = code_llm.bind_tools(tools)
     msgs: list = [SystemMessage(content=system), *(history or []), HumanMessage(content=goal)]
     resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
-    rounds, nudged = 0, False
+    cap = _DIRECT_ROUNDS if rounds_cap is None else rounds_cap
+    rounds, nudges = 0, 0
     seen_calls: set[str] = set()  # анти-зацикливание: тот же тул с теми же аргументами
     while True:
         calls = getattr(resp, "tool_calls", None) or []
         if not calls:
             # Модель НАЧАЛА действовать, но закончила ход ОБЕЩАНИЕМ («давай открою…»)
-            # вместо вызова — один толчок: действуй или итожь (живой тест: act замирал
-            # на полпути). Толчок единственный — без риска зацикливания.
-            if rounds > 0 and not nudged:
+            # вместо вызова — толчок: действуй или итожь (живой тест: act замирал на полпути).
+            # Для playback max_nudges>1 → персистентность: пробуй следующий результат/источник,
+            # ПОКА не заиграет (юзер: «ищи в браузере пока не запустится»).
+            if rounds > 0 and nudges < max_nudges:
                 msgs.append(resp)
-                msgs.append(HumanMessage(content=(
-                    "Не обещай следующее действие — сделай его ВЫЗОВОМ инструмента прямо "
-                    "сейчас. Если задача уже доведена до конца — дай краткий итог "
-                    "РЕЗУЛЬТАТА (что сделано), без планов и обещаний.")))
-                nudged = True
+                push = ("Не обещай следующее действие — сделай его ВЫЗОВОМ инструмента прямо "
+                        "сейчас. Если задача уже доведена до конца — дай краткий итог "
+                        "РЕЗУЛЬТАТА (что сделано), без планов и обещаний.")
+                if max_nudges > 1:  # playback-персистентность
+                    push = ("Ещё НЕ подтверждено реальное воспроизведение («ЗВУК ИГРАЕТ»). НЕ "
+                            "сдавайся: вернись к выдаче (browser_see/scroll) и кликни СЛЕДУЮЩИЙ "
+                            "результат, или попробуй ДРУГОЙ сервис/источник через его строку "
+                            "поиска (не угадывай URL). Действуй ВЫЗОВОМ инструмента сейчас. "
+                            "Только если честно исчерпал попытки — дай итог, что пробовал.")
+                msgs.append(HumanMessage(content=push))
+                nudges += 1
                 resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
                 continue
             break
-        if rounds >= _DIRECT_ROUNDS:
+        if rounds >= cap:
             break
         msgs.append(resp)
         for tc in calls[:MAX_DIRECT_TOOLCALLS]:
@@ -1144,18 +1242,31 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
         resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
 
     text = strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp))
-    if not text.strip():
-        # модель упёрлась в маркап/пустоту → попросим словесный итог БЕЗ инструментов
+    # МЕТА-ОТВЕТ вместо результата: модель пишет «я перечислил / список выше / задача
+    # выполнена», а сам результат (список) остался в ToolMessage и юзеру НЕ виден (живой баг
+    # browse: «перечислил 5 названий» — без названий). Пустота ИЛИ мета-ответ → ресинтез
+    # с требованием выдать РЕЗУЛЬТАТ ЦЕЛИКОМ из данных инструментов.
+    if not text.strip() or _is_meta_ack(text):
         final = await asyncio.wait_for(code_llm.ainvoke(
-            msgs + [resp, HumanMessage(content="Кратко сообщи пользователю итог сделанного "
-                                               "(без вызова инструментов и без разметки).")]),
+            msgs + [resp, HumanMessage(content=(
+                "Выдай пользователю РЕЗУЛЬТАТ ЦЕЛИКОМ прямо здесь, опираясь на данные из "
+                "инструментов выше (список — со ВСЕМИ пунктами и деталями). Пользователь НЕ "
+                "видит промежуточные шаги. Без вызова инструментов, без разметки, без "
+                "«список выше/я перечислил» — только сам результат. Только реально полученное."))]),
             timeout=deadline)
         text = strip_tool_markup(final.content if hasattr(final, "content") else str(final))
         if not text:
-            # Никакого «Действие выполнено» вслепую: покажем РЕАЛЬНЫЙ последний результат тула.
+            # Никакого «Действие выполнено» вслепую: покажем РЕАЛЬНЫЙ последний результат тула,
+            # но НЕ внутренний плумбинг (dedup-нота «уже выполнялся», ошибки инструмента,
+            # пустышки) — он утекал юзеру как ответ (живой баг на Кинопоиске).
+            def _is_plumbing(c: str) -> bool:
+                c = c.strip().lower()
+                return (c.startswith("(") or "уже выполнялся" in c or "нет инструмента" in c
+                        or "ошибка инструмента" in c or not c)
             last_tool = next((m.content for m in reversed(msgs)
                               if m.__class__.__name__ == "ToolMessage"
-                              and isinstance(getattr(m, "content", ""), str)), "")
+                              and isinstance(getattr(m, "content", ""), str)
+                              and not _is_plumbing(m.content)), "")
             text = (f"Готово. Текущее состояние:\n{last_tool[-500:]}" if last_tool
                     else "Действие выполнено.")
         return text, msgs + [resp, final]
@@ -1428,6 +1539,15 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         answer = ("Не удалось достоверно прочитать данные со страницы (контент не загрузился "
                   "или подгружается прокруткой). Открой нужный список и скажи точнее, что "
                   "показать — перечислю только реально видимое, без выдумок.")
+
+    # АНТИ-ЛОЖНЫЙ-ОТКАЗ (жёсткое правило проекта: НИКОГДА не «нет доступа»): под давлением
+    # бюджета/неудачи модель срывается в безопасный отказ «не имею доступа к личным аккаунтам»
+    # — но доступ ЕСТЬ через расширение (живой баг на Spotify Liked Songs). Заменяем на
+    # честный статус: задача физического веба → инструменты есть, просто не довели.
+    if _is_false_access_refusal(answer):
+        answer = ("Не довёл до конца в этом прогоне (физический веб через расширение доступен — "
+                  "вопрос не в доступе). Скажи «продолжи» — доведу с места остановки, либо уточни "
+                  "сервис/раздел.")
 
     # АНТИ-ЛОЖЬ О ЗАВЕРШЕНИИ: если прогон ОБРЕЗАН бюджетом или есть НЕвыполненные подшаги,
     # запрещаем заявлять «добавил/заказал/готово/включил» (живой баг: «я добавил в корзину»

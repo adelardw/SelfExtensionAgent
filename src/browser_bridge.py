@@ -33,7 +33,8 @@ HOST = "127.0.0.1"
 PORT = 8777
 TOKEN_FILE = Path("data/browser_bridge.token")
 LOG_FILE = Path("data/browser_bridge.log")  # трафик мост↔расширение (для диагностики плеера)
-CMD_TIMEOUT = 25  # сек на исполнение команды в расширении (хватает с запасом)
+CMD_TIMEOUT = 45  # сек на команду в расширении: тяжёлые стриминги (Кинопоиск/онлайн-кинотеатры)
+# грузятся дольно — 25с не хватало (живой TimeoutError на open Кинопоиска), 45 с запасом
 
 
 _prev_app: Optional[str] = None

@@ -202,7 +202,7 @@ def test_act_does_not_lie_about_playback(monkeypatch):
     from langchain_core.messages import AIMessage, ToolMessage
     import src.agent as A
 
-    async def _fake_direct(system, goal, tools, deadline, history=None):
+    async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         ai = AIMessage(content="", tool_calls=[{"name": "browser_click", "args": {"item": 3}, "id": "1"}])
         tm = ToolMessage(content="Кликнул [3]. Страница: 'Поиск'", tool_call_id="1")  # НЕ играет
         return "Включил трек, играет.", [ai, tm]
@@ -214,8 +214,11 @@ def test_act_does_not_lie_about_playback(monkeypatch):
     # путь БЕЗ подтверждения, поэтому глушим авто-дожим (connected→False).
     monkeypatch.setattr(A.browser_bridge, "connected", lambda: False)
     out = asyncio.run(A.act_node({"query": "включи трек X"}))
-    assert "НЕ пошл" in out["final_answer"] and "mode" not in out
-    assert "Что сейчас на странице" in out["final_answer"]  # показываем реальный снапшот
+    # Не врёт про воспроизведение (нет «ЗВУК ИГРАЕТ» → честное «не пошло»), и НЕ сливает
+    # сырой снапшот в ответ (раньше дампил «Что сейчас на странице» — убрано как плумбинг).
+    ans = out["final_answer"]
+    assert "НЕ пошл" in ans and "mode" not in out
+    assert "нажми плей" in ans.lower() or "уточни" in ans.lower()
 
 
 def test_act_accepts_confirmed_playback(monkeypatch):
@@ -224,7 +227,7 @@ def test_act_accepts_confirmed_playback(monkeypatch):
     from langchain_core.messages import AIMessage, ToolMessage
     import src.agent as A
 
-    async def _fake_direct(system, goal, tools, deadline, history=None):
+    async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         ai = AIMessage(content="", tool_calls=[{"name": "browser_media", "args": {"action": "play"}, "id": "1"}])
         tm = ToolMessage(content="play: затронуто 1/1; ♪ ЗВУК ИГРАЕТ", tool_call_id="1")
         return "Включил трек, играет.", [ai, tm]
