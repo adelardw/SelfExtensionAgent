@@ -47,7 +47,7 @@ def test_act_node_escalates_without_tool_calls(monkeypatch):
     from langchain_core.messages import AIMessage
     import src.agent as A
 
-    async def _fake_direct(system, goal, tools, deadline, history=None):
+    async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         return "Открываю Яндекс Почту в браузере.", [AIMessage(content="Открываю...")]
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
     monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["device_control"])
@@ -62,7 +62,7 @@ def test_act_node_succeeds_with_tool_call(monkeypatch):
     from langchain_core.messages import AIMessage
     import src.agent as A
 
-    async def _fake_direct(system, goal, tools, deadline, history=None):
+    async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         ai = AIMessage(content="", tool_calls=[
             {"name": "open_url", "args": {"url": "https://mail.yandex.ru"}, "id": "1"}])
         return "Открыл mail.yandex.ru в браузере.", [ai]
