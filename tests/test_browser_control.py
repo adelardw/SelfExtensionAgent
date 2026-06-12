@@ -209,6 +209,10 @@ def test_act_does_not_lie_about_playback(monkeypatch):
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
     monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["browser_control"])
     monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [object()])
+    # Изоляция от ЖИВОГО расширения: если оно подключено к WS-мосту во время прогона,
+    # act дёрнул бы реальный media('play') и трек заиграл бы → тест проверяет именно
+    # путь БЕЗ подтверждения, поэтому глушим авто-дожим (connected→False).
+    monkeypatch.setattr(A.browser_bridge, "connected", lambda: False)
     out = asyncio.run(A.act_node({"query": "включи трек X"}))
     assert "НЕ пошл" in out["final_answer"] and "mode" not in out
     assert "Что сейчас на странице" in out["final_answer"]  # показываем реальный снапшот
