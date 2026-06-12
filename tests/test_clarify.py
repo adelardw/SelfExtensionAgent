@@ -90,3 +90,22 @@ def test_routing_clarify_gate():
     assert route_after_goal({"mode": "reason", "needs_clarify_gate": True}) == "reason"
     # heavy тоже проходит через гейт, fast/clarify сюда не доходят (goal только для deliberate/reason/heavy)
     assert route_after_goal({"mode": "heavy", "needs_clarify_gate": True}) == "clarify_gate"
+
+
+def test_ask_user_options_fullwidth_pipe():
+    """Модель разделила варианты полноширинной «｜» — живой тест слепил их в один маркер."""
+    import asyncio
+    from src import clarify
+
+    seen = {}
+    def fake_clarifier(items):
+        seen["options"] = items[0]["options"]
+        return ["Да, открывай в браузере"]
+    clarify.set_clarifier(fake_clarifier)
+    clarify.reset_ledger()
+    tool = clarify.make_ask_user_tool()
+    out = asyncio.run(tool.coroutine(question="Открыть в браузере?",
+                                     options="Да, открывай в браузере｜Нет, нужно приложение"))
+    clarify.set_clarifier(None)
+    assert seen["options"] == ["Да, открывай в браузере", "Нет, нужно приложение"]
+    assert "Да, открывай" in out

@@ -13,3 +13,6 @@ logs
 # Secrets / runtime data
 .env
 data/
+config.local.yml
+data/browser_bridge.token
+data/browser_bridge.log

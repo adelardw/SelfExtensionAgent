@@ -63,6 +63,7 @@ skills:
   - app_control
   - ax_control
   - phone_control
+  - browser_control          # действия в браузере агента (browser_see — read-only, без вопросов)
   autosync: true
   temp_ttl_days: 7           # временные (не принятые в библиотеку) навыки старше TTL чистятся при старте
 mcp:

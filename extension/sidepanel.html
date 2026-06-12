@@ -1,0 +1,29 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  :root { color-scheme: light dark; }
+  body { font: 13px -apple-system, sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+  header { padding: 8px 12px; border-bottom: 1px solid #8884; display: flex; justify-content: space-between; align-items: center; }
+  #status { font-size: 11px; } .ok { color: #2da44e; } .off { color: #b00; }
+  #log { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  .msg { margin: 6px 0; padding: 7px 10px; border-radius: 10px; max-width: 90%; white-space: pre-wrap; }
+  .me { background: #2f81f7; color: #fff; margin-left: auto; }
+  .ag { background: #8882; }
+  footer { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #8884; }
+  #inp { flex: 1; padding: 7px; border-radius: 8px; border: 1px solid #8886; }
+  button { padding: 7px 12px; cursor: pointer; border-radius: 8px; border: 0; background: #2f81f7; color: #fff; }
+  .setup { padding: 10px 12px; } .setup input { width: 100%; box-sizing: border-box; padding: 6px; margin: 6px 0; }
+  .hint { color: #888; font-size: 11px; }
+</style></head><body>
+  <header><b>🤖 Агент</b><span id="status" class="off">○ нет связи</span></header>
+  <div id="setup" class="setup" style="display:none">
+    <p class="hint">Вставь токен из <code>data/browser_bridge.token</code> (агент печатает при старте):</p>
+    <input id="token" placeholder="токен">
+    <button id="save">Подключить</button>
+  </div>
+  <div id="log"></div>
+  <footer>
+    <input id="inp" placeholder="спроси агента или попроси что-то…">
+    <button id="send">▶</button>
+  </footer>
+  <script src="sidepanel.js"></script>
+</body></html>

@@ -12,7 +12,7 @@ load_dotenv()
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings", category=UserWarning)
 
 from langchain_openai.chat_models import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, ToolMessage
 from langgraph.graph import START, END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langchain.agents import create_agent
@@ -25,6 +25,7 @@ from .utils import (
     _skill_loadable,
     ensure_python_package,
     missing_module_from_error,
+    strip_tool_markup,
 )
 from .retrieval import bm25_rank
 from .prompts import (
@@ -60,6 +61,7 @@ from .structured_outputs import (
     ClarificationSet,
 )
 from . import bandit
+from . import browser_bridge
 from . import clarify
 from . import collective
 from . import habits
@@ -370,6 +372,11 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     взаимодействия — fast (System 1) / deliberate (System 2) / clarify. Отдельный
     модуль, чтобы режим можно было менять независимо от целеполагания.
     """
+    # Юзер зафиксировал режим в /config — мета-контроллер не выбирает (и не тратит вызов).
+    forced = (state.get("force_mode") or "").strip().lower()
+    if forced in ("fast", "reason", "act", "deliberate", "heavy"):
+        return {"mode": forced, "needs_clarify_gate": False}
+
     # Бандит-прайор (контур C): Beta/Thompson по похожим эпизодам юзера — добавляет
     # НЕГАТИВНОЕ свидетельство (few-shots несут только успехи). Прайор, не диктат;
     # едет в существующем слоте memory_context — ядро reflexion не тронуто.
@@ -422,7 +429,9 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
 def _skills_for_act(query: str, top: int = 2) -> list[str]:
     """Дешёвый ToolSearch для act-режима: BM25 по ПОЛНЫМ md навыков (описание в реестре
     обрезано — ключевые слова инструментов теряются), без LLM: селектор-LLM был бы
-    дороже самого действия."""
+    дороже самого действия. device_control добирается ВСЕГДА (если есть): act — это
+    действия с устройством, а лексика запроса («включи северслат…») часто не пересекается
+    с md навыка — живой тест оставил act без рук."""
     from .tools.skill_creation import SKILLS_DIR
 
     registry = _load_registry()
@@ -437,7 +446,29 @@ def _skills_for_act(query: str, top: int = 2) -> list[str]:
             doc = str(meta.get("description", ""))
         names.append(n)
         docs.append(f"{n} {doc}")
-    return [names[i] for i in bm25_rank(docs, query, top)]
+    picked = [names[i] for i in bm25_rank(docs, query, top)]
+    # Базовые «руки» добираются всегда: структурный браузер (треки/видео/сайты) и
+    # устройство (приложения/скриншот) — лексика запроса часто не пересекается с md.
+    for base in ("browser_control", "device_control"):
+        if base in registry and base not in picked:
+            picked.append(base)
+    return picked
+
+
+def _history_messages(state: GeneralGraphState, keep: int = 8) -> list:
+    """chat_history (dict-реплики) → реальные Human/AIMessage для модели (MessagesPlaceholder-
+    стиль). Отбрасываем хвостовое user-сообщение — это и есть текущий query (идёт отдельно)."""
+    hist = list(state.get("chat_history", []) or [])
+    if hist and hist[-1].get("role") == "user":
+        hist = hist[:-1]
+    out = []
+    for h in hist[-keep:]:
+        content = h.get("content", "")
+        if not content:
+            continue
+        out.append(HumanMessage(content=content) if h.get("role") == "user"
+                   else AIMessage(content=content))
+    return out
 
 
 async def act_node(state: GeneralGraphState) -> dict:
@@ -455,9 +486,10 @@ async def act_node(state: GeneralGraphState) -> dict:
     tools.append(clarify.make_ask_user_tool())
     sys_text = act_system_prompt.format(
         memory_context=state.get("memory_context", "Память пуста."))
+    history = _history_messages(state)  # реальные Human/AIMessage диалога (контекст «любую/да»)
     deadline = min(STEP_DEADLINE_CAP, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
     try:
-        output, msgs = await _exec_direct(sys_text, query, tools, deadline)
+        output, msgs = await _exec_direct(sys_text, query, tools, deadline, history=history)
     except Exception as e:  # noqa: BLE001
         print(f"[Act] failed → deliberate: {type(e).__name__}: {e}")
         return {"mode": "deliberate"}
@@ -465,10 +497,49 @@ async def act_node(state: GeneralGraphState) -> dict:
     refused = any(REFUSAL_MARK in (getattr(m, "content", "") or "") for m in msgs)
     if refused:  # отказ человека — не провал и не повод эскалировать
         return {"final_answer": output, "user_blocked": True}
-    called = [tc.get("name", "") for m in msgs for tc in (getattr(m, "tool_calls", None) or [])]
     # Заземление действия: без вызова инструмента «сделал» — это текст, не действие.
+    # ask_user — НЕ действие (живой тест: act спросил юзера, получил «да» и сдался с
+    # «нет инструментов» — а должен был эскалировать; ответ юзера едет дальше в ledger).
+    called = [tc.get("name", "") for m in msgs for tc in (getattr(m, "tool_calls", None) or [])
+              if tc.get("name") != "ask_user"]
     if not called or "ESCALATE" in (output or "").upper()[:200]:
         return {"mode": "deliberate"}
+
+    # ЗАЗЕМЛЕНИЕ ВОСПРОИЗВЕДЕНИЯ: на просьбу «включи/поставь/запусти трек/видео/музыку»
+    # успех = РЕАЛЬНЫЙ звук, подтверждённый результатом тула («ЗВУК ИГРАЕТ»/«играет N»),
+    # а не слова модели и не общая заглушка. Иначе — честный статус + последний снапшот.
+    q_low = query.lower()
+    play_intent = (any(w in q_low for w in ("включи", "поставь", "запусти", "вруби", "сыграй", "play")) and
+                   any(w in q_low for w in ("трек", "песн", "музык", "видео", "альбом", "плейлист", "подборк", "radio", "клип")))
+    tool_msgs = [m for m in msgs if m.__class__.__name__ == "ToolMessage"]
+    tool_texts = " ".join(m.content for m in tool_msgs if isinstance(getattr(m, "content", ""), str))
+    _is_playing = lambda t: ("ЗВУК ИГРАЕТ" in t) or bool(re.search(r"играет\s+[1-9]", t))
+    confirmed = _is_playing(tool_texts)
+    low = (output or "").lower()
+    claims_playing = any(w in low for w in ("играет", "включил", "запустил", "воспроизвод"))
+
+    # ДЕТЕРМИНИРОВАННЫЙ ДОЖИМ ПЛЕЯ: дешёвая модель открывает страницу и бросает, не нажав
+    # «Воспроизведение» (живой лог: кнопки [39..] в снапшоте, но клика нет). На play-intent
+    # нода САМА жмёт плей через browser_media('play') (он кликает первую кнопку play) —
+    # не полагаясь на модель. Одна попытка, потом честный статус.
+    if play_intent and not confirmed and browser_bridge.connected():
+        try:
+            res = await browser_bridge.media("play")  # кликает первую кнопку «Воспроизведение»
+            if _is_playing(res or ""):
+                m = re.search(r"ИГРАЕТ\s*\(([^)]+)\)", res or "")  # реальное название из mediaSession
+                what = f": {m.group(1)}" if m else ""
+                return {"final_answer": f"Запустил, играет фоном{what}. 🎧 Вкладка в твоём браузере."}
+            tool_texts = (tool_texts + " " + str(res))[-800:]
+        except Exception as e:  # noqa: BLE001
+            print(f"[Act] авто-плей не вышел: {type(e).__name__}")
+
+    if (play_intent or claims_playing) and not _is_playing(tool_texts):
+        last = tool_texts[-400:].strip()
+        tail = f"\n\nЧто сейчас на странице:\n{last}" if last else ""
+        return {"final_answer": (
+            "Открыл нужную страницу, но воспроизведение пока НЕ пошло (возможно, нужно войти "
+            "в аккаунт в этом окне или нажать плей на нужном результате). Скажи «нажми плей» — "
+            "доведу." + tail)}
     return {"final_answer": output}
 
 
@@ -983,36 +1054,89 @@ async def _exec_compose(system: str, goal: str, deadline: float) -> tuple[str, l
     return (resp.content if hasattr(resp, "content") else str(resp)), []
 
 
-async def _exec_direct(system: str, goal: str, tools: list, deadline: float) -> tuple[str, list]:
+_DIRECT_ROUNDS = 6  # максимум раундов «вызов → инструменты» в direct-шаге (анти-runaway);
+                    # 6 — реальные браузер-цепочки: открыть→see→клик→опция→в корзину→see
+
+
+async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
+                       history: list | None = None) -> tuple[str, list]:
     """
-    direct-шаг: БЕЗ ReAct-петли. Один вызов с привязанными тулами → если нужен тул,
-    исполняем (≤MAX_DIRECT_TOOLCALLS, вывод сжат) → один финальный вызов за ответом.
-    Это 1–2 LLM-вызова вместо петли — основной выигрыш по стоимости/латентности.
+    direct-шаг: лёгкая петля «вызов → инструменты» (≤_DIRECT_ROUNDS раундов, вывод сжат) —
+    1–2 LLM-вызова в типовом случае. Тулы привязаны и в продолжениях: живой прогон показал,
+    что финал БЕЗ тулов заставляет модель эмитить DSML-маркап вызова ТЕКСТОМ («включи
+    музыку»: open_url выполнен, дальше маркап утёк юзеру как ответ). Финал чистится
+    strip_tool_markup; пустота → отдельный итоговый вызов без инструментов.
+    history — РЕАЛЬНЫЕ сообщения диалога (Human/AIMessage), идут перед текущим запросом
+    (MessagesPlaceholder-стиль): эллиптичные «любую/да» получают контекст из ролей, а не
+    из текстового поля промпта.
     """
     if not tools:
         return await _exec_compose(system, goal, deadline)
     by_name = {t.name: t for t in tools}
     llm_t = code_llm.bind_tools(tools)
-    msgs: list = [SystemMessage(content=system), HumanMessage(content=goal)]
+    msgs: list = [SystemMessage(content=system), *(history or []), HumanMessage(content=goal)]
     resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
-    tool_calls = getattr(resp, "tool_calls", None) or []
-    if not tool_calls:  # тул не понадобился — это и есть ответ
-        return (resp.content if hasattr(resp, "content") else str(resp)), msgs + [resp]
-    msgs.append(resp)
-    for tc in tool_calls[:MAX_DIRECT_TOOLCALLS]:
-        t = by_name.get(tc.get("name"))
-        if t is None:
-            out = f"(нет инструмента {tc.get('name')})"
-        else:
-            try:
-                out = await asyncio.wait_for(t.ainvoke(tc.get("args", {})), timeout=deadline)
-            except Exception as e:  # noqa: BLE001
-                out = f"(ошибка инструмента: {type(e).__name__}: {e})"
-        s = out if isinstance(out, str) else str(out)
-        s, _flag = sanitize_tool_output(s, source=tc.get("name", "инструмент"))  # анти-инъекция
-        msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
-    final = await asyncio.wait_for(code_llm.ainvoke(msgs), timeout=deadline)
-    return (final.content if hasattr(final, "content") else str(final)), msgs + [final]
+    rounds, nudged = 0, False
+    seen_calls: set[str] = set()  # анти-зацикливание: тот же тул с теми же аргументами
+    while True:
+        calls = getattr(resp, "tool_calls", None) or []
+        if not calls:
+            # Модель НАЧАЛА действовать, но закончила ход ОБЕЩАНИЕМ («давай открою…»)
+            # вместо вызова — один толчок: действуй или итожь (живой тест: act замирал
+            # на полпути). Толчок единственный — без риска зацикливания.
+            if rounds > 0 and not nudged:
+                msgs.append(resp)
+                msgs.append(HumanMessage(content=(
+                    "Не обещай следующее действие — сделай его ВЫЗОВОМ инструмента прямо "
+                    "сейчас. Если задача уже доведена до конца — дай краткий итог "
+                    "РЕЗУЛЬТАТА (что сделано), без планов и обещаний.")))
+                nudged = True
+                resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
+                continue
+            break
+        if rounds >= _DIRECT_ROUNDS:
+            break
+        msgs.append(resp)
+        for tc in calls[:MAX_DIRECT_TOOLCALLS]:
+            sig = f"{tc.get('name')}({tc.get('args')})"
+            if sig in seen_calls:  # живой тест: open_url того же URL по кругу
+                msgs.append(ToolMessage(
+                    content="(этот вызов с теми же аргументами УЖЕ выполнялся — не повторяй; "
+                            "смени подход или заверши с итогом)",
+                    tool_call_id=tc.get("id", "")))
+                continue
+            seen_calls.add(sig)
+            t = by_name.get(tc.get("name"))
+            if t is None:
+                out = f"(нет инструмента {tc.get('name')})"
+            else:
+                try:
+                    out = await asyncio.wait_for(t.ainvoke(tc.get("args", {})), timeout=deadline)
+                except Exception as e:  # noqa: BLE001
+                    out = f"(ошибка инструмента: {type(e).__name__}: {e})"
+            s = out if isinstance(out, str) else str(out)
+            s, _flag = sanitize_tool_output(s, source=tc.get("name", "инструмент"))  # анти-инъекция
+            msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
+        rounds += 1
+        resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
+
+    text = strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp))
+    if not text.strip():
+        # модель упёрлась в маркап/пустоту → попросим словесный итог БЕЗ инструментов
+        final = await asyncio.wait_for(code_llm.ainvoke(
+            msgs + [resp, HumanMessage(content="Кратко сообщи пользователю итог сделанного "
+                                               "(без вызова инструментов и без разметки).")]),
+            timeout=deadline)
+        text = strip_tool_markup(final.content if hasattr(final, "content") else str(final))
+        if not text:
+            # Никакого «Действие выполнено» вслепую: покажем РЕАЛЬНЫЙ последний результат тула.
+            last_tool = next((m.content for m in reversed(msgs)
+                              if m.__class__.__name__ == "ToolMessage"
+                              and isinstance(getattr(m, "content", ""), str)), "")
+            text = (f"Готово. Текущее состояние:\n{last_tool[-500:]}" if last_tool
+                    else "Действие выполнено.")
+        return text, msgs + [resp, final]
+    return text, msgs + [resp]
 
 
 async def _exec_research(system: str, goal: str, tools: list, deadline: float) -> tuple[str, list]:
@@ -1166,10 +1290,19 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # страховка от зависания; но основную экономию даёт сам выбор lean-пути для direct/compose.
     kind = step.get("kind", "research")
     refused = False
-    # Веб-фактосбор → ВСЕГДА дисциплинированный agentic research, даже если decompose
-    # пометил 'direct'. Признак — ВЫБРАН веб-навык (см. _web_step: матчить по именам
-    # ТУЛОВ нельзя — search_memory/search_knowledge_base прицеплены к каждому шагу).
-    _is_web = _web_step(selected)
+    # Research-путь — ТОЛЬКО для research-шагов при выбранном веб-навыке. ПО-ШАГОВО, не
+    # на весь прогон: в смешанной задаче («найди трек и включи») шаг-ДЕЙСТВИЕ иначе уходит
+    # в research без рук и «выполняется» текстом (живой тест). См. _web_step про имена тулов.
+    _is_web = _web_step(selected) and kind == "research"
+
+    # Динамический добор «рук» под шаг-ДЕЙСТВИЕ: селектор мог выбрать только веб-навыки
+    # (для исследовательской части), оставив «включи/открой» без инструментов устройства.
+    # BM25-подбор по цели шага (без LLM) + базовый device_control.
+    if kind == "direct":
+        extra = [s for s in _skills_for_act(step.get("goal", "")) if s not in selected]
+        if extra:
+            have = {t.name for t in tools}
+            tools.extend(t for t in get_all_loaded_skill_tools(extra) if t.name not in have)
     # Дедлайн шага: остаток бюджета, НО не больше потолка. Веб-research НЕ ретраится и
     # сам ограничен по времени → даём ему БОЛЬШЕ (полный multi-hop: 3-4 под-вопроса),
     # обычным шагам — STEP_DEADLINE_CAP (анти-монополия). Wall-clock всё равно общий потолок.
@@ -1253,7 +1386,7 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         "clarifications": clarify.format_ledger(),
         "step_results": results_text,
     })
-    answer = (resp.content if hasattr(resp, "content") else str(resp)) or ""
+    answer = strip_tool_markup((resp.content if hasattr(resp, "content") else str(resp)) or "")
     # Guard от пустого/протёкшего финала. НЕ отдаём сырой текст шага, если он похож на
     # ПЛАН/ПРОЦЕСС («[Шаг N]…», «Navigate to…», «Найти/Открыть…») — это не ответ
     # (AB вскрыл: финал = «[Шаг 3] Navigate to Zillow…»). Лучше честный отказ.

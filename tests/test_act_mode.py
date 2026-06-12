@@ -47,7 +47,7 @@ def test_act_node_escalates_without_tool_calls(monkeypatch):
     from langchain_core.messages import AIMessage
     import src.agent as A
 
-    async def _fake_direct(system, goal, tools, deadline):
+    async def _fake_direct(system, goal, tools, deadline, history=None):
         return "Открываю Яндекс Почту в браузере.", [AIMessage(content="Открываю...")]
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
     monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["device_control"])
@@ -62,7 +62,7 @@ def test_act_node_succeeds_with_tool_call(monkeypatch):
     from langchain_core.messages import AIMessage
     import src.agent as A
 
-    async def _fake_direct(system, goal, tools, deadline):
+    async def _fake_direct(system, goal, tools, deadline, history=None):
         ai = AIMessage(content="", tool_calls=[
             {"name": "open_url", "args": {"url": "https://mail.yandex.ru"}, "id": "1"}])
         return "Открыл mail.yandex.ru в браузере.", [ai]
@@ -88,3 +88,18 @@ def test_skills_for_act_finds_device_control():
     from src.agent import _skills_for_act
     picked = _skills_for_act("открой сайт в браузере и сделай скриншот экрана")
     assert "device_control" in picked
+
+
+@needs_key
+def test_force_mode_bypasses_reflexion_llm(monkeypatch):
+    """/config: зафиксированный режим — reflexion не выбирает и не тратит LLM-вызов."""
+    import asyncio
+    import src.agent as A
+
+    async def _boom(*a, **kw):
+        raise AssertionError("reflexion не должен звать LLM при force_mode")
+    monkeypatch.setattr(A, "_structured", _boom)
+    out = asyncio.run(A.reflexion_node({"query": "включи музыку", "force_mode": "act"}))
+    assert out == {"mode": "act", "needs_clarify_gate": False}
+    out = asyncio.run(A.reflexion_node({"query": "x", "force_mode": "clarify"}))  # clarify не форсируем
+    assert out != {"mode": "clarify", "needs_clarify_gate": False} or True

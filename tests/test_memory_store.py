@@ -78,3 +78,18 @@ def test_prune(store):
     removed = store.prune(max_episodes=5, max_facts=300, max_reflections=200)
     assert isinstance(removed, dict)
     assert store.episode_count(UID) <= 5
+
+
+def test_implicit_feedback_fail_reaction(store):
+    """«не слышу» после «Включаю трек» — реакция-провал, а не новая размытая задача."""
+    from src.memory import feedback
+
+    store.add_episode(UID, "найди трек purple hearts и включи его", "Включаю трек.",
+                      outcome="ok", confidence=0.8, mode="deliberate")
+    sig = feedback.detect(store, UID, "не слышу", low_conf=0.6)
+    assert feedback.is_negative(sig)
+    assert "не дало эффекта" in sig and "purple hearts" in sig
+    # длинный новый запрос со словами «не работает» в середине — НЕ реакция
+    long_q = ("напиши подробный отчёт о том, почему сервис авторизации не работает "
+              "под нагрузкой и как это чинить, с планом и метриками")
+    assert "не дало эффекта" not in feedback.detect(store, UID, long_q, low_conf=0.6)
