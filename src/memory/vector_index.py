@@ -18,6 +18,16 @@ from typing import Optional
 # Порог, с которого имеет смысл идти через ANN, а не линейно.
 MIN_VECTORS = 32
 
+
+def _unit(vec: list[float]):
+    """L2-нормировка → IdMapIndex ранжирует по inner-product, а на единичных векторах
+    IP = cosine (как линейный фолбэк и cosine() в store). Без неё норма исказила бы ранг."""
+    import numpy as np
+
+    a = np.asarray(vec, dtype=np.float32)
+    n = float(np.linalg.norm(a))
+    return (a / n) if n > 0 else a
+
 try:
     import numpy as np
     from turbovec import IdMapIndex
@@ -53,7 +63,7 @@ class VectorIndex:
         if not vec or len(vec) != self.dim or row_id in self._ids:
             return
         try:
-            v = np.asarray([vec], dtype=np.float32)
+            v = np.asarray([_unit(vec)], dtype=np.float32)
             ids = np.asarray([row_id], dtype=np.uint64)
             self._index.add_with_ids(v, ids)
             self._ids.add(row_id)
@@ -65,7 +75,7 @@ class VectorIndex:
         if not qvec or len(qvec) != self.dim or not self._ids:
             return []
         try:
-            q = np.asarray([qvec], dtype=np.float32)
+            q = np.asarray([_unit(qvec)], dtype=np.float32)
             kwargs = {}
             if allowed:
                 allow = np.asarray([i for i in allowed if i in self._ids], dtype=np.uint64)

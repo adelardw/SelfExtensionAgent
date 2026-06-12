@@ -7,6 +7,7 @@ class GeneralGraphState(TypedDict):
     # ── Input ──
     query: str
     user_id: str  # идентификатор пользователя для долгой памяти (thread_id / tg user id)
+    session_id: str  # идентификатор СЕССИИ/чата для временных приложенных файлов (ярус 3)
     messages: Annotated[list, add_messages]
     chat_history: list[dict]  # [{role: "user"|"assistant", content: str}] — управляется из main.py
 

@@ -23,6 +23,9 @@ from src.clarify import set_clarifier
 from src.hitl import set_confirmer
 from src.llm import active_summary, set_provider
 from src.media import AUDIO_EXTS, DOC_EXTS, IMAGE_EXTS, TEXT_EXTS, attachment_context, transcribe_audio
+from src.knowledge_base import (
+    add_document_async, add_session_file, create_folder, list_kb, clear_session, search_kb_async,
+)
 from src.progress import stream_with_progress
 from src.tracing import diagnose, trace_store
 from src.usage import TokenTracker, add_alltime, cost_of, load_alltime
@@ -84,7 +87,8 @@ def banner() -> None:
         f"Активно: [cyan]{active_summary()}[/]\n"
         f"Режимы: {legend}\n"
         f"Команды: [dim]/model /voice /help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]\n"
-        f"Вложения: [dim]упомяни путь к файлу/картинке в запросе — подхвачу автоматически[/]"
+        f"Файлы: [dim]/attach <файл> — в сессию (tmp, мультимодал)  ·  /kb add|ls|mkdir|find — личная база знаний (граф)[/]\n"
+        f"Вложения: [dim]или упомяни путь к файлу в запросе — подхвачу автоматически[/]"
     )
     console.print(Panel(body, title="🤖 Self-Extension Agent", border_style="bright_blue", expand=False))
 
@@ -287,6 +291,38 @@ async def _repl_clarify(items: list[dict]) -> list[str]:
     return answers
 
 
+async def cmd_attach(args: list[str], session_id: str) -> None:
+    """Приложить файл(ы) к ТЕКУЩЕЙ сессии (tmp, мультимодал — pdf/image/audio/video)."""
+    paths = [Path(a).expanduser() for a in args]
+    if not paths:
+        console.print("[dim]/attach <путь> [ещё...] — приложить файл(ы) к этой сессии[/]"); return
+    for p in paths:
+        if not p.exists():
+            console.print(f"[red]нет файла: {p}[/]"); continue
+        msg = await asyncio.to_thread(add_session_file, session_id, str(p))
+        console.print(f"[green]📎 {msg}[/]")
+
+
+async def cmd_kb(args: list[str], user_id: str) -> None:
+    """Глобальная база знаний: add <файл> [папка] · ls · mkdir <папка> · find <запрос>."""
+    sub = (args[0].lower() if args else "")
+    if sub == "add" and len(args) >= 2:
+        folder = args[2] if len(args) >= 3 else ""
+        console.print("[dim]индексирую в граф LightRAG…[/]")
+        msg = await add_document_async(user_id, str(Path(args[1]).expanduser()), folder)
+        console.print(f"[green]📚 {msg}[/]")
+    elif sub == "ls":
+        console.print(Panel(await asyncio.to_thread(list_kb, user_id), title="📚 База знаний", border_style="cyan", expand=False))
+    elif sub == "mkdir" and len(args) >= 2:
+        rel = await asyncio.to_thread(create_folder, user_id, args[1])
+        console.print(f"[green]📁 создана папка: {rel}[/]")
+    elif sub == "find" and len(args) >= 2:
+        res = await search_kb_async(user_id, " ".join(args[1:]))
+        console.print(Panel(res[:1500], title="🔎 БЗ", border_style="cyan", expand=False))
+    else:
+        console.print("[dim]/kb add <файл> [папка]  ·  /kb ls  ·  /kb mkdir <папка>  ·  /kb find <запрос>[/]")
+
+
 async def _repl_confirm(description: str) -> bool:
     """Human-in-the-loop: подтверждение side-effect действия прямо в терминале."""
     console.print(Panel(description, title="⚠️  Агент просит разрешение на действие",
@@ -323,10 +359,15 @@ async def main():
             if low in ("exit", "quit", "q"):
                 break
             if low in ("/new", "new"):
+                clear_session(thread_id)  # ярус 3: временные файлы старой сессии не переносим
                 thread_id = str(uuid.uuid4())
                 chat_history = []
-                console.print("[dim]Новый тред.[/]")
+                console.print("[dim]Новый тред (приложенные файлы сессии очищены).[/]")
                 continue
+            if low.startswith("/attach"):
+                await cmd_attach(query.split()[1:], thread_id); continue
+            if low.startswith("/kb"):
+                await cmd_kb(query.split()[1:], user_id); continue
             if low in ("/help", "help", "?"):
                 banner(); continue
             if low.startswith("/model"):
@@ -363,7 +404,7 @@ async def main():
 
                     result = await stream_with_progress(
                         graph,
-                        {"query": full_query, "user_id": user_id,
+                        {"query": full_query, "user_id": user_id, "session_id": thread_id,
                          "chat_history": chat_history + [{"role": "user", "content": query}]},
                         config={"configurable": {"thread_id": thread_id}, "recursion_limit": 50,
                                 "callbacks": [tracker]},
@@ -386,6 +427,7 @@ async def main():
             console.print(f"[dim]🧮 токены: {_k(di)} in + {_k(do)} out = {_k(di+do)} "
                           f"(~${cost_of(di, do):.4f}) · сессия {_k(tracker.total)} · /usage[/]")
 
+        clear_session(thread_id)  # ярус 3 не переживает выход из сессии
         console.print("[dim]Пока![/]")
 
 

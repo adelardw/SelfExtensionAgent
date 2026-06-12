@@ -74,6 +74,10 @@ from .memory_tools import make_memory_tools, clear_scratch
 from .research import make_deep_research_tool, agentic_research
 from .compute import make_compute_tool
 from .media import make_pdf_vision_tool
+from .knowledge_base import (
+    make_kb_tool, kb_has_docs, search_kb_async,
+    make_session_kb_tool, session_has_files, search_session,
+)
 from .tracing import traced, new_run, current_run, trace_store, diagnose
 from .tools import get_manager_tools, get_all_loaded_skill_tools, get_skill_runtime_prompts, sync_registry
 from .tools.skill_creation import (
@@ -247,6 +251,27 @@ async def recall_node(state: GeneralGraphState) -> dict:
     if profile:
         memory_context = f"{profile}\n\n{memory_context}"
 
+    # AutoRAG: авто-подмешивание релевантных кусков из ЛИЧНОЙ БЗ юзера + приложенных в
+    # ЭТОЙ сессии файлов (если есть). Агент отвечает из документов юзера БЕЗ явного вызова
+    # тула; тулы search_knowledge_base/search_attached_files остаются для глубокого поиска.
+    sess = state.get("session_id") or user_id
+    kb_bits = []
+    _own = ("Это СОБСТВЕННЫЕ данные пользователя (он сам их приложил/загрузил). Если они "
+            "содержат ответ — отвечай ПРЯМО и сразу, без отказов по «конфиденциальности» и "
+            "без лишних уточнений.")
+    if session_has_files(sess):
+        s = search_session(sess, query, k=3)
+        if s and "не нашлось" not in s and "не приложено" not in s:
+            kb_bits.append(f"[Файлы, приложенные в этой сессии. {_own}]\n" + s)
+    if kb_has_docs(user_id):
+        s = await search_kb_async(user_id, query, k=3)
+        if s and "не нашлось" not in s and "ничего нет" not in s:
+            kb_bits.append(f"[Из личной базы знаний пользователя. {_own}]\n" + s)
+    if kb_bits:
+        # Провенанс важен: это данные ВЛАДЕЛЬЦА, спрашивающего про свои же файлы — не путать
+        # с внешними/чужими секретами; отвечать прямо, без отказов по «конфиденциальности».
+        memory_context = "\n\n".join(kb_bits) + "\n\n" + memory_context
+
     # Онбординг: первый контакт с пользователем (нет ни эпизодов, ни фактов) —
     # агент представляется И узнаёт рабочий профиль, чтобы сразу подстроиться.
     if memory_store.episode_count(user_id) == 0 and not memory_store.get_facts(user_id):
@@ -336,9 +361,16 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
         print(f"[Reflexion] failed, fallback deliberate: {e}")
         return {"mode": "deliberate"}  # безопасный фолбэк (не мисхэндлит action-задачи)
 
+    mem = state.get("memory_context", "") or ""
+    # AutoRAG-провенанс: если в контексте есть СОБСТВЕННЫЕ документы юзера (приложенные файлы
+    # сессии / личная БЗ), они обычно снимают мнимую неоднозначность («какой именно X») —
+    # глушим clarify, кроме КРАЙНЕЙ размытости (>0.85). Свои данные → отвечать, не переспрашивать.
+    has_own = ("приложенные в этой сессии" in mem) or ("личной базы знаний" in mem)
+    if has_own and decision.mode == "clarify" and decision.ambiguity < 0.85:
+        decision.mode = "fast"
+
     # Ambiguity-гейт (идея Ouroboros): слишком неоднозначно → переспросить, а не гадать.
-    if decision.ambiguity >= AMBIGUITY_GATE and decision.mode != "clarify":
-        mem = state.get("memory_context", "") or ""
+    if decision.ambiguity >= AMBIGUITY_GATE and decision.mode != "clarify" and not (has_own and decision.ambiguity < 0.85):
         need = decision.missing_info or "уточни, что именно нужно"
         return {"mode": "clarify", "memory_context": f"⚠ Неясно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}"}
     # Гейт ОБОСНОВАННОСТИ (ход юзера: reflexion проверяет, может ли ДОСТОВЕРНО ответить сам).
@@ -901,7 +933,15 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
 
     # Память-как-TOOL: агент САМ решает подтянуть память/восстановить полную историю
     # (drill-back), а не только получать авто-впрыск. Привязаны к user_id прогона.
-    tools.extend(make_memory_tools(memory_store, state.get("user_id") or "default"))
+    uid = state.get("user_id") or "default"
+    tools.extend(make_memory_tools(memory_store, uid))
+    # База знаний юзера: поиск по ЕГО документам (если БЗ не пуста — иначе анти-bloat).
+    if kb_has_docs(uid):
+        tools.append(make_kb_tool(uid))
+    # Ярус 3: файлы, приложенные В ЭТОЙ СЕССИИ (tmp). Тул только если что-то приложено.
+    sess = state.get("session_id") or uid
+    if session_has_files(sess):
+        tools.append(make_session_kb_tool(sess))
 
     # Вычислительный слой: точные расчёты/агрегация над найденными данными (LLM-арифметика
     # ненадёжна). Доступен всегда — вычисления универсальны для любой задачи.
