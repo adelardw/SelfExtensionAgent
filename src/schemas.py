@@ -22,7 +22,8 @@ class GeneralGraphState(TypedDict):
     goal_rubric: list[str]    # критерии успеха активной цели (DeepAgents-style rubric)
 
     # ── Self-Reflexion Choice (meta-controller) ──
-    mode: str                 # "fast" | "reason" | "deliberate" | "heavy" | "clarify" — тип мышления
+    mode: str                 # "fast" | "reason" | "act" | "deliberate" | "heavy" | "clarify" — тип мышления
+    force_mode: str           # юзер зафиксировал режим в /config — reflexion не выбирает ("" = авто)
     revision_rounds: int      # heavy: сколько раундов «сквозной ревью → доработка» уже прошло
     steps_executed: int       # глобальный счётчик исполнений шага на прогон (бюджет от runaway)
     needs_clarify_gate: bool  # средняя неоднозначность → собрать батч уточнений перед исполнением

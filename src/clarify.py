@@ -121,7 +121,10 @@ def make_ask_user_tool():
     from langchain_core.tools import StructuredTool
 
     async def _ask_user(question: str, options: str = "") -> str:
-        opts = [o.strip() for o in options.split("|") if o.strip()] if options else []
+        # Модели разделяют варианты и обычной «|», и полноширинной «｜» (живой тест:
+        # «Да…｜Нет…» слиплось в ОДИН вариант) — нормализуем перед сплитом.
+        opts = ([o.strip() for o in options.replace("｜", "|").split("|") if o.strip()]
+                if options else [])
         ans = await ask_one(question, opts, why="запрошено исполнителем шага")
         return f"Ответ пользователя: {ans}"
 

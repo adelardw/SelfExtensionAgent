@@ -34,9 +34,11 @@ def _cur() -> list:
     return cur
 
 
-def record_hitl(action: str, approved: bool) -> None:
-    """HITL-решение по side-effect действию. action = 'skill.tool(args…)'."""
-    _cur().append({"type": "hitl", "action": action, "approved": approved, "ts": time.time()})
+def record_hitl(action: str, approved: bool, note: str = "") -> None:
+    """HITL-решение по side-effect действию. action = 'skill.tool(args…)';
+    note — содержательная часть семантического ответа (условие/причина/указание)."""
+    _cur().append({"type": "hitl", "action": action, "approved": approved,
+                   "note": note, "ts": time.time()})
 
 
 def events() -> list[dict]:
@@ -57,10 +59,11 @@ def harvest(store, user_id: str, clarify_items: list[dict] | None = None) -> int
     for ev in _cur():
         if ev["type"] == "hitl" and not ev["approved"]:
             tool = _tool_of(ev["action"])
+            extra = f" Его слова: «{ev['note'][:120]}»." if ev.get("note") else ""
             store.add_fact(
                 user_id=user_id,
                 key=f"hitl-отказ: {tool}",
-                value=(f"Пользователь отклонил действие {ev['action'][:160]} — не выполнять и "
+                value=(f"Пользователь отклонил действие {ev['action'][:160]}.{extra} Не выполнять и "
                        "не предлагать подобное без его явной просьбы; сначала спрашивать."),
                 importance=0.7,
                 tags=["hitl", "preference"],

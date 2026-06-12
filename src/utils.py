@@ -13,6 +13,30 @@ from pathlib import Path
 SMOKE_TEST_TIMEOUT: int = 15
 SMOKE_IMPORT_GRACE: int = 15  # запас wall-времени на импорт langchain в подпроцессе
 
+# Маркап тул-вызовов, который модель может эмитить ТЕКСТОМ (deepseek DSML, generic
+# <tool_call>): живой прогон показал утечку «<｜DSML｜invoke name="open_url"…>» прямо
+# в ответ пользователю. Это не ответ — это несостоявшийся вызов инструмента.
+_TOOL_MARKUP_RE = re.compile(
+    r"<[^<>]*｜DSML｜[^<>]*>|</?tool_calls?>|<｜tool[▁_]calls?[^>]*｜>|"
+    r"</?(?:invoke|parameter)\b[^<>]*>",
+    re.IGNORECASE)
+
+
+def strip_tool_markup(text: str) -> str:
+    """Убирает маркап тул-вызовов из текста ответа. Если после чистки остались лишь
+    обрывки аргументов (URL/имена параметров) — текст не был ответом, вернём ''."""
+    if not text:
+        return ""
+    low = text.lower()
+    if "｜dsml｜" not in low and "<tool_call" not in low and "<invoke" not in low:
+        return text
+    cleaned = _TOOL_MARKUP_RE.sub(" ", text)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned).strip()
+    # остался служебный мусор вызова, а не человеческий ответ → пусто (вызывающий сделает итог)
+    if len(cleaned) < 12 or re.fullmatch(r"[\w/:.?=+&%~#-]+", cleaned):
+        return ""
+    return cleaned
+
 # Импорт-имя → pip-имя для частых расхождений (авто-установка зависимостей навыков).
 MODULE_TO_PKG = {
     "pptx": "python-pptx",

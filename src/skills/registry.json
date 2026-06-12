@@ -129,5 +129,13 @@
     "updated_at": "2026-06-10T16:21:23.585796",
     "version": 1,
     "protected": true
+  },
+  "browser_control": {
+    "description": "# Skill: browser_control (core)\n\nПолноценные ДЕЙСТВИЯ в браузере: включить трек, включить видео, найти и запустить\nмузыку/фильм/плейлист, нажать кнопку на сайте, заполнить форму, залогиниться,\nходить ",
+    "has_tools": true,
+    "has_system_prompt": false,
+    "created_at": "2026-06-12T12:51:33.990841",
+    "updated_at": "2026-06-12T12:51:33.990850",
+    "version": 1
   }
 }
