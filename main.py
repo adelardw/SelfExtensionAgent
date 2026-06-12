@@ -308,8 +308,22 @@ async def cmd_kb(args: list[str], user_id: str) -> None:
     sub = (args[0].lower() if args else "")
     if sub == "add" and len(args) >= 2:
         folder = args[2] if len(args) >= 3 else ""
-        console.print("[dim]индексирую в граф LightRAG…[/]")
-        msg = await add_document_async(user_id, str(Path(args[1]).expanduser()), folder)
+        path = str(Path(args[1]).expanduser())
+        # Граф стоит денег (LLM-извлечение сущностей на каждый чанк) — прикидываем цену и
+        # спрашиваем ДО запуска (HITL). Отказ ≠ отмена: документ ляжет в бесплатный BM25.
+        use_graph = False
+        from src.lightrag_engine import estimate_index_cost, lightrag_available
+        if lightrag_available():
+            from src.media import read_file
+            text = await asyncio.to_thread(read_file, path, 200_000)
+            est = estimate_index_cost(text)
+            console.print(f"[yellow]⚖ граф LightRAG: ~{est['chunks']} чанков, "
+                          f"~{est['calls']} LLM-вызовов, ≈ ${est['usd']:.3f}[/]")
+            ans = await _paused_input("Индексировать в граф? [y/N — N: только бесплатный BM25] ")
+            use_graph = ans.strip().lower() in ("y", "yes", "д", "да")
+        if use_graph:
+            console.print("[dim]индексирую в граф LightRAG…[/]")
+        msg = await add_document_async(user_id, path, folder, use_graph=use_graph)
         console.print(f"[green]📚 {msg}[/]")
     elif sub == "ls":
         console.print(Panel(await asyncio.to_thread(list_kb, user_id), title="📚 База знаний", border_style="cyan", expand=False))

@@ -13,6 +13,7 @@ class GeneralGraphState(TypedDict):
 
     # ── Memory (recall) ──
     memory_context: str       # инъектируемый блок долгой памяти
+    own_docs: bool            # AutoRAG нашёл СОБСТВЕННЫЕ документы юзера (БЗ/сессия) → reflexion глушит мнимый clarify
     implicit_feedback: str    # гипотеза о неявной обратной связи пользователя
 
     # ── Self-reflection (goal) ──
@@ -55,6 +56,7 @@ class GeneralGraphState(TypedDict):
     create_retries: int
 
     # ── Use Skills branch ──
+    recipe_id: int            # применённый рецепт (скомпилированный опыт); 0 — холодный прогон
     selected_skills: list[str]
     plan: str
     skill_context: str
