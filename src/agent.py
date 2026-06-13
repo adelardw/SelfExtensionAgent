@@ -40,6 +40,8 @@ from .prompts import (
     reflection_prompt,
     step_execution_system_prompt,
     step_validation_prompt,
+    act_finalize_prompt,
+    search_query_prompt,
     synthesize_prompt,
     skill_retention_prompt,
     OPTIMIZABLE_PROMPTS,
@@ -159,6 +161,9 @@ if UNLEASH:
 RECALL_K: int = config.get("memory", {}).get("recall_k", 5)
 REFLECT_EVERY: int = config.get("memory", {}).get("reflect_every", 5)
 RECALL_BUDGET: int = config.get("memory", {}).get("recall_budget_chars", 1800)
+# Гейт ассоциативной памяти («recall не всегда»): эпизоды/выводы инжектятся, только если
+# лучший из них релевантен запросу (top_score>=gate); персона-факты — всегда. 0 = гейт выкл.
+RECALL_GATE: float = config.get("memory", {}).get("recall_gate", 0.0)
 MEM_CAPS = dict(
     max_episodes=config.get("memory", {}).get("max_episodes", 2000),
     max_facts=config.get("memory", {}).get("max_facts", 300),
@@ -166,7 +171,8 @@ MEM_CAPS = dict(
 )
 
 memory_store = MemoryStore(
-    db_path=config.get("memory", {}).get("db_path", "data/memory.db"),
+    # AGENT_MEMORY_DB — временный стор для бенча/изоляции (не пачкаем личную data/memory.db).
+    db_path=os.getenv("AGENT_MEMORY_DB") or config.get("memory", {}).get("db_path", "data/memory.db"),
     embedder=build_embedder(
         config.get("memory", {}).get("embeddings", False),
         config.get("memory", {}).get("embedding_model"),
@@ -192,7 +198,7 @@ def rebuild_llms() -> None:
     global llm, code_llm, deep_llm, route_chain, sgr_create_chain, test_case_chain
     global skill_selector_chain, validation_chain, validation_chain_b
     global memory_extraction_chain, reflection_chain, step_validation_chain
-    global synth_chain, create_skills_agent, skill_retention_chain
+    global synth_chain, act_finalize_chain, search_query_chain, create_skills_agent, skill_retention_chain
 
     llm = _chat("fast", config.model.temperature)
     code_llm = _chat("code", config.code_model.temperature)
@@ -211,6 +217,8 @@ def rebuild_llms() -> None:
     # _override_system → их промпты обучаемы (см. graph_learn).
     step_validation_chain = step_validation_prompt | llm.with_structured_output(StepOutcome)
     synth_chain = synthesize_prompt | llm
+    act_finalize_chain = act_finalize_prompt | llm  # чистая финализация act из РЕЗУЛЬТАТОВ
+    search_query_chain = search_query_prompt | llm  # запрос юзера → фокусный поисковый запрос
     skill_retention_chain = skill_retention_prompt | llm.with_structured_output(SkillRetention)
 
     create_skills_agent = create_agent(code_llm, get_manager_tools(), system_prompt=create_skills_system_prompt)
@@ -253,8 +261,13 @@ async def recall_node(state: GeneralGraphState) -> dict:
     user_id = state.get("user_id") or "default"
     clear_scratch(user_id)  # временный (runtime) ярус памяти живёт только в рамках прогона
     query = state["query"]
+    browser_bridge.set_user_domains(query)  # анти-тайпсквоттинг: домены, явно названные юзером
 
-    memory_context = memory_store.recall(user_id, query, k=RECALL_K, budget=RECALL_BUDGET)
+    # recall эмбеддит запрос (синхронный HTTP) → в to_thread, чтобы не блокировать event loop.
+    # Гейт RECALL_GATE: ассоциативная память (эпизоды/выводы) — только при релевантности;
+    # персона-факты остаются всегда («recall не всегда должен быть»).
+    memory_context, _recall_score = await asyncio.to_thread(
+        memory_store.recall_scored, user_id, query, k=RECALL_K, budget=RECALL_BUDGET, gate=RECALL_GATE)
     summary = memory_store.get_summary(user_id)
     if summary:
         memory_context = f"[Саммари сессии]\n{summary}\n\n{memory_context}"
@@ -419,6 +432,16 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
         print(f"[Reflexion] grounding {decision.grounding:.0%} < {GROUNDING_GATE:.0%}: "
               f"{mode}→deliberate (нет надёжной базы — заземляюсь, не гадаю)")
         mode = "deliberate"
+    # ДЕТЕРМИНИРОВАННЫЙ АНТИ-ВЫДУМКА ПОЛ (поверх самооценки модели и рецептов, которые гонят
+    # «лучшие суши адреса / где купить / как оформить» в fast/reason ИЛИ в deliberate, где
+    # synthesize дампит память и сочиняет адреса/сайты): запрос про конкретные внешние факты БЕЗ
+    # физ-интента → ВСЕГДА act, где act_node идёт детерминированным грунтованным поиском (сам
+    # ищет headless, синтез строго из находок). Анти-галлюцинация — жёсткое требование проекта.
+    if mode != "clarify" and _needs_web_grounding(state["query"]) and not _wants_physical_browser(state["query"]):
+        if mode != "act":
+            print(f"[Reflexion] нужны реальные внешние факты (адреса/цены/сайты/процедура) → "
+                  f"{mode}→act (детерминированный грунтованный поиск, не выдумываю)")
+        mode = "act"
 
     # ЗАЗЕМЛЕНИЕ ТЕКУЩЕГО ВЕБ-КОНТЕНТА (анти-выдумка, детерминированно поверх самооценки
     # модели): запрос «НАЙДИ/ПОКАЖИ варианты» актуального каталога/выдачи (видео, обзоры,
@@ -453,14 +476,32 @@ def _skills_for_act(query: str, top: int = 2) -> list[str]:
         names.append(n)
         docs.append(f"{n} {doc}")
     picked = [names[i] for i in bm25_rank(docs, query, top)]
-    # Базовые «руки» ВСЕГДА: структурный браузер (визуал/воспроизведение/действие),
-    # устройство (приложения/скриншот) и web_search (headless-чтение выдачи). Так в лёгком
-    # browse-цикле LLM сам выбирает read-vs-physical (читать дёшево headless vs действовать в
-    # физ-браузере), не угадываем лексикой запроса — md часто не пересекается с формулировкой.
-    for base in ("browser_control", "device_control", "web_search"):
+    # web_search (headless-чтение выдачи) — ВСЕГДА: поиск/анализ/факты идут БЕЗ физ-вкладки.
+    # ФИЗИЧЕСКИЕ руки (browser_control = вкладка в окне юзера, device_control = приложения/
+    # скриншот) добираются ТОЛЬКО при физ-интенте (воспроизведение/действие на сайте). Для
+    # ЧТЕНИЯ/рекомендаций физ-браузер НЕ даём — иначе модель открывает видимую вкладку под
+    # анализ и крадёт фокус (живой фидбек: «отвлёкся на открытую ссылку, анализ должен быть
+    # скрытым»). Так read=headless гарантирован структурно, а не уговорами промпта.
+    base_hands = ["web_search"]
+    if _wants_physical_browser(query):
+        base_hands = ["browser_control", "device_control", "web_search"]
+    for base in base_hands:
         if base in registry and base not in picked:
             picked.append(base)
+    # Если физ-интента нет, но BM25 затащил ФИЗ-навык по лексике md — убираем (чтение headless,
+    # без видимых окон/кликов/кражи фокуса). Любой навык, открывающий окна/жмущий/делающий
+    # скриншоты, отвлекает юзера → для анализа недопустим.
+    if not _wants_physical_browser(query):
+        picked = [p for p in picked if p not in _PHYSICAL_SKILLS]
     return picked
+
+
+# Навыки с ВИДИМЫМИ побочками (окна/клики/скриншоты/приложения) — крадут фокус юзера.
+# Для ЧТЕНИЯ/анализа не даём (headless web_search), только при явном физ-интенте.
+_PHYSICAL_SKILLS = frozenset({
+    "browser_control", "device_control", "ax_control", "app_control",
+    "phone_control", "launcher",
+})
 
 
 _FALSE_REFUSAL_RE = re.compile(
@@ -509,12 +550,84 @@ _PLAY_NOUN = ("трек", "песн", "музык", "видео", "альбом"
               "трейлер", "шоу")
 
 
+_NON_MEDIA = ("свет", "лампу", "лампочк", "комп", "ноут", "телевизор", "телек", "кондиц",
+              "печк", "плит", "чайник", "стиральн", "пылесос", "обогрев", "вентилятор", "утюг",
+              "фонар", "духов", "колонк", "микроволн")
+
+
 def _is_play_intent(query: str) -> bool:
-    """Запрос на ВОСПРОИЗВЕДЕНИЕ медиа (играть/смотреть + трек/видео/фильм/аниме/…). Для
-    БЮДЖЕТА (playback-навигация длиннее: поиск→результат→плеер→ретрай) и АНТИ-ЛЖИ (успех =
-    реальный звук). Это эвристика бюджета/энфорсмента, НЕ маршрутизация режима."""
+    """Запрос на ВОСПРОИЗВЕДЕНИЕ медиа. Ловит и «включи музыку X», и «включи <артист> <трек>»
+    БЕЗ слова «трек» (живой баг: «включи sewerslvt blooming iridescent flower» не распознан).
+    Для дожима плея и анти-лжи (успех = реальный звук). Эвристика, не маршрутизация."""
     q = (query or "").lower()
-    return any(v in q for v in _PLAY_VERB) and any(n in q for n in _PLAY_NOUN)
+    if not any(v in q for v in _PLAY_VERB):
+        return False
+    if re.search(r"пауз|стоп\b|выключ|останов|приостанов|тиш|mute|муть|убери звук", q):
+        return False  # пауза/стоп/выключи — это НЕ «играй»
+    if any(n in q for n in _NON_MEDIA):
+        return False  # «включи свет/телевизор/чайник» — не медиа
+    if any(n in q for n in _PLAY_NOUN):
+        return True   # явная медиа-сущность (трек/видео/фильм/…)
+    # play-глагол + НАЗВАНИЕ (есть цель после глагола) = трек/артист/тайтл («включи Beatles»,
+    # «включи sewerslvt blooming…»). NON_MEDIA/пауза уже отсеяны выше.
+    words = [w for w in re.findall(r"[\wа-яё]+", q) if len(w) > 1]
+    return len(words) >= 2
+
+
+# Маркеры ФИЗИЧЕСКОГО веба (открыть вкладку в браузере юзера = ВИДНО ему, может отвлечь):
+# воспроизведение, явное «открой/зайди/покажи сайт», действие под логином (аккаунт/корзина/
+# избранное), клики. Всё остальное (поиск/анализ/рекомендация/факты/«где/как/лучшие/адреса»)
+# = ЧТЕНИЕ → строго HEADLESS (web_search/browse), без физ-вкладки и без кражи фокуса.
+_PHYS_RE = re.compile(
+    r"открой|откры(ть|вай)|зайди|перейди|покажи\s+(мне\s+)?(сайт|страниц|вкладк)|"
+    r"на\s+сайте|в\s+браузере|вкладк|залогинь|войди|в\s+аккаунт|мой\s+аккаунт|"
+    r"корзин|избранн|мои\s+(треки|плейлист|заказ|подписк)|нажми|жми|кликни|"
+    r"заполни|введи\s+в|прокрут|скролл", re.I)
+
+
+# Запрос про КОНКРЕТНЫЕ ВНЕШНИЕ ФАКТЫ, которых модель достоверно НЕ знает (адреса, сайты,
+# цены, «где купить/взять», «лучшие X в городе», «как получить пособие/справку») — отвечать
+# из памяти НЕЛЬЗЯ (выдумает правдоподобное: живой баг — сочинил адреса суши и сайты). Жёсткий
+# анти-галлюцинационный пол: такие запросы ВСЕГДА заземляются веб-поиском, не fast/reason.
+# Регэксп тут — энфорсмент анти-выдумки (разрешённое применение), не маршрутизация интента.
+_GROUND_RE = re.compile(
+    r"\bгде\b.{0,30}(купить|взять|заказать|найти|поесть|посмотр|скача|сходи|останов)|"
+    r"лучш|best|топ[- ]?\d|рейтинг|самы[ей].{0,20}(в|на)\b|куда\s+(сходить|пойти|поехать)|"
+    r"адрес|сайт|ссылк|где\s+это|цен[аы]|стоимост|сколько\s+стоит|почём|подешевле|дешёв|дешев|"
+    r"как\s+(получить|оформить|подать|сделать|открыть|зарегистр|восстанов|поменять|заменить).{0,40}"
+    r"(пособи|справк|документ|услуг|паспорт|субсид|льгот|выплат|пенси|пропис|регистрац|визу|"
+    r"карт|счёт|загран|снилс|инн|полис|сертификат|пособие|вычет)|"
+    r"посовету|порекоменду|подбери|подскажи\s+где|"
+    r"како[йяюео][\wа-яё]*\s+([\wа-яё]+\s+)?(купить|выбрать|взять|посовет|лучше)|"
+    r"что\s+(купить|подарить|выбрать|взять|посмотреть\s+из)|"
+    r"найди.{0,30}(сайт|магазин|товар|вариант|обзор|отзыв|цен|где)|"
+    r"отзыв|обзор.{0,20}(на|про)\b", re.I)
+
+# Сравнение/выбор ТОВАРОВ (есть модель/бренд — латиница или числа): нужны текущие цены/специфы.
+_COMPARE_RE = re.compile(r"сравни|чем\s+отлич|что\s+лучше|vs\b|против\b", re.I)
+_PRODUCTISH_RE = re.compile(r"[a-z]{2,}|\d{2,}", re.I)
+
+
+def _needs_web_grounding(query: str) -> bool:
+    """Запрос требует РЕАЛЬНЫХ внешних фактов (адреса/сайты/цены/где купить/как оформить/
+    лучшие в городе/сравнить товары) → нельзя из памяти, нужен веб-поиск. Анти-выдумка (жёсткое
+    требование). False-positive безопасен (просто заземлимся), false-negative = выдумка."""
+    q = query or ""
+    if _GROUND_RE.search(q):
+        return True
+    # «сравни iPhone 16 и Samsung S24» (модель/бренд) → грунтуем; «сравни рекурсию и итерацию»
+    # (чистое понятие, без латиницы/чисел) → нет, модель знает сама.
+    return bool(_COMPARE_RE.search(q) and _PRODUCTISH_RE.search(q))
+
+
+def _wants_physical_browser(query: str) -> bool:
+    """Нужен ли ФИЗИЧЕСКИЙ браузер (вкладка в окне юзера). Да — для воспроизведения
+    (музыка/видео) и явных действий на сайте (открой/войди/корзина/клик). НЕТ — для
+    поиска/анализа/рекомендаций/фактов: это ЧТЕНИЕ, оно идёт HEADLESS (web_search), чтобы
+    НЕ открывать видимую вкладку и НЕ отвлекать юзера (живой фидбек: «отвлёкся на открытую
+    ссылку — анализ должен быть в скрытом режиме»). Эвристика-гейт рук, не маршрутизация."""
+    q = (query or "").lower()
+    return _is_play_intent(q) or bool(_PHYS_RE.search(q))
 
 
 def _service_domain(tool_texts: str) -> str:
@@ -541,6 +654,117 @@ def _history_messages(state: GeneralGraphState, keep: int = 8) -> list:
     return out
 
 
+def _tool_by_name(tools: list, name: str):
+    for t in tools:
+        if getattr(t, "name", "") == name:
+            return t
+    return None
+
+
+def _domains_of(text: str) -> set[str]:
+    """Множество доменов из текста (для проверки заземлённости URL в ответе)."""
+    return {d.lower() for d in re.findall(r"https?://(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})", text or "", re.I)}
+
+
+def _strip_ungrounded_urls(answer: str, grounded: set[str]) -> str:
+    """АНТИ-ВЫДУМКА URL: убираем из ответа ссылки, чей домен НЕ встречался в реальных
+    результатах поиска (модель любит сконструировать tanuki.ru/sakura-msk.ru по памяти).
+    Markdown-ссылку [текст](url) с невалидным доменом сводим к голому тексту; голый
+    выдуманный URL вырезаем. Жёсткий пол достоверности — лучше без ссылки, чем с фальшивой."""
+    def _ok(u: str) -> bool:
+        dom = (re.match(r"https?://(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})", u, re.I) or [None, ""])
+        return bool(dom[1]) and dom[1].lower() in grounded
+    # [текст](url) → текст, если url не заземлён
+    answer = re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)",
+                    lambda m: m.group(0) if _ok(m.group(2)) else m.group(1), answer)
+    # голые невалидные URL → удалить
+    answer = re.sub(r"https?://[^\s)\]}>\"']+",
+                    lambda m: m.group(0) if _ok(m.group(0)) else "", answer)
+    return re.sub(r"[ \t]+\n", "\n", answer).strip()
+
+
+async def _research_answer(state: GeneralGraphState, query: str) -> dict:
+    """ДЕТЕРМИНИРОВАННЫЙ грунтованный поиск (ядро цели «надёжный поисковик»): сами вызываем
+    search_web (реальная выдача с реальными URL) + читаем топ-страницы headless, синтез СТРОГО
+    из находок, чистим выдуманные URL, и ОТКРЫВАЕМ лучшую ссылку в ФОНОВОЙ вкладке. Не полагаемся
+    на то, что дешёвая модель сама решит искать (она дампит память → выдумывает адреса/сайты).
+    Всё headless (без физ-вкладки во время анализа — фидбек «отвлёкся на открытую ссылку»)."""
+    tools = get_all_loaded_skill_tools(["web_search"])
+    search = _tool_by_name(tools, "search_web")
+    browse = _tool_by_name(tools, "browse")
+    if not search:
+        return {"mode": "deliberate"}  # нет поискового тула — обычный путь
+    # ФОРМУЛИРОВКА ЗАПРОСА: сырой разговорный текст («хочу дешёвые брюки, где взять?») в поисковик
+    # тащит форумы/видео (reddit/youtube) вместо магазинов. Переписываем в фокусный запрос под
+    # НУЖНЫЙ тип источника (магазины для покупки, рейтинги для «лучших», госуслуги для процедур).
+    sq = query
+    try:
+        r = await search_query_chain.ainvoke({
+            "query": query, "chat_history": _format_chat_history(state)})
+        cand = (r.content if hasattr(r, "content") else str(r)).strip().splitlines()
+        cand = (cand[0] if cand else "").strip(" \"'»«")[:200]
+        if cand and len(cand) > 2:
+            sq = cand
+    except Exception as e:  # noqa: BLE001
+        print(f"[Research] переформулировка не вышла ({type(e).__name__}) — сырой запрос")
+    try:
+        serp = await search.ainvoke({"query": sq, "max_results": 8})
+    except Exception as e:  # noqa: BLE001
+        print(f"[Research] поиск не вышел → deliberate: {type(e).__name__}")
+        return {"mode": "deliberate"}
+    if not isinstance(serp, str) or "http" not in serp:
+        return {"final_answer": "Не нашёл ничего по запросу — попробуй переформулировать "
+                "(добавь город/уточнение), и я поищу заново."}
+    urls = re.findall(r"https?://[^\s)\]}>\"']+", serp)[:8]
+    grounded = _domains_of(serp)
+    # Читаем топ-3 страницы headless параллельно (реальные детали: адреса/цены/условия) —
+    # бюджетно и с фолбэком на сниппеты выдачи, если страница не отдалась.
+    pages = ""
+    if browse and urls:
+        async def _b(u):
+            try:
+                return await asyncio.wait_for(browse.ainvoke({"url": u, "find": query}), timeout=20)
+            except Exception:  # noqa: BLE001
+                return ""
+        reads = await asyncio.gather(*[_b(u) for u in urls[:3]])
+        pages = "\n\n".join(r for r in reads if isinstance(r, str) and len(r) > 120)
+        grounded |= _domains_of(pages)
+    findings = f"ВЫДАЧА ПОИСКА (реальные ссылки — бери URL отсюда дословно):\n{serp}"
+    if pages:
+        findings += f"\n\nСОДЕРЖИМОЕ ТОП-СТРАНИЦ:\n{pages[:6000]}"
+    fmsg = ToolMessage(content=findings, tool_call_id="research")
+    clean = await _finalize_act(query, [fmsg], state.get("memory_context", ""))
+    if not clean:
+        clean = serp  # на крайний случай отдаём сырую выдачу с реальными ссылками
+    clean = _strip_ungrounded_urls(clean, grounded)
+    opened = await _maybe_open_best(clean if _URL_RE.search(clean) else serp)
+    if opened:
+        clean = f"{clean}\n\n🔗 Открыл в фоновой вкладке: {opened} (посмотри, когда удобно)."
+    return {"final_answer": clean}
+
+
+async def _finalize_act(query: str, msgs: list, memory_context: str) -> str:
+    """Чистая ФИНАЛИЗАЦИЯ act: ответ синтезируется ИЗ РЕЗУЛЬТАТОВ инструментов (находок),
+    а НЕ из накопленного хода ReAct-рассуждений — отдельным вызовом (как synthesize у
+    deliberate). Юзер: «часть размышлений на финализацию не учитывать». Тривиальное действие
+    (мало находок) синтез не нужен → '' (caller оставит сырой output, без лишнего вызова)."""
+    tool_msgs = [m for m in msgs if m.__class__.__name__ == "ToolMessage"]
+    findings = "\n\n".join(
+        (m.content or "")[:1500] for m in tool_msgs
+        if isinstance(getattr(m, "content", ""), str) and (m.content or "").strip())
+    if len(findings.strip()) < 400:  # тривиальное действие — синтез ни к чему (экономим вызов)
+        return ""
+    try:
+        resp = await act_finalize_chain.ainvoke({
+            "query": query, "memory_context": memory_context or "Память пуста.",
+            "findings": findings[-6000:],  # хвост — самые свежие/итоговые находки
+        })
+        return strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp)) or ""
+    except Exception as e:  # noqa: BLE001
+        print(f"[Act-finalize] {type(e).__name__} → сырой output")
+        return ""
+
+
 async def act_node(state: GeneralGraphState) -> dict:
     """
     act-режим (System 1 с руками): ОДНО прямое действие 1–2 вызовами инструментов, без
@@ -549,6 +773,14 @@ async def act_node(state: GeneralGraphState) -> dict:
     Не вызван ни один инструмент / исполнитель сказал ESCALATE → эскалация в deliberate.
     """
     query = state["query"]
+    # ЯДРО ЦЕЛИ — надёжный поисковик: запрос про реальные внешние факты (адреса/сайты/цены/
+    # «где купить»/«как оформить»/«лучшие в городе») и БЕЗ физ-интента → ДЕТЕРМИНИРОВАННЫЙ
+    # грунтованный поиск (сами ищем headless, синтез строго из находок, чистим выдуманные URL,
+    # открываем лучшую ссылку фоном). Не отдаём это на волю модели — она дампит память.
+    if _needs_web_grounding(query) and not _wants_physical_browser(query):
+        res = await _research_answer(state, query)
+        if "final_answer" in res:
+            return res  # иначе (res={'mode':'deliberate'}) — провалились, идём обычным путём
     picked = _skills_for_act(query)
     tools = get_all_loaded_skill_tools(picked)  # HITL-обёртки внутри (skills.confirm)
     if not tools:
@@ -557,16 +789,13 @@ async def act_node(state: GeneralGraphState) -> dict:
     sys_text = act_system_prompt.format(
         memory_context=state.get("memory_context", "Память пуста."))
     history = _history_messages(state)  # реальные Human/AIMessage диалога (контекст «любую/да»)
-    # PLAYBACK длиннее обычного act (поиск→результат→плеер→ретрай по источникам, юзер просил
-    # «искать пока не запустится») → больше раундов, больше толчков персистентности, длиннее
-    # дедлайн. Обычное действие — лёгкий бюджет (дёшево). Эвристика бюджета, не маршрутизация.
-    play = _is_play_intent(query)
-    cap = STEP_DEADLINE_CAP * (2 if play else 1)
-    deadline = min(cap, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
-    rounds_cap, nudges = (12, 4) if play else (None, 1)
+    # ЛЁГКИЙ бюджет act (как было ДО еды — шустро): дефолтные раунды (_DIRECT_ROUNDS=6) и один
+    # толчок. Простое действие завершается за 1-2 раунда. Раздутый бюджет (12 раундов/2 толчка/
+    # дедлайн ×1.5) из попытки автозаказа УБРАН — он заставлял дешёвую модель флейлить дольше на
+    # ЛЮБОЙ задаче (живой регресс юзера: «было быстро, стало медленно», 140k токенов/ход).
+    deadline = min(STEP_DEADLINE_CAP, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
     try:
-        output, msgs = await _exec_direct(sys_text, query, tools, deadline, history=history,
-                                          rounds_cap=rounds_cap, max_nudges=nudges)
+        output, msgs = await _exec_direct(sys_text, query, tools, deadline, history=history)
     except Exception as e:  # noqa: BLE001
         print(f"[Act] failed → deliberate: {type(e).__name__}: {e}")
         return {"mode": "deliberate"}
@@ -595,6 +824,14 @@ async def act_node(state: GeneralGraphState) -> dict:
                                          r"ничего не нашлось|не найден[ао]", t or "", re.I))
     _is_playing = lambda t: (("ЗВУК ИГРАЕТ" in t) or bool(re.search(r"играет\s+[1-9]", t))) and not _is_error(t)
     confirmed = _is_playing(tool_texts)
+    # ПОДТВЕРЖДЁННОЕ воспроизведение (LLM уже запустил, снапшот = «ЗВУК ИГРАЕТ») → чистый
+    # детерминированный ответ. Без утечки снапшота в финал и без лишнего вызова финализации.
+    if play_intent and confirmed:
+        m = re.search(r"ИГРАЕТ\s*\(([^)]+)\)", tool_texts)
+        what = f": {m.group(1)}" if m else ""
+        dom = _service_domain(tool_texts)
+        via = f" (через {dom})" if dom else ""
+        return {"final_answer": f"Запустил, играет{what}{via}. 🎧 Вкладка в твоём браузере."}
     low = (output or "").lower()
     claims_playing = any(w in low for w in ("играет", "включил", "запустил", "воспроизвод"))
 
@@ -652,7 +889,56 @@ async def act_node(state: GeneralGraphState) -> dict:
             "Открыл нужную страницу, но воспроизведение пока НЕ пошло — возможно, нужно войти "
             "в аккаунт в этом окне, выбрать конкретный результат или контент требует подписки. "
             "Скажи «нажми плей» или уточни, что включить — доведу.")}
+    # ЧИСТАЯ ФИНАЛИЗАЦИЯ (юзер: не тащить ход рассуждений ReAct в финал): для содержательных
+    # находок РЕСЁРЧА ответ синтезируется ОТДЕЛЬНО из РЕЗУЛЬТАТОВ инструментов, а не из
+    # последнего хода петли. НЕ для плеера (он отдал чистый ответ выше) и не для тривиального
+    # действия (мало находок) — там сырой output, без лишнего вызова (быстро).
+    if not play_intent:
+        clean = await _finalize_act(query, msgs, state.get("memory_context", ""))
+        if clean:
+            # КРИТЕРИЙ 2: после анализа агент сам открывает НАИБОЛЕЕ ПОДХОДЯЩУЮ страницу —
+            # но В ФОНОВОЙ вкладке (active:false, фокус возвращается юзеру), НЕ во время
+            # анализа (анализ был headless). Берём первую РЕАЛЬНУЮ ссылку из готового ответа
+            # (она подкреплена находками — finalize не выдумывает URL). Тихо, одна вкладка.
+            opened = await _maybe_open_best(clean)
+            if opened:
+                clean = f"{clean}\n\n🔗 Открыл в фоновой вкладке: {opened} (посмотри, когда удобно)."
+            return {"final_answer": clean}
     return {"final_answer": output}
+
+
+_URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
+
+
+async def _maybe_open_best(answer: str) -> str:
+    """Открыть верхнюю рекомендованную ссылку из ответа В ФОНОВОЙ вкладке (не крадёт фокус —
+    bridge возвращает прежнее приложение; plain open не трогает видимость, в отличие от
+    медиа-старта). Возвращает домен открытой страницы или '' (нет ссылки/нет расширения).
+    Тихо и одна — анализ остаётся скрытым, физ-вкладка только под ИТОГ (живой фидбек)."""
+    if os.getenv("AGENT_EVAL_MODE") == "1":
+        return ""  # бенч/eval: без побочных эффектов (не открываем 200 вкладок)
+    m = _URL_RE.search(answer or "")
+    if not m:
+        return ""
+    # Мост может быть ещё не поднят в автоматизированном (--auto) пути — поднимаем идемпотентно
+    # и кратко ждём авто-подключения расширения. Нет расширения (Chrome закрыт) → просто без
+    # авто-открытия (ссылки уже в ответе текстом), не блокируемся.
+    if not browser_bridge.connected():
+        try:
+            browser_bridge.ensure_server()
+            await asyncio.to_thread(browser_bridge.wait_connected, 3.0)
+        except Exception:  # noqa: BLE001
+            pass
+    if not browser_bridge.connected():
+        return ""
+    url = m.group(0).rstrip(".,;")
+    try:
+        await browser_bridge.open_url(url)
+        dom = _service_domain(url)
+        return dom or url
+    except Exception as e:  # noqa: BLE001
+        print(f"[Act] фоновое открытие итоговой ссылки не вышло: {type(e).__name__}")
+        return ""
 
 
 async def fast_answer_node(state: GeneralGraphState) -> dict:
@@ -1195,22 +1481,17 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
     while True:
         calls = getattr(resp, "tool_calls", None) or []
         if not calls:
-            # Модель НАЧАЛА действовать, но закончила ход ОБЕЩАНИЕМ («давай открою…»)
-            # вместо вызова — толчок: действуй или итожь (живой тест: act замирал на полпути).
-            # Для playback max_nudges>1 → персистентность: пробуй следующий результат/источник,
-            # ПОКА не заиграет (юзер: «ищи в браузере пока не запустится»).
+            # Модель НАЧАЛА действовать, но закончила ход ОБЕЩАНИЕМ («давай открою…») вместо
+            # вызова — толчок: ДЕЙСТВУЙ ВЫЗОВОМ или итожь (живой тест: act замирал на полпути).
+            # Общий для любой задачи (не «тип»): если цель не достигнута — следующий шаг
+            # инструментом; если упёрся — честный итог. Несколько толчков = персистентность.
             if rounds > 0 and nudges < max_nudges:
                 msgs.append(resp)
-                push = ("Не обещай следующее действие — сделай его ВЫЗОВОМ инструмента прямо "
-                        "сейчас. Если задача уже доведена до конца — дай краткий итог "
-                        "РЕЗУЛЬТАТА (что сделано), без планов и обещаний.")
-                if max_nudges > 1:  # playback-персистентность
-                    push = ("Ещё НЕ подтверждено реальное воспроизведение («ЗВУК ИГРАЕТ»). НЕ "
-                            "сдавайся: вернись к выдаче (browser_see/scroll) и кликни СЛЕДУЮЩИЙ "
-                            "результат, или попробуй ДРУГОЙ сервис/источник через его строку "
-                            "поиска (не угадывай URL). Действуй ВЫЗОВОМ инструмента сейчас. "
-                            "Только если честно исчерпал попытки — дай итог, что пробовал.")
-                msgs.append(HumanMessage(content=push))
+                msgs.append(HumanMessage(content=(
+                    "Не обещай следующее действие — СДЕЛАЙ его ВЫЗОВОМ инструмента прямо сейчас "
+                    "(следующий шаг/результат/источник). Если задача УЖЕ доведена — дай краткий "
+                    "итог РЕЗУЛЬТАТА. Если честно упёрся (не выходит/нужна оплата/вход) — скажи "
+                    "что сделано и что мешает. Без планов и обещаний.")))
                 nudges += 1
                 resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
                 continue

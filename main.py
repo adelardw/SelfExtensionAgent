@@ -70,6 +70,7 @@ COMMANDS = {
     "/config":   "настройки: модель · режим работы · мышление · гранты",
     "/auto":     "режим работы: /auto — полный авто · /auto accept · /auto off",
     "/model":    "модель: /model api · /model ollama [имя]",
+    "/backend":  "браузер-движок: /backend puppeteer|hybrid|extension (puppeteer ждёт SPA)",
     "/voice":    "голосовой ввод (один запрос)",
     "/attach":   "приложить файл к сессии (pdf/image/audio/video)",
     "/kb":       "база знаний: add <файл> · ls · mkdir <папка> · find <запрос>",
@@ -627,6 +628,20 @@ async def main():
                 banner(); continue
             if low.startswith("/model"):
                 cmd_model(query.split()[1:]); continue
+            if low.startswith("/backend"):
+                from src.cli_config import get_cli, set_cli
+                arg = (query.split()[1:] or [""])[0].lower()
+                if arg in ("extension", "puppeteer", "hybrid", "window"):
+                    set_cli("browser_backend", arg)
+                    console.print(f"[green]🧩 браузер-бэкенд → [bold]{arg}[/][/] [dim](сохранено)[/]"
+                                  + ("\n[dim]puppeteer/hybrid: open/see ждут рендер тяжёлого SPA "
+                                     "(Я.Еда/Лавка) — нужен Reload расширения до версии с pp-бэкендом.[/]"
+                                     if arg in ("puppeteer", "hybrid") else ""))
+                else:
+                    cur = get_cli("browser_backend") or "extension"
+                    console.print(f"[cyan]браузер-бэкенд: {cur}[/]  [dim]/backend extension|puppeteer|hybrid|window"
+                                  "  ·  puppeteer/hybrid = Puppeteer-ожидание SPA[/]")
+                continue
             if low == "/facts":
                 cmd_facts(user_id); continue
             if low == "/goal":
@@ -703,6 +718,14 @@ async def run_once(task: str, auto: bool = False) -> int:
     from src.cli_config import get_cli
 
     hitl.load_grants(get_cli("allow") or [])
+    # Мост браузера поднимаем и в автоматизированном пути: расширение успевает подключиться за
+    # время прогона, и агент может (а) играть музыку/видео, (б) ФОНОВО открыть итоговую ссылку
+    # после анализа (критерий «сам открыть наиболее подходящую вкладку»). Идемпотентно.
+    try:
+        from src import browser_bridge
+        browser_bridge.ensure_server()
+    except Exception:  # noqa: BLE001
+        pass
     if auto:
         hitl.set_work_mode("auto")  # автоматизированный запуск = полная автономия
     else:

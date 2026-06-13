@@ -41,12 +41,17 @@ def test_skill_md_has_universal_menu_navigation():
     assert "навигация по МЕНЮ" in md and "не угадывай URL" in md
 
 
-def test_act_always_has_web_search_and_browser():
-    """act-руки: всегда есть browser_control (физ) и web_search (headless-чтение) — LLM сам
-    выбирает read-vs-physical в лёгком browse-цикле, без keyword-форса режима."""
-    from src.agent import _skills_for_act
-    picked = _skills_for_act("найди обзоры наушников и перечисли варианты")
-    assert "web_search" in picked and "browser_control" in picked
+def test_research_is_headless_play_is_physical():
+    """Архитектурная граница (фидбек юзера «отвлёкся на открытую ссылку, анализ скрытым»):
+    ЧТЕНИЕ/анализ/поиск → ТОЛЬКО headless web_search (физ-вкладка не открывается, фокус не
+    крадётся). ВОСПРОИЗВЕДЕНИЕ/действие на сайте → физ-руки (browser_control). Гейт рук, не
+    маршрутизация режима."""
+    from src.agent import _skills_for_act, _PHYSICAL_SKILLS
+    research = _skills_for_act("найди обзоры наушников и перечисли варианты")
+    assert "web_search" in research
+    assert not (_PHYSICAL_SKILLS & set(research))  # анализ — без физ-навыков (без кражи фокуса)
+    play = _skills_for_act("включи трек chikoi the maid")
+    assert "browser_control" in play and "web_search" in play  # воспроизведение — физ-руки есть
 
 
 def test_reflexion_prompt_routes_browse_to_act():
@@ -129,3 +134,36 @@ def test_act_confirmed_play_mentions_service(monkeypatch):
     out = asyncio.run(A.act_node({"query": "включи музыку Imagine Dragons"}))
     ans = out.get("final_answer", "")
     assert "играет фоном" in ans and "music.yandex.ru" in ans
+
+
+def test_payment_boundary_in_content_actions():
+    """[ГРАНИЦА ОПЛАТЫ] кнопка оформления/оплаты в content_actions.js — агент не нажимает сам."""
+    from pathlib import Path
+    js = Path("extension/content_actions.js").read_text(encoding="utf-8")
+    assert "ГРАНИЦА ОПЛАТЫ" in js and "payLabel" in js and "payRefusal" in js
+    # граница применена И в click, И в clicktext
+    assert js.count("payLabel(") >= 2
+
+
+def test_skill_md_has_payment_boundary():
+    from pathlib import Path
+    md = Path("src/skills/browser_control/browser_control.md").read_text(encoding="utf-8")
+    assert "ГРАНИЦА ОПЛАТЫ" in md and "финальную кнопку" in md
+
+
+def test_anti_typosquat_url_correction():
+    """Безопасность: близкий-но-другой домен (тайпсквоттинг) правится на ТОЧНЫЙ пользовательский."""
+    from src import browser_bridge as br
+    br.set_user_domains("закажи суши с сайта https://niyama.ru/ любой набор")
+    assert br.safe_url("https://niama.ru/menu") == "https://niyama.ru/menu"   # тайпсквот → точный
+    assert br.safe_url("https://niyama.ru/cart") == "https://niyama.ru/cart"  # точный — без изменений
+    assert br.safe_url("https://google.com") == "https://google.com"          # другой — не трогаем
+    br.set_user_domains("включи музыку")  # юзер не давал домен
+    assert br.safe_url("https://music.yandex.ru") == "https://music.yandex.ru"  # не над-правим
+
+
+def test_router_blocks_skill_creation_for_browser():
+    """Орк-фикс: физический веб → use_skills (browser_control), НИКОГДА create_skill (+uv-инсталл)."""
+    from src.prompts import router_prompt
+    text = "".join(str(m.prompt.template) for m in router_prompt.messages)
+    assert "ФИЗИЧЕСКИЙ ВЕБ" in text and "НИКОГДА 'create_skill'" in text

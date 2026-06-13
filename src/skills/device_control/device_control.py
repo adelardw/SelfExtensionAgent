@@ -23,8 +23,10 @@ _OS = platform.system()  # 'Darwin' | 'Linux' | 'Windows'
 
 
 def _run(cmd: list[str], timeout: int = 20) -> tuple[bool, str]:
-    # Безопасный режим: AGENT_DRY_RUN=1 → не выполнять реальные действия с устройством.
-    if os.getenv("AGENT_DRY_RUN"):
+    # Безопасный режим: AGENT_DRY_RUN=1 ИЛИ AGENT_EVAL_MODE=1 (бенч/eval) → НЕ выполнять реальные
+    # действия с устройством. Критично: иначе бенч-прогон дёргал бы `open <url>`/keystroke в ЖИВОЙ
+    # системе юзера — крал фокус, печатал в его активную вкладку (живой инцидент).
+    if os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1":
         return True, f"[dry-run] {' '.join(str(c) for c in cmd)[:200]}"
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)

@@ -88,7 +88,7 @@ def phone_tap(query: str) -> str:
     Args:
         query: Visible text or resource-id of the element to tap.
     """
-    if os.getenv("AGENT_DRY_RUN"):
+    if (os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1"):
         return f"[dry-run] tap '{query}'"
     ready, info = _device_ready()
     if not ready:
@@ -114,7 +114,7 @@ def phone_type(text: str) -> str:
     Args:
         text: Text to input.
     """
-    if os.getenv("AGENT_DRY_RUN"):
+    if (os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1"):
         return f"[dry-run] type '{text[:40]}'"
     ready, info = _device_ready()
     if not ready:
@@ -133,7 +133,7 @@ def phone_key(key: str) -> str:
     code = _KEYS.get(key.lower())
     if not code:
         return f"Неизвестная клавиша. Доступно: {', '.join(_KEYS)}"
-    if os.getenv("AGENT_DRY_RUN"):
+    if (os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1"):
         return f"[dry-run] key {key}"
     ok, out = _adb(["shell", "input", "keyevent", code])
     return f"Нажал {key}" if ok else f"Ошибка: {out}"
@@ -146,7 +146,7 @@ def phone_open_app(package: str) -> str:
     Args:
         package: Android package id.
     """
-    if os.getenv("AGENT_DRY_RUN"):
+    if (os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1"):
         return f"[dry-run] open app {package}"
     ready, info = _device_ready()
     if not ready:

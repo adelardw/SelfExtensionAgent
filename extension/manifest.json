@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Self-Extension Agent — Browser Hands",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Позволяет твоему локальному агенту действовать в ТВОЁМ браузере (твои логины, твои вкладки) — включить музыку/видео, нажать, заполнить. Команды идут только с локального агента (127.0.0.1).",
   "permissions": ["tabs", "scripting", "activeTab", "storage", "sidePanel", "alarms", "debugger"],
   "host_permissions": ["<all_urls>"],
