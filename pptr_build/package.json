@@ -1,0 +1,13 @@
+{
+  "name": "pptr-extension-bundle",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Бандлит puppeteer-core (ExtensionTransport) в один файл для MV3 service worker",
+  "scripts": {
+    "build": "esbuild entry.mjs --bundle --format=esm --platform=browser --outfile=../extension/vendor/puppeteer.bundle.js"
+  },
+  "dependencies": {
+    "esbuild": "^0.28.1",
+    "puppeteer-core": "^25.1.0"
+  }
+}

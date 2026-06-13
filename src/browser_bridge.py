@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import platform
 import secrets
 import shutil
@@ -73,6 +74,64 @@ def _log(line: str) -> None:
             f.write(f"{time.strftime('%H:%M:%S')} {line}\n")
     except Exception:  # noqa: BLE001
         pass
+
+# ── АНТИ-ТАЙПСКВОТТИНГ (безопасность): домены, которые ЯВНО назвал пользователь в запросе.
+# Если агент пытается открыть близкий-но-ДРУГОЙ домен (одна-две буквы разницы = фишинг/малварь,
+# живой инцидент: niyama.ru → niama.ru), правим на точный пользовательский. Детерминированно,
+# поверх промпт-правила. ──
+import re as _re
+
+_user_domains: list[str] = []
+
+
+def _domains_in(text: str) -> list[str]:
+    """Зарегистрированные домены из текста (из URL и голых доменов вида name.tld)."""
+    out = []
+    for m in _re.findall(r"(?:https?://)?([a-z0-9][a-z0-9.-]*\.[a-z]{2,})", (text or "").lower()):
+        d = m.strip(".")
+        if d and d not in out:
+            out.append(d)
+    return out
+
+
+def set_user_domains(query: str) -> None:
+    """Запомнить домены, явно названные пользователем в текущем запросе (для анти-тайпсквоттинга)."""
+    global _user_domains
+    _user_domains = _domains_in(query)
+
+
+def _edit_distance(a: str, b: str) -> int:
+    if abs(len(a) - len(b)) > 2:
+        return 99
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def safe_url(url: str) -> str:
+    """Защита от тайпсквоттинга: если домен открываемого URL — близкий-но-ДРУГОЙ к тому, что
+    ЯВНО назвал пользователь (расстояние 1-2), заменить на ТОЧНЫЙ пользовательский домен.
+    Точное совпадение и совсем другие домены не трогаем."""
+    if not _user_domains or not url:
+        return url
+    m = _re.match(r"(https?://)?([^/]+)(.*)", url.strip(), _re.I)
+    if not m:
+        return url
+    scheme, host, rest = m.group(1) or "https://", m.group(2).lower(), m.group(3)
+    bare = host.split("@")[-1].split(":")[0]
+    if bare in _user_domains:
+        return url  # точно как просил юзер
+    for ud in _user_domains:
+        d = _edit_distance(bare, ud)
+        if 1 <= d <= 2:  # тайпсквоттинг пользовательского домена
+            _log(f"⚠ анти-тайпсквоттинг: {bare} → {ud} (юзер назвал {ud})")
+            return f"{scheme}{ud}{rest}"
+    return url
+
 
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _thread: Optional[threading.Thread] = None
@@ -201,6 +260,10 @@ def ensure_server() -> None:
 
 
 def connected() -> bool:
+    # Бенч/eval: НЕ трогаем живой браузер юзера (иначе 200 прогонов открыли бы вкладки/
+    # играли музыку в его реальном Chrome). Физ-пути видят «не подключено» и тихо ноупят.
+    if os.getenv("AGENT_EVAL_MODE") == "1":
+        return False
     return _client is not None
 
 
@@ -225,6 +288,8 @@ def _last_profile() -> str:
 def launch_browser() -> bool:
     """Поднять системный браузер пользователя (закрыт → откроется, расширение
     автозагрузится и подключится к мосту). True — команда запуска отправлена."""
+    if os.getenv("AGENT_EVAL_MODE") == "1":
+        return False  # бенч/eval: не поднимаем реальный Chrome юзера
     sysname = platform.system()
     try:
         if sysname == "Darwin":
@@ -291,6 +356,7 @@ async def _send(cmd: str, **args) -> str:
 
 # ── Поверхность, идентичная browser_session (исполнитель — расширение) ───────
 async def open_url(url: str) -> str:
+    url = safe_url(url)  # анти-тайпсквоттинг: близкий-но-другой домен → точный пользовательский
     return await _send("open", url=url)
 
 
@@ -300,6 +366,10 @@ async def see() -> str:
 
 async def click(item: int) -> str:
     return await _send("click", item=int(item))
+
+
+async def tap(item: int) -> str:
+    return await _send("tap", item=int(item))
 
 
 async def type_into(item: int, text: str, submit: bool = True) -> str:
@@ -336,6 +406,10 @@ async def media(action: str = "toggle") -> str:
 
 async def click_selector(selector: str) -> str:
     return await _send("clicksel", selector=selector)
+
+
+async def click_text(text: str) -> str:
+    return await _send("clicktext", text=text)
 
 
 async def read() -> str:

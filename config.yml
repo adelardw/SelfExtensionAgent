@@ -39,8 +39,9 @@ memory:
   recall_k: 5
   reflect_every: 5
   recall_budget_chars: 1800
-  embeddings: false
+  embeddings: true              # эмбеддинги памяти вкл (OPEN_ROUTER_API_KEY); recall эмбеддит запрос ОДИН раз
   embedding_model: openai/text-embedding-3-small
+  recall_gate: 0.22             # «recall не всегда»: ассоциативная память (эпизоды/выводы) инжектится только если top_score>=gate; персона-факты всегда. 0=выкл гейт
   max_episodes: 2000
   max_facts: 300
   max_reflections: 200

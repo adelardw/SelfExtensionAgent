@@ -18,7 +18,7 @@ from langchain_core.tools import tool
 
 
 def _osa(script: str, timeout: int = 25) -> str:
-    if os.getenv("AGENT_DRY_RUN"):
+    if (os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1"):
         return f"[dry-run] osascript: {script[:160]}"
     try:
         p = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=timeout)

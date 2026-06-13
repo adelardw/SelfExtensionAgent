@@ -573,12 +573,16 @@ class MemoryStore:
 
     # ── retrieval scoring (Generative Agents) ─────────────────────────
 
-    def _relevance(self, query: str, text: str, emb_json: Optional[str]) -> float:
+    def _relevance(self, query: str, text: str, emb_json: Optional[str],
+                   qvec: Optional[list] = None) -> float:
+        # qvec — ПРЕДВЫЧИСЛЕННЫЙ эмбеддинг запроса (один на весь recall). Без него embed
+        # вызывался бы на КАЖДЫЙ кандидат → N синхронных HTTP-вызовов на один recall
+        # (латентность + деньги). Передаём qvec сверху; embed тут — лишь фолбэк.
         if self.embedder.enabled and emb_json:
-            qvec = self.embedder.embed(query)
-            if qvec:
+            qv = qvec if qvec is not None else self.embedder.embed(query)
+            if qv:
                 try:
-                    return cosine(qvec, json.loads(emb_json))
+                    return cosine(qv, json.loads(emb_json))
                 except Exception:  # noqa: BLE001
                     pass
         return _overlap(query, text)
@@ -588,22 +592,26 @@ class MemoryStore:
         age = max(0.0, time.time() - ts)
         return math.exp(-age / _RECENCY_HALFLIFE)
 
-    def _score(self, query: str, text: str, ts: float, importance: float, emb_json: Optional[str]) -> float:
+    def _score(self, query: str, text: str, ts: float, importance: float,
+               emb_json: Optional[str], qvec: Optional[list] = None) -> float:
         return (
             _W_RECENCY * self._recency(ts)
-            + _W_RELEVANCE * self._relevance(query, text, emb_json)
+            + _W_RELEVANCE * self._relevance(query, text, emb_json, qvec)
             + _W_IMPORTANCE * importance
         )
 
-    def _rank_episodes(self, user_id: str, query: str, k: int) -> list[sqlite3.Row]:
+    def _rank_episodes(self, user_id: str, query: str, k: int,
+                       qvec: Optional[list] = None) -> list[sqlite3.Row]:
         """
         Гибридное ранжирование эпизодов:
           • если активен TurboVec-индекс (эмбеддинги + достаточно данных) —
             ANN-кандидаты по вектору, затем дореранк по recency+importance;
           • иначе — линейный скоринг recency+relevance(token)+importance.
+        qvec — предвычисленный эмбеддинг запроса (переиспользуем, не эмбеддим повторно).
         """
         if self._vindex and self._vindex.active and self.embedder.enabled:
-            qvec = self.embedder.embed(query)
+            if qvec is None:
+                qvec = self.embedder.embed(query)
             if qvec:
                 user_ids = [
                     r["id"] for r in self._conn.execute(
@@ -631,12 +639,12 @@ class MemoryStore:
         for ep in self._conn.execute(
             "SELECT * FROM episodes WHERE user_id=?", (user_id,)
         ).fetchall():
-            s = self._score(query, ep["query"] + " " + ep["answer"], ep["ts"], 0.4, ep["embedding"])
+            s = self._score(query, ep["query"] + " " + ep["answer"], ep["ts"], 0.4, ep["embedding"], qvec)
             scored.append((s, ep))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [ep for s, ep in scored[:k] if s > 0.15]
 
-    def _rank_facts(self, user_id: str, query: str) -> list[sqlite3.Row]:
+    def _rank_facts(self, user_id: str, query: str, qvec: Optional[list] = None) -> list[sqlite3.Row]:
         """
         Гибкий отбор персональных фактов под запрос: score = важность + релевантность
         (по эмбеддингам/токенам ключа+значения+тегов). Устойчивая персона (язык, имя —
@@ -653,48 +661,73 @@ class MemoryStore:
                     tags = " ".join(json.loads(f["tags"] or "[]"))
                 except Exception:  # noqa: BLE001
                     tags = ""
-            rel = self._relevance(query, f"{f['key']} {f['value']} {tags}", f["embedding"])
+            rel = self._relevance(query, f"{f['key']} {f['value']} {tags}", f["embedding"], qvec)
             return _W_IMPORTANCE * f["importance"] + _W_RELEVANCE * rel
 
         return sorted(facts, key=fscore, reverse=True)
 
     def recall(self, user_id: str, query: str, k: int = 5, budget: int = 1800) -> str:
+        """Текст памяти. Обёртка над recall_scored — обратная совместимость (тул/тесты)."""
+        text, _ = self.recall_scored(user_id, query, k=k, budget=budget)
+        return text
+
+    def recall_scored(self, user_id: str, query: str, k: int = 5, budget: int = 1800,
+                      gate: float = 0.0) -> tuple[str, float]:
         """
         Адаптивно собирает контекст памяти под бюджет символов (анти-bloat):
         факты о пользователе + релевантные эпизоды + выводы добавляются жадно по
-        приоритету, пока не исчерпан budget. При большой памяти попадают только
-        самые ценные чанки, а не всё подряд.
+        приоритету, пока не исчерпан budget.
+
+        Возвращает (текст, top_score). top_score — макс. РЕЛЕВАНТНОСТЬ (0..1) лучшего
+        эпизода/вывода к запросу. ГЕЙТ («recall не всегда»): если gate>0 и top_score<gate —
+        АССОЦИАТИВНЫЕ секции (эпизоды/выводы) опускаются, факты-персона остаются (дешёвая
+        персона всегда; ассоциативная память — только когда реально релевантна).
+
+        Запрос эмбеддится ОДИН раз (qvec) и переиспользуется во всех _relevance — без
+        N синхронных HTTP-вызовов на кандидат (иначе recall с эмбеддингами блокировал бы).
         """
-        facts = self._rank_facts(user_id, query)
-        top_eps = self._rank_episodes(user_id, query, k)
+        qvec = self.embedder.embed(query) if self.embedder.enabled else None
+        facts = self._rank_facts(user_id, query, qvec)
+        top_eps = self._rank_episodes(user_id, query, k, qvec)
 
         scored_refl = []
         for rf in self._conn.execute(
             "SELECT * FROM reflections WHERE user_id=?", (user_id,)
         ).fetchall():
-            s = self._score(query, rf["insight"], rf["ts"], rf["importance"], rf["embedding"])
+            s = self._score(query, rf["insight"], rf["ts"], rf["importance"], rf["embedding"], qvec)
             scored_refl.append((s, rf))
         scored_refl.sort(key=lambda x: x[0], reverse=True)
 
         if not facts and not top_eps and not scored_refl:
-            return "Пока нет сохранённой памяти о пользователе."
+            return "Пока нет сохранённой памяти о пользователе.", 0.0
 
-        # Кандидаты-строки в порядке приоритета: факты > выводы > эпизоды.
+        # top_score = макс. РЕЛЕВАНТНОСТЬ (не полный score с recency) лучшего эпизода/вывода:
+        # сигнал «есть ли в памяти релевантное запросу» для гейта ассоциативной части.
+        ep_rel = max((self._relevance(query, ep["query"] + " " + ep["answer"], ep["embedding"], qvec)
+                      for ep in top_eps), default=0.0)
+        rf_rel = max((self._relevance(query, rf["insight"], rf["embedding"], qvec)
+                      for _, rf in scored_refl), default=0.0)
+        top_score = max(ep_rel, rf_rel)
+        # gate>0 и ничего релевантного → ассоциативную память НЕ инжектим (только персона).
+        assoc = (gate <= 0.0) or (top_score >= gate)
+
+        # Кандидаты-строки в порядке приоритета: факты (персона) > выводы > эпизоды.
         sections: list[tuple[str, list[str]]] = []
         sections.append((
             "[Что я знаю о пользователе]",
             [f"- {f['key']}: {f['value']}" for f in facts],
         ))
-        sections.append((
-            "[Выводы из опыта]",
-            [f"- {rf['insight']}" for s, rf in scored_refl if s > 0.2],
-        ))
-        ep_lines = []
-        for ep in top_eps:
-            when = time.strftime("%Y-%m-%d", time.localtime(ep["ts"]))
-            tag = "✓" if ep["outcome"] == "ok" else "⚠ слабый ответ"
-            ep_lines.append(f"- ({when}) «{ep['query'][:80]}» [{tag}]")
-        sections.append(("[Похожие прошлые задачи]", ep_lines))
+        if assoc:
+            sections.append((
+                "[Выводы из опыта]",
+                [f"- {rf['insight']}" for s, rf in scored_refl if s > 0.2],
+            ))
+            ep_lines = []
+            for ep in top_eps:
+                when = time.strftime("%Y-%m-%d", time.localtime(ep["ts"]))
+                tag = "✓" if ep["outcome"] == "ok" else "⚠ слабый ответ"
+                ep_lines.append(f"- ({when}) «{ep['query'][:80]}» [{tag}]")
+            sections.append(("[Похожие прошлые задачи]", ep_lines))
 
         blocks: list[str] = []
         used = 0
@@ -710,7 +743,8 @@ class MemoryStore:
             if picked:
                 blocks.append(header + "\n" + "\n".join(picked))
 
-        return "\n\n".join(blocks) if blocks else "Пока нет релевантной памяти."
+        text = "\n\n".join(blocks) if blocks else "Пока нет релевантной памяти."
+        return text, top_score
 
     def prune(self, max_episodes: int = 2000, max_facts: int = 300, max_reflections: int = 200) -> dict:
         """

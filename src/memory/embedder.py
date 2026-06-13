@@ -33,6 +33,9 @@ class NullEmbedder:
     def embed(self, text: str) -> Optional[list[float]]:
         return None
 
+    async def aembed(self, text: str) -> Optional[list[float]]:
+        return None
+
 
 class OpenAIEmbedder:
     """
@@ -102,6 +105,11 @@ class OpenAIEmbedder:
         except Exception as e:  # noqa: BLE001
             print(f"[Embedder] embed failed: {e}")
             return None
+
+    async def aembed(self, text: str) -> Optional[list[float]]:
+        """Async-обёртка: sync-вызов в to_thread, чтобы не блокировать event loop."""
+        import asyncio
+        return await asyncio.to_thread(self.embed, text)
 
 
 def cosine(a: list[float], b: list[float]) -> float:
