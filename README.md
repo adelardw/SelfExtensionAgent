@@ -63,8 +63,8 @@ correctly). Reproduce: `python -m src.eval.route_eval`.
 - **Universal intent router (any language)** (`src/intent.py`) — front-of-pipeline signals (needs
   web grounding / physical browser / media playback) are decided by an embedding-kNN "route
   codebook", not Russian-lexicon regexes: multilingual (es/de/fr/… caught via embeddings); the
-  regex remains as fallback and as an anti-hallucination floor (web-grounding = regex ∨
-  classifier — the floor isn't weakened, plus other languages). The codebook **grows from the
+  regex remains as fallback and as an anti-hallucination safeguard (web-grounding = regex OR
+  classifier — the safeguard isn't weakened, plus other languages). The codebook **grows from the
   feedback loop** (validated run → the route that worked), **reuses the query embedding from
   recall** (zero extra calls in the hot path), is pinned per model (model change → re-seed).
   Statistical eval: `python -m src.eval.route_eval` (410 labeled multilingual cases, 100+/class):
@@ -187,7 +187,7 @@ sits on the **AutoRAG knowledge-base injection** (a poisoned document is data, n
 paths are protected from traversal, and **collective recipes** aren't promoted from injection
 queries ("don't learn from a break-in" extends to the shared pool).
 
-**Anti-hallucination and anti-PII (deterministic floors over the model):** grounding facts (a
+**Anti-hallucination and anti-PII (deterministic checks layered over the model):** grounding facts (a
 query about addresses/prices/"where to buy" → web, not from memory), cutting fabricated URLs
 (`_strip_ungrounded_urls`) and **fabricated emails** (`safety.strip_ungrounded_pii` — only emails,
 numbers/GAIA-answers untouched), a detector of degenerate repetition and false "no access". "Don't
@@ -328,11 +328,13 @@ learning bans, incl. collective), universal files (pdf/excel/docx/pptx/video/gif
 tracing/self-diagnosis, on-demand device (cross-platform), DeepAgent, eval harnesses
 (daily/GAIA/AssistantBench/amortize), REPL/Telegram/FastAPI.
 
-Deferred (see `ARCHITECTURE.md`): a trained local route head (kNN tuning / CatBoost on the
-accumulated route corpus), removing the regex grounding-floor behind a fabrication eval, raising
-L2/L3 GAIA (multi-hop + files — the cheap-tier ceiling), free dynamic composition of modules
-(the act→deliberate ladder is the first step), inheriting strong MCPs via before/after comparison,
-LLM generalization of recipes before collective promotion, cross-platform UI automation outside macOS.
+Deferred (see `ARCHITECTURE.md`): a trained local route-selection model (kNN tuning / CatBoost on
+the accumulated examples); replacing the hard regex "is web search needed?" check with a learned
+classifier — but only after verifying it won't increase fabricated answers; raising L2/L3 GAIA
+(multi-step tasks + files — the cheap-tier ceiling); free dynamic composition of modules (the
+act→deliberate ladder is the first step); inheriting strong MCPs via before/after comparison;
+anonymizing saved task playbooks (recipes) before sharing them with similar users; cross-platform
+UI automation outside macOS.
 
 ---
 ---
@@ -398,8 +400,8 @@ LLM generalization of recipes before collective promotion, cross-platform UI aut
 - **Универсальный роутер интентов (любой язык)** (`src/intent.py`) — сигналы фронта (нужен
   веб-грунтинг / физ-браузер / воспроизведение) определяет embedding-kNN «кодбук маршрутов»,
   а не русско-лексиконные регэкспы: мультиязычно (es/de/fr/… ловятся через эмбеддинги),
-  регэксп остаётся как fallback и как анти-галлюцинационный пол (web-грунтинг = UNION
-  регэксп∨классификатор — пол не ослаблен, +другие языки). Кодбук **растёт из фидбек-лупа**
+  регэксп остаётся как fallback и как анти-галлюцинационная страховка (web-грунтинг =
+  регэксп ИЛИ классификатор — страховка не ослабляется, плюс другие языки). Кодбук **растёт из фидбек-лупа**
   (валидированный прогон → сработавший маршрут), **переиспользует эмбеддинг запроса из recall**
   (ноль лишних вызовов в hot-path), фиксирован по модели (смена → пере-seed). Стат-оценка
   `python -m src.eval.route_eval` (410 размеченных мультиязычных кейсов, 100+/класс):
@@ -525,7 +527,7 @@ LLM generalization of recipes before collective promotion, cross-platform UI aut
 не команды), пути БЗ защищены от traversal, а **коллективные рецепты** не промоутятся
 из инъекционных запросов (запрет «не учиться на взломе» распространён на общий пул).
 
-**Анти-галлюцинация и анти-PII (детерминированные полы поверх модели):** грунтование
+**Анти-галлюцинация и анти-PII (детерминированные проверки поверх модели):** заземление
 фактов (запрос про адреса/цены/«где купить» → веб, не из памяти), срез выдуманных URL
 (`_strip_ungrounded_urls`) и **выдуманных email** (`safety.strip_ungrounded_pii` — только
 email, числа/GAIA-ответы не трогаются), детектор вырожденного повтора и ложного «нет
@@ -668,9 +670,10 @@ HITL + **анти-injection в выводах тулов и AutoRAG** + запр
 трейсинг/самодиагностика, device on-demand (кроссплатформенно), DeepAgent, eval-харнессы
 (daily/GAIA/AssistantBench/amortize), REPL/Telegram/FastAPI.
 
-Отложено (см. `ARCHITECTURE.md`): обучаемая локальная голова роутера (kNN-тюнинг / CatBoost
-на накопленном корпусе маршрутов), снятие регэксп-грунтинг-пола за fabrication-eval, подъём
-L2/L3 GAIA (мультихоп + файлы — потолок дешёвого тира), свободная динамическая композиция
-модулей (лестница act→deliberate — первый шаг), наследование сильных MCP через before/after-
-сравнение, LLM-генерализация рецептов перед коллективным промоушеном, кроссплатформенный
-UI-automation вне macOS.
+Отложено (см. `ARCHITECTURE.md`): обучаемая локальная модель выбора маршрута (kNN-тюнинг /
+CatBoost на накопленных примерах); замена жёсткой регэксп-проверки «нужен ли веб-поиск» на
+обучаемый классификатор — но только после проверки, что это не увеличит долю выдуманных ответов;
+подъём L2/L3 GAIA (многошаговые задачи + файлы — потолок дешёвого тира); свободная динамическая
+композиция модулей (лестница act→deliberate — первый шаг); наследование сильных MCP через
+сравнение «до/после»; обезличивание сохранённых сценариев (рецептов) перед тем как делиться ими
+с похожими пользователями; кроссплатформенный UI-automation вне macOS.
