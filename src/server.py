@@ -50,16 +50,29 @@ def webui():
 _cfg = OmegaConf.load("config.yml")
 _last_request = time.time()
 _idle_done = False  # чтобы не гонять improve повторно за один idle-период
+_graph = None       # строится на старте с АСИНХРОННЫМ чекпойнтером
 
-_conn = sqlite3.connect("data/checkpoints.db", check_same_thread=False)
-try:
-    from langgraph.checkpoint.sqlite import SqliteSaver
 
-    _graph = build_graph(SqliteSaver(_conn))
-except Exception:  # noqa: BLE001
-    from langgraph.checkpoint.memory import MemorySaver
+@app.on_event("startup")
+async def _build_graph_async() -> None:
+    """Граф — с АСИНХРОННЫМ SqliteSaver: /chat зовёт `await ainvoke`, а синхронный
+    SqliteSaver async-методы не поддерживает (был источник 500). Фолбэк — MemorySaver
+    (состояние графа не персистится, но история тредов всё равно живёт в chat_store)."""
+    global _graph
+    Path("data").mkdir(parents=True, exist_ok=True)
+    try:
+        import aiosqlite
+        from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    _graph = build_graph(MemorySaver())
+        conn = await aiosqlite.connect("data/checkpoints.db")
+        saver = AsyncSqliteSaver(conn)
+        await saver.setup()
+        _graph = build_graph(saver)
+    except Exception as e:  # noqa: BLE001
+        from langgraph.checkpoint.memory import MemorySaver
+
+        print(f"[server] AsyncSqliteSaver недоступен ({type(e).__name__}: {e}) → MemorySaver")
+        _graph = build_graph(MemorySaver())
 
 
 # Рабочий буфер связности реплик: последние N сообщений треда (берём из
