@@ -21,10 +21,43 @@ from rich.table import Table
 from rich.text import Text
 
 console = Console()
+
+
+def _frozen_bootstrap() -> None:
+    """Только для упакованного бинаря (PyInstaller). Дефолтный config.yml лежит в бандле
+    (_MEIPASS); при первом запуске копируем его в рабочую папку, чтобы существующие
+    относительные load('config.yml') резолвились БЕЗ переписывания кода, а правки и данные
+    (data/, config.local.yml) персистились рядом с бинарём. ДОЛЖЕН отработать ДО тяжёлых
+    импортов (они грузят config.yml). В обычном запуске из исходников — no-op."""
+    import os as _os
+    import sys as _sys
+    import shutil as _shutil
+    if not getattr(_sys, "frozen", False):
+        return
+    bundle = getattr(_sys, "_MEIPASS", _os.path.dirname(_sys.executable))
+    if not _os.path.exists("config.yml"):
+        src = _os.path.join(bundle, "config.yml")
+        if _os.path.exists(src):
+            try:
+                _shutil.copy(src, "config.yml")
+            except OSError:
+                pass
+
+
+_frozen_bootstrap()  # до импорта src.agent (он читает config.yml на импорте)
+
 # Мгновенный фидбек: тяжёлые импорты (langchain/langgraph/модели/навыки) занимают пару
 # секунд — показываем это сразу, чтобы старт не выглядел зависшим.
 with console.status("[cyan]🔥 Прогрев агента (первый запуск дольше — грузятся модели и навыки)…"):
-    from src.agent import build_graph, config, memory_store, rebuild_llms
+    from src.agent import config, memory_store, rebuild_llms
+    # ЭКСПЕРИМЕНТ (флаг experimental.composer): мета-контроллер компонует примитивы
+    # вместо выбора 1 из 6 режимов. Изолировано в src/agent_experimental.py; рабочий граф
+    # используется по умолчанию.
+    if config.get("experimental", {}).get("composer"):
+        from src.agent_experimental import build_graph
+        console.print("[yellow]⚗  experimental.composer: ON — мета-контроллер примитивов[/]")
+    else:
+        from src.agent import build_graph
     from src.clarify import set_clarifier
     from src.hitl import set_confirmer
     from src.llm import active_summary, set_provider
@@ -540,12 +573,15 @@ async def cmd_config() -> None:
         force = (get_cli("force_mode") or "").strip() or "auto"
         force_lbl = "авто — агент решает сам" if force == "auto" else MODE_STYLE.get(force, (force,))[0]
         allow = list(get_cli("allow") or [])
+        from src.llm import api_key_source
+        base_url = get_cli("base_url") or "openrouter (по умолчанию)"
         rows = [
             f"[cyan]1[/]. Модель: [bold]{active_summary()}[/]",
             f"[cyan]2[/]. Режим работы: [bold]{WORK_LABEL.get(hitl.work_mode(), hitl.work_mode())}[/]",
             f"[cyan]3[/]. Режим мышления: [bold]{force_lbl}[/]",
             f"[cyan]4[/]. Разрешено без вопроса: [bold]{len(allow)}[/] " +
             (f"[dim]({', '.join(allow[:3])}{'…' if len(allow) > 3 else ''})[/]" if allow else "[dim](пусто)[/]"),
+            f"[cyan]5[/]. Провайдер/ключ: [bold]API-ключ — {api_key_source()}[/] [dim]· endpoint: {base_url}[/]",
         ]
         console.print(Panel("\n".join(rows), title="⚙️  Настройки",
                             subtitle="[dim]номер — изменить · Enter или q — закрыть[/]",
@@ -581,6 +617,56 @@ async def cmd_config() -> None:
                 set_cli("allow", [])
                 hitl._grants.clear()
                 console.print("   гранты очищены")
+        elif pick == "5":
+            await cmd_provider_settings()
+
+
+async def cmd_provider_settings() -> None:
+    """Настройки провайдера: API-ключ и endpoint (base_url) редактируются ИЗ интерфейса и
+    персистятся в config.local.yml. Живая валидация ключа. env-ключ имеет приоритет."""
+    from src.cli_config import get_cli, set_cli
+    from src.llm import api_key_source, validate_credentials
+
+    while True:
+        base_url = get_cli("base_url") or "https://openrouter.ai/api/v1 (по умолчанию)"
+        src_lbl = api_key_source()
+        rows = [
+            f"[cyan]1[/]. API-ключ: [bold]{src_lbl}[/]" +
+            ("  [dim](задан в env — приоритетнее настроек)[/]" if src_lbl == "env" else ""),
+            f"[cyan]2[/]. Endpoint (base_url): [bold]{base_url}[/]",
+            "[cyan]3[/]. Проверить ключ сейчас (живой запрос)",
+            "[cyan]4[/]. Сбросить ключ/endpoint из настроек (вернуться к env/дефолту)",
+        ]
+        console.print(Panel("\n".join(rows), title="🔑  Провайдер / ключ / endpoint",
+                            subtitle="[dim]номер — изменить · Enter или q — назад[/]",
+                            border_style="bright_blue", expand=False))
+        pick = (await _paused_input("   › ")).strip().lower()
+        if not pick or pick in ("q", "й", "exit", "выход", "назад"):
+            return
+        if pick == "1":
+            raw = (await _paused_input(
+                "   вставь API-ключ (Enter — отмена; не показывается в баннере) › ")).strip()
+            if raw:
+                set_cli("api_key", raw)
+                rebuild_llms()  # клиенты подхватывают новый ключ сразу
+                ok, msg = validate_credentials()
+                console.print(f"   ключ сохранён · {('[green]' if ok else '[red]')}{msg}[/]")
+        elif pick == "2":
+            raw = (await _paused_input(
+                "   base_url (напр. https://openrouter.ai/api/v1 · Enter — отмена) › ")).strip()
+            if raw:
+                set_cli("base_url", raw)
+                rebuild_llms()
+                console.print(f"   endpoint сохранён: [bold]{raw}[/]")
+        elif pick == "3":
+            with console.status("[cyan]проверяю ключ…"):
+                ok, msg = validate_credentials()
+            console.print(f"   {('[green]✓ ' if ok else '[red]✗ ')}{msg}[/]")
+        elif pick == "4":
+            set_cli("api_key", None)
+            set_cli("base_url", None)
+            rebuild_llms()
+            console.print("   сброшено — используются env-ключ и endpoint по умолчанию")
 
 
 async def _repl_confirm(description: str) -> str:
@@ -899,7 +985,9 @@ async def run_once(task: str, auto: bool = False) -> int:
     return 0 if ok else 1
 
 
-if __name__ == "__main__":
+def _cli_entry() -> None:
+    """Точка входа консольной команды `self-extension-agent` (см. pyproject [project.scripts])
+    и упакованного бинаря. Аргументы → one-shot прогон; без аргументов → интерактивный REPL."""
     import sys as _sys
 
     _args = [a for a in _sys.argv[1:]]
@@ -908,3 +996,7 @@ if __name__ == "__main__":
     if _task:
         raise SystemExit(asyncio.run(run_once(_task, auto=_auto)))
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    _cli_entry()

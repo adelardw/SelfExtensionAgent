@@ -1,0 +1,44 @@
+name: build-binaries
+
+# Кроссплатформенная сборка нативных бинарей (Windows .exe / macOS / Linux).
+# PyInstaller не кросс-компилирует — поэтому матрица из трёх ОС, каждая собирает своё.
+# Запуск: вручную (workflow_dispatch) или по тегу vX.Y.Z.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: self-extension-agent-linux
+          - os: macos-latest
+            artifact: self-extension-agent-macos
+          - os: windows-latest
+            artifact: self-extension-agent-windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Sync deps (+ packaging group)
+        run: uv sync --group package
+
+      - name: Build binary
+        run: uv run python scripts/build_binary.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/self-extension-agent
+            dist/self-extension-agent.exe
+          if-no-files-found: warn

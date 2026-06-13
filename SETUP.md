@@ -19,6 +19,31 @@ TELEGRAM_BOT_TOKEN=...               # опц. — Telegram-бот
 uvicorn src.server:app --port 8000   # HTTP API (/chat, /diagnose, /memory/*, /traces)
 ```
 
+## 0.1. Кроссплатформенность и упаковка
+
+**Установка на любой ОС (Windows / macOS / Linux)** — через `uv`:
+```bash
+uv sync                              # macOS-only deps (pyobjc) гейтятся сами → ставится везде
+uv run self-extension-agent          # консольная команда (REPL); с аргументом — one-shot
+uv run self-extension-agent "посчитай 2^10"   # автономный прогон одной задачи
+```
+> macOS-специфичные навыки (AX/keystroke управления окнами) на Windows/Linux просто не
+> грузятся — ядро (поиск/анализ/память/браузер) работает кроссплатформенно.
+
+**Нативный бинарь (.exe / .app / бинарь), без Python у пользователя** — PyInstaller:
+```bash
+uv sync --group package              # поставить pyinstaller
+python scripts/build_binary.py       # собрать под ТЕКУЩУЮ ОС → dist/self-extension-agent[.exe]
+```
+PyInstaller не кросс-компилирует: для всех трёх ОС сразу — CI
+`.github/workflows/build.yml` (матрица ubuntu/macos/windows → артефакты). При первом запуске
+бинарь кладёт дефолтный `config.yml` рядом с собой; данные (`data/`, `config.local.yml`)
+персистятся в рабочей папке.
+
+**Провайдер и ключ без `.env`** — в REPL `/config` → пункт «Провайдер/ключ»: ввод API-ключа и
+`base_url` (любой OpenAI-совместимый endpoint) с живой валидацией; сохраняется в
+`config.local.yml`. env-ключ (`OPEN_ROUTER_API_KEY`) имеет приоритет.
+
 ## 1. Работа с приложениями ПК «без костылей»
 
 ### app_control — скриптуемые приложения (Mail/Safari/Calendar/Notes), AppleScript

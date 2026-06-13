@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 
 from dotenv import load_dotenv
@@ -29,8 +30,55 @@ def set_provider(provider_name: str | None, model: str | None = None) -> None:
     _active = None
 
 
+def _cli_override(key: str, default=None):
+    """Пользовательская настройка из config.local.yml (cli.<key>) — заполняется из /config.
+    Ленивый импорт, чтобы избежать цикла; битый/отсутствующий конфиг не ломает запуск."""
+    try:
+        from .cli_config import get_cli
+        return get_cli(key, default)
+    except Exception:  # noqa: BLE001
+        return default
+
+
 def api_key() -> str | None:
-    return os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+    """Ключ: env (приоритет) → пользовательский ввод из настроек (config.local.yml)."""
+    return (os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+            or _cli_override("api_key") or None)
+
+
+def api_key_source() -> str:
+    """Откуда взят ключ — для отображения в настройках (без раскрытия самого ключа)."""
+    if os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY"):
+        return "env"
+    if _cli_override("api_key"):
+        return "настройки"
+    return "не задан"
+
+
+def validate_credentials(key: str | None = None, base_url: str | None = None,
+                         model: str | None = None) -> tuple[bool, str]:
+    """Живая проверка ключа/endpoint: минимальный chat-запрос (max_tokens=1) к
+    OpenAI-совместимому base_url. Работает для openrouter и любого кастомного endpoint."""
+    key = key or api_key()
+    base = (base_url or _cli_override("base_url") or OPENROUTER_BASE).rstrip("/")
+    if not key:
+        return False, "API-ключ не задан"
+    mdl = model or model_for("fast")
+    body = json.dumps({"model": mdl, "messages": [{"role": "user", "content": "ping"}],
+                       "max_tokens": 1}).encode()
+    req = urllib.request.Request(
+        base + "/chat/completions", data=body,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            json.loads(r.read())
+        return True, "ключ валиден ✓"
+    except urllib.error.HTTPError as e:  # type: ignore[attr-defined]
+        if e.code in (401, 403):
+            return False, "ключ отклонён (401/403 — неверный ключ или нет доступа)"
+        return False, f"endpoint ответил HTTP {e.code}"
+    except Exception as e:  # noqa: BLE001
+        return False, f"не удалось проверить ({type(e).__name__}): {str(e)[:60]}"
 
 
 def _ollama_works() -> bool:
@@ -87,7 +135,8 @@ def model_for(role: str) -> str:
 def _base_and_key() -> tuple[str, str]:
     if provider() == "ollama":
         return _cfg.get("ollama", {}).get("base_url", "http://localhost:11434/v1"), "ollama"
-    return OPENROUTER_BASE, (api_key() or "")
+    # openrouter / совместимый: endpoint можно переопределить из настроек (cli.base_url)
+    return (_cli_override("base_url") or OPENROUTER_BASE), (api_key() or "")
 
 
 def chat(role: str = "fast", temperature: float = 0.0):

@@ -23,8 +23,10 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pydantic>=2.12.5",
     "pymupdf>=1.27.2.3",
-    "pyobjc-framework-applicationservices>=12.2",
-    "pyobjc-framework-cocoa>=12.2",
+    # macOS-only (AX/keystroke управление окнами). Гейт по платформе — иначе
+    # uv sync / pip install ПАДАЕТ на Windows/Linux (pyobjc там не ставится).
+    "pyobjc-framework-applicationservices>=12.2; sys_platform == 'darwin'",
+    "pyobjc-framework-cocoa>=12.2; sys_platform == 'darwin'",
     "python-docx>=1.2.0",
     "python-pptx>=1.0.2",
     "pyyaml>=6.0.3",
@@ -35,8 +37,16 @@ dependencies = [
     "yml>=0.0.1",
 ]
 
+[project.scripts]
+self-extension-agent = "main:_cli_entry"
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.4.0",
+]
+# Кроссплатформенная упаковка в нативный бинарь (.exe/.app/бинарь) — opt-in.
+# Установка: `uv sync --group package`; сборка: `python scripts/build_binary.py`.
+package = [
+    "pyinstaller>=6.11.0",
 ]
