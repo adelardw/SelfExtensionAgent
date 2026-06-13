@@ -1,0 +1,1 @@
+Reads ORCID (Open Researcher and Contributor ID) profile data via the public ORCID API. Used to fetch a person's works/publications list from their ORCID record. Returns publication titles, DOIs, publication years, and other metadata.
