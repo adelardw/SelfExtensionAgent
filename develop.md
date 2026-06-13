@@ -70,12 +70,15 @@ Jaccard (без сети в hot-path); персональные остаются
 регэксп там — high-precision энфорсмент, оставлен. Вернуться при фокусе на daily-ассистента.
 `bandit.mode_prior` Jaccard→эмбеддинги — тоже отложено (текущий Jaccard работает).
 
-### Thread 3b — анти-галлюцинационный пол (ТОЛЬКО за eval-доказательством)
-Убрать дублирующий оверрайд `_needs_web_grounding→act` (`agent.py:433`); решение —
-на модельном `ReflexionDecision.grounding`+GROUNDING_GATE; `_GROUND_RE` сузить до
-high-precision СТРАХОВКИ. **Доказательство до коммита:** набор кейсов выдумки →
-`_before_after_eval` (доля выдуманных URL/фактов ДО vs ПОСЛЕ), коммит только при after≤before,
-иначе откат. Тест: расширить `tests/test_research_grounding.py`. **Риск ВЫСОКИЙ.**
+### Thread 3b — анти-галлюцинационный пол   ⏸ ОТЛОЖЕНО ОСОЗНАННО (2026-06-13), пол СОХРАНЁН
+РЕШЕНИЕ: НЕ убираем `_needs_web_grounding→act` (`agent.py`). Обоснование: (1) это high-precision
+анти-галлюцинационный ЭНФОРСМЕНТ (разрешённое применение регэкспа по [[feedback-no-keyword-crutches]]),
+дублирующий модельный `grounding` как СТРАХОВКА — это корректный belt-and-suspenders, не баг;
+(2) удаление без fabrication-eval (`_before_after_eval`) = риск регресса по ЖЁСТКОМУ инварианту
+«не выдумывать» — не делаем на веру/спекулятивно; (3) НЕ на критическом пути GAIA (англ. research,
+не «где купить»). Вернуться: собрать набор кейсов выдумки → before/after, коммит только при
+after≤before. До тех пор пол работает и не трогается. (Анти-PII пол Thread 2c — уже усилил эту
+ветку в сторону «не разглашать».)
 
 ### Thread 3c — heavy НЕ предсказывается, а ЗАРАБАТЫВАЕТСЯ   ✅ СДЕЛАНО (2026-06-13)
 reflexion-авто `mode=='heavy'→'deliberate'` (heavy убран из стартовых; force_mode='heavy'
@@ -107,11 +110,12 @@ tool_call_id и парность с AIMessage СОХРАНЯЮТСЯ (струк
 всего (rubric) — уже есть. Тесты: `tests/test_context_masking.py` (4: свёртка/noop/идемпотентность/
 короткие), 262 passed.
 
-### Порядок
-(0+1) вместе → 2 → 2c → 4 → 3a → 3c → 3b (последним, за eval). Каждая нить: ветка от main,
-свои тесты + полный suite (242) + `bench_scenarios.py` на регресс (Thread 4 — особо на
-токен-экономию и сохранность межшаговых данных). ОТКРЫТО: PII-генерализация рецептов перед
-`collective.maybe_promote` (privacy в мульти-юзере).
+### Порядок — СТАТУС (ветка etap0-recall-embeddings)
+✅ 0+1 (эмбеддинги+recall-гейт) → ✅ 2 (GraphRAG-lite) → ✅ 2c (анти-PII) → ✅ 4 (маскинг) →
+✅ 3a (similarity few-shots; embedding-kNN physical/play отложен) → ✅ 3c (heavy earned) →
+⏸ 3b (пол сохранён, за eval). Каждая нить: свои тесты + полный suite (263 passed) на регресс.
+GAIA-smoke (n=5, EVAL_MODE): пайплайн работает на реальных задачах (L1 ✅ 25с/$0.0018,
+L2 ✅ 189с/$0.0138). ОТКРЫТО: PII-генерализация рецептов; embedding-kNN intent; 3b eval.
 
 ---
 
