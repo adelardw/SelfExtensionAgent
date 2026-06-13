@@ -31,7 +31,19 @@ from typing import Optional
 from .memory.embedder import build_embedder, cosine
 
 CODEBOOK_FILE = Path(os.getenv("AGENT_INTENT_CODEBOOK") or "data/intent_codebook.json")
-MIN_SIM = 0.45          # ниже — «не уверен» → fallback на регэксп
+
+
+def _cfg_min_sim() -> float:
+    # Калибровано на route_eval (102 кейса): 0.45→acc 78%/fallback 46%; 0.30→acc 93%/fallback 16%/
+    # web_grounding recall 43%→82%, без перекрёстных ошибок. Конфигурируемо (тюнинг kNN на корпусе).
+    try:
+        from omegaconf import OmegaConf
+        return float((OmegaConf.load("config.yml").get("intent", {}) or {}).get("min_sim", 0.30))
+    except Exception:  # noqa: BLE001
+        return 0.30
+
+
+MIN_SIM = _cfg_min_sim()  # ниже порога — «не уверен» → fallback на регэксп/рассуждение
 MAX_PER_LABEL = 60      # потолок выученных экземпляров на лейбл (анти-переполнение, LRU по ts)
 
 LABELS = ("web_grounding", "physical_browser", "play_media", "self_contained")

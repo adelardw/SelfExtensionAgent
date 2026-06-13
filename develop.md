@@ -133,6 +133,10 @@ seed решает cold-start (RecSys content-based). РАСТЁТ из фидб�
 (валидированный успех, лейбл из реального поведения). КОРПУС `route_examples.db` (pos+neg, reward
 0/1) — сырьё для будущего contrastive (kNN-тюнинг / CatBoost-head / локальный эмбеддер); на
 live-роутинг не влияет; в eval не пишется. Тесты: `tests/test_intent.py` (8), 271 passed.
+**СТАТ-ОЦЕНКА** (`src/eval/route_eval.py`, 102 размеченных мультиязычных кейса ВНЕ seed):
+порог `intent.min_sim` калиброван свипом 0.45→0.30 → **accuracy 78%→93.1%** [Wilson 86.5–96.6%],
+fallback 46%→16%, web_grounding recall 43%→82%; per-label: physical/play 100%, self_contained 93%,
+web_grounding 82%; перекрёстных ошибок почти нет. Это «тюнинг kNN на корпусе» (порог по данным).
 ОТЛОЖЕНО (по нарастающей): reward-взвешенный kNN + per-user калибровка порогов → CatBoost-head
 (когда корпус ≥~1k, holdout>kNN) → fine-tuned ЛОКАЛЬНЫЙ роут-эмбеддер (скрыт+бесплатен+развязан,
 нужна локальная инфра). Guardrail: голова=прайор гейтов (не оракул), exploration=бандит, holdout
