@@ -9,6 +9,7 @@ dependencies = [
     "cloakbrowser>=0.3.31",
     "deepagents>=0.6.8",
     "dotenv>=0.9.9",
+    "fastapi>=0.115.0",
     "langchain>=1.2.10",
     "langchain-mcp-adapters>=0.2.2",
     "langchain-openai>=1.1.10",
@@ -49,4 +50,9 @@ dev = [
 # Установка: `uv sync --group package`; сборка: `python scripts/build_binary.py`.
 package = [
     "pyinstaller>=6.11.0",
+]
+# Нативное десктоп-окно (системный webview, без Electron/Node) — opt-in.
+# Установка: `uv sync --group gui`; запуск: `python desktop.py`.
+gui = [
+    "pywebview>=5.3",
 ]

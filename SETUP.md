@@ -16,8 +16,12 @@ TELEGRAM_BOT_TOKEN=...               # опц. — Telegram-бот
 ```bash
 .venv/bin/python main.py             # REPL (rich + редактирование строки/история)
 .venv/bin/python bot.py              # Telegram-бот
-uvicorn src.server:app --port 8000   # HTTP API (/chat, /diagnose, /memory/*, /traces)
+uvicorn src.server:app --port 8000   # HTTP API + веб-GUI на http://localhost:8000/
+.venv/bin/python desktop.py          # нативное окно с чат-GUI (uv sync --group gui)
 ```
+**GUI**: сервер отдаёт чат-интерфейс на `/` (открой в браузере), либо `desktop.py` —
+нативное окно ОС (системный webview, без Electron). Тонкий клиент + мозг: окно говорит
+с `/chat` локального сервера.
 
 ## 0.1. Кроссплатформенность и упаковка
 

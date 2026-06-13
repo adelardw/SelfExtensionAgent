@@ -32,10 +32,11 @@ for pkg in (
     except Exception as e:  # пакет может отсутствовать на части платформ
         print(f"[spec] collect_all({pkg}) пропущен: {e}")
 
-# Наш код как ресурсы: дефолтный config.yml + навыки (читаются в рантайме).
+# Наш код как ресурсы: дефолтный config.yml + навыки + веб-GUI (читаются в рантайме).
 datas += [
     (str(ROOT / "config.yml"), "."),
     (str(ROOT / "src" / "skills"), "src/skills"),
+    (str(ROOT / "src" / "webui"), "src/webui"),
 ]
 hiddenimports += collect_submodules("src")
 
