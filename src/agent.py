@@ -135,13 +135,16 @@ STEP_ITER_LIMIT: int = config.agent.get("step_iter_limit", 16)
 # Глобальный бюджет прогона: сколько ВСЕГО исполнений шага допустимо на один запрос
 # (включая ретраи шагов, fix-подшаги heavy-ревью, повторы плана при low-conf). Жёсткий
 # предохранитель от runaway — eval ловил heavy на 928k токенов/$0.11/17мин.
-MAX_STEPS_PER_RUN: int = config.agent.get("max_steps_per_run", 12)
+# Бюджеты прогона ENV-переопределяемы (дефолты для daily не трогаем). Принцип проекта:
+# способность=цель, бюджет=констрейнт, НЕ наоборот — для капасити-теста (GAIA) даём больше
+# через env, не раздувая стоимость повседневных прогонов. UNLEASH ниже переопределяет жёстче.
+MAX_STEPS_PER_RUN: int = int(os.getenv("AGENT_MAX_STEPS") or config.agent.get("max_steps_per_run", 12))
 # Токен-бюджет прогона (жёсткий потолок против runaway: eval ловил ~1М токенов/$0.11).
 # При исчерпании ноды принудительно идут к синтезу — собрать что есть, не жечь дальше.
-MAX_RUN_TOKENS: int = config.agent.get("max_run_tokens", 120000)
+MAX_RUN_TOKENS: int = int(os.getenv("AGENT_MAX_RUN_TOKENS") or config.agent.get("max_run_tokens", 120000))
 # Wall-clock дедлайн прогона: heavy в eval упирался в 5 мин (медленно молотил). Стоп
 # по времени ИЛИ по токенам — что раньше. Держим заметно ниже 5 мин ради UX.
-MAX_RUN_SECONDS: float = config.agent.get("max_run_seconds", 150)
+MAX_RUN_SECONDS: float = float(os.getenv("AGENT_MAX_RUN_SECONDS") or config.agent.get("max_run_seconds", 150))
 CAP_RESEARCH_TIMEOUT: float = config.agent.get("cap_research_timeout", 30)  # потолок веб-поиска способа
 STEP_DEADLINE_CAP: float = config.agent.get("step_deadline_cap", 45)  # макс. секунд на ОДИН шаг (анти-монополия)
 RESEARCH_STEP_DEADLINE: float = config.agent.get("research_step_deadline", 90)  # веб-research не ретраится → больше времени на multi-hop
