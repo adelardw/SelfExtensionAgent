@@ -15,6 +15,44 @@
 
 Полная архитектура — в [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+---
+
+## In English (overview)
+
+A self-extending, self-improving personal agent built on **LangGraph**. It picks a *thinking
+mode* per task, remembers the user across sessions, extends itself with skills, and **learns
+from its own traces** — treating its graph as a trainable program. Thesis: a **cheap model +
+strong harness** beats a bigger model; usefulness comes from **per-user optimization**
+(personalization = the path to universality), with context kept compact via context engineering.
+
+## Benchmarks & results
+
+Honest numbers on a **cheap tier** (`google/gemini-2.5-flash-lite` for routing/validation,
+`deepseek/deepseek-v4-flash` for execution). Not benchmark-tuned — these come from live runs.
+
+**GAIA (held-out validation, all levels, `EVAL_MODE`, default budget, resilient runner):**
+
+| | Overall | L1 | L2 | L3 | Cost |
+|---|---|---|---|---|---|
+| baseline (n=20, before fixes) | 15% | 29% | 14% | 0% | $0.16 |
+| **after fixes (n=100)** | **23%** | **49%** | 8% | 8% | $0.58 |
+
+The L1 jump (29%→49%) came from fixing "give-up" behavior (research now reads real findings
+instead of answering "couldn't determine"). L2/L3 (8%/8%) are the ceiling of this model tier
+(multi-hop + files). Context: GPT-4+plugins score ~15% on GAIA; top agents ~40–50% on L1 only.
+Reproduce: `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
+
+**Universal intent router** (`src/eval/route_eval.py`, 410 labeled multilingual cases, held out
+of the seed): **94%** overall — `play_media` 100%, `physical_browser` 97%, `self_contained` 93%,
+`web_grounding` 87%. Multilingual via embeddings (es/de/fr/… outside the seed are routed
+correctly). Reproduce: `python -m src.eval.route_eval`.
+
+**Amortization** (`scripts/amortize_bench.py`): warm pass **−13% tokens with quality 78%→98%**
+(n=4 — illustrative, not statistically strong). **Tests:** 272, mostly offline (no LLM).
+
+> Caveats: GAIA n=100 → per-level CIs are wide; route_eval threshold is calibrated on its own
+> set (single hyperparameter, low overfit risk); confidence numbers are validator self-assessment.
+
 ## Что умеет
 
 - **6 типов мышления (Any-2-Any)** — мета-контроллер сам выбирает по анализу задачи,
