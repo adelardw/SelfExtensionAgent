@@ -599,11 +599,11 @@ def _needs_web_grounding(query: str, qvec: list | None = None) -> bool:
 
 
 def _wants_physical_browser(query: str, qvec: list | None = None) -> bool:
-    """Нужен ли ФИЗИЧЕСКИЙ браузер (вкладка в окне юзера): воспроизведение / действие под логином.
-    Чтение/анализ/факты → headless (не крадём фокус). УНИВЕРСАЛЬНО через embedding-классификатор
-    (любой язык), без регэкспов; нет уверенного сигнала → False (по умолчанию headless)."""
+    """Нужен ли ФИЗИЧЕСКИЙ браузер (вкладка в окне юзера): воспроизведение / медиа-контроль
+    (пауза/стоп) / действие под логином. Чтение/анализ/факты → headless (не крадём фокус).
+    УНИВЕРСАЛЬНО через embedding-классификатор (любой язык), без регэкспов; нет сигнала → False."""
     c = intent.get_router().classify(query, qvec)
-    return bool(c and c["label"] in ("physical_browser", "play_media"))
+    return bool(c and c["label"] in ("physical_browser", "play_media", "media_control"))
 
 
 def _service_domain(tool_texts: str) -> str:

@@ -446,6 +446,103 @@ CASES: list[tuple[str, str]] = [
     ("what is a recursion base case", "self_contained"),
     ("объясни алгоритм дейкстры кратко", "self_contained"),
     ("give me a simple analogy for a database index", "self_contained"),
+
+    # ── media_control (пауза/стоп/громкость — НЕ запуск; новые формулировки) ──
+    ("поставь музыку на паузу", "media_control"),
+    ("pause the song please", "media_control"),
+    ("приостанови видео на секунду", "media_control"),
+    ("stop the playback", "media_control"),
+    ("сделай звук потише", "media_control"),
+    ("turn it down a bit", "media_control"),
+    ("выключи звук совсем", "media_control"),
+    ("mute it", "media_control"),
+    ("поставь воспроизведение на паузу", "media_control"),
+    ("останови музыку", "media_control"),
+    ("pausa el video", "media_control"),
+    ("baisse le son", "media_control"),
+
+    # ═══ ДОБОР до 100+/класс + ЯЗЫКИ (JA/ZH/AR/KO/HI/TR/IT) ═══
+    # ── media_control (+88 до 100; пауза/стоп/громкость, многоязычно) ──
+    ("останови проигрывание", "media_control"), ("поставь трек на паузу", "media_control"),
+    ("приглуши звук", "media_control"), ("прибавь громкость", "media_control"),
+    ("убавь громкость", "media_control"), ("поставь на стоп", "media_control"),
+    ("выруби звук", "media_control"), ("сделай погромче пожалуйста", "media_control"),
+    ("останови этот ролик", "media_control"), ("поставь воспроизведение на стоп", "media_control"),
+    ("hold the music", "media_control"), ("halt the video", "media_control"),
+    ("silence it", "media_control"), ("crank the volume up", "media_control"),
+    ("lower it down", "media_control"), ("pause this track", "media_control"),
+    ("stop this song", "media_control"), ("turn the sound off please", "media_control"),
+    ("bring the volume up", "media_control"), ("mute the playback", "media_control"),
+    ("detén la canción", "media_control"), ("silencia el audio", "media_control"),
+    ("sube un poco el volumen", "media_control"), ("baja un poco el volumen", "media_control"),
+    ("pon pausa", "media_control"), ("apaga el sonido", "media_control"),
+    ("pausa este video", "media_control"), ("halte das lied an", "media_control"),
+    ("stoppe das video bitte", "media_control"), ("ton leiser machen", "media_control"),
+    ("ton lauter machen", "media_control"), ("schalte den ton stumm", "media_control"),
+    ("pausiere den song", "media_control"), ("mach die musik aus", "media_control"),
+    ("arrête la chanson", "media_control"), ("baisse un peu le son", "media_control"),
+    ("monte un peu le son", "media_control"), ("coupe la musique", "media_control"),
+    ("mets la vidéo en pause", "media_control"), ("désactive le son", "media_control"),
+    ("stoppe la lecture", "media_control"), ("ferma la canzone", "media_control"),
+    ("abbassa un po' il volume", "media_control"), ("alza un po' il volume", "media_control"),
+    ("silenzia tutto", "media_control"), ("metti in pausa il video", "media_control"),
+    ("spegni l'audio", "media_control"), ("pausa a reprodução", "media_control"),
+    ("abaixa o volume", "media_control"), ("aumenta o volume", "media_control"),
+    ("silencia tudo", "media_control"), ("para essa música", "media_control"),
+    ("desliga o som", "media_control"), ("zatrzymaj odtwarzanie", "media_control"),
+    ("ścisz trochę", "media_control"), ("pogłośnij trochę", "media_control"),
+    ("wstrzymaj wideo", "media_control"), ("wycisz to", "media_control"),
+    ("videoyu durdur", "media_control"), ("sesi biraz aç", "media_control"),
+    ("sesi biraz kıs", "media_control"), ("müziği duraklat", "media_control"),
+    ("sesi sustur", "media_control"), ("pauzeer het nummer", "media_control"),
+    ("stop de video", "media_control"), ("geluid zachter", "media_control"),
+    ("geluid harder", "media_control"), ("dempen", "media_control"),
+    ("再生を止めて", "media_control"), ("動画を一時停止して", "media_control"),
+    ("音を小さくして", "media_control"), ("音を大きくして", "media_control"),
+    ("ミュートして", "media_control"), ("暂停一下", "media_control"),
+    ("把视频停掉", "media_control"), ("声音调大一点", "media_control"),
+    ("把声音关掉", "media_control"), ("暂停这首歌", "media_control"),
+    ("أوقف الأغنية", "media_control"), ("ارفع الصوت قليلا", "media_control"),
+    ("اكتم الصوت تماما", "media_control"), ("أوقف الفيديو الآن", "media_control"),
+    ("재생 멈춰줘", "media_control"), ("소리 키워줘", "media_control"),
+    ("음소거", "media_control"), ("동영상 정지해줘", "media_control"),
+    ("आवाज़ धीमी करो", "media_control"), ("वीडियो रोको", "media_control"),
+    # ── web_grounding (+15: JA/ZH/AR/KO/HI/TR/IT) ──
+    ("東京で一番安いホテルはどこ", "web_grounding"), ("iphoneの最新モデルはどれ", "web_grounding"),
+    ("近くのカフェのおすすめは", "web_grounding"), ("哪里可以买到便宜的机票", "web_grounding"),
+    ("最新的苹果手机多少钱", "web_grounding"), ("附近有什么好吃的", "web_grounding"),
+    ("أين أجد أرخص تذاكر طيران", "web_grounding"), ("ما هي أفضل سماعات لاسلكية", "web_grounding"),
+    ("가장 싼 항공권 어디서 사", "web_grounding"), ("이번 주 날씨 어때", "web_grounding"),
+    ("근처 맛집 추천해줘", "web_grounding"), ("सस्ता लैपटॉप कहाँ मिलेगा", "web_grounding"),
+    ("आज सोने का भाव क्या है", "web_grounding"), ("en ucuz uçak bileti nerede", "web_grounding"),
+    ("dove comprare un telefono economico", "web_grounding"),
+    # ── physical_browser (+15) ──
+    ("ツイッターを開いてツイートして", "physical_browser"), ("設定を開いてダークモードにして", "physical_browser"),
+    ("注文履歴を見せて", "physical_browser"), ("打开我的推特发推文", "physical_browser"),
+    ("登录我的银行账户", "physical_browser"), ("在购物车结算", "physical_browser"),
+    ("افتح حسابي على تويتر", "physical_browser"), ("سجّل دخولي إلى البنك", "physical_browser"),
+    ("أكمل الطلب في السلة", "physical_browser"), ("트위터 열어서 트윗해줘", "physical_browser"),
+    ("은행 계정에 로그인", "physical_browser"), ("장바구니에서 결제해줘", "physical_browser"),
+    ("मेरा जीमेल खोलो", "physical_browser"), ("e-postama giriş yap", "physical_browser"),
+    ("apri il mio carrello e paga", "physical_browser"),
+    # ── play_media (+15) ──
+    ("クイーンの曲をかけて", "play_media"), ("ポッドキャストを再生して", "play_media"),
+    ("映画の予告編を見せて", "play_media"), ("播放周杰伦的歌", "play_media"),
+    ("放一部纪录片", "play_media"), ("播放白噪音", "play_media"),
+    ("شغّل أغنية لفيروز", "play_media"), ("شغّل بودكاست عن التاريخ", "play_media"),
+    ("شغّل فيلما الآن", "play_media"), ("아이유 노래 틀어줘", "play_media"),
+    ("팟캐스트 재생해줘", "play_media"), ("영화 틀어줘", "play_media"),
+    ("कोई गाना बजाओ", "play_media"), ("bir şarkı çal", "play_media"),
+    ("metti un film da guardare", "play_media"),
+    # ── self_contained (+15) ──
+    ("フィボナッチ数列を書いて", "self_contained"), ("光の速さはいくつ", "self_contained"),
+    ("この文を日本語に翻訳して", "self_contained"), ("写一个冒泡排序", "self_contained"),
+    ("解释一下http和https的区别", "self_contained"), ("把这句话翻译成英文", "self_contained"),
+    ("ما هي عاصمة فرنسا", "self_contained"), ("اكتب دالة لعكس سلسلة نصية", "self_contained"),
+    ("اشرح ما هو ال api", "self_contained"), ("버블 정렬 코드 짜줘", "self_contained"),
+    ("빛의 속도가 얼마야", "self_contained"), ("이 문장을 영어로 번역해줘", "self_contained"),
+    ("144 का वर्गमूल क्या है", "self_contained"), ("faktöriyel fonksiyonu yaz", "self_contained"),
+    ("spiega cos'è la ricorsione", "self_contained"),
 ]
 
 
@@ -489,12 +586,12 @@ def run() -> None:
     print(f"\nOverall accuracy: {correct}/{n} = {acc:.1%}  [95% Wilson {lo:.1%}–{hi:.1%}]")
     print(f"Classified (не-None): {classified}/{n} = {classified/n:.0%}  ·  fallback(None): {fallback}/{n} = {fallback/n:.0%}")
     print("\nPer-label recall:")
-    for lbl in ("web_grounding", "physical_browser", "play_media", "self_contained"):
+    for lbl in ("web_grounding", "physical_browser", "play_media", "media_control", "self_contained"):
         t = per_total[lbl]
         if t:
             print(f"  {lbl:18} {per_correct[lbl]}/{t} = {per_correct[lbl]/t:.0%}")
     print("\nConfusion (expected → predicted):")
-    for exp in ("web_grounding", "physical_browser", "play_media", "self_contained"):
+    for exp in ("web_grounding", "physical_browser", "play_media", "media_control", "self_contained"):
         row = ", ".join(f"{p}:{cnt}" for p, cnt in confusion[exp].most_common())
         print(f"  {exp:18} → {row}")
     print("=" * 90)
