@@ -1434,6 +1434,27 @@ async def skill_injection_node(state: GeneralGraphState) -> dict:
 # витке, а несётся обрезанной сутью.
 TOOL_OUTPUT_CAP = 1500
 MAX_DIRECT_TOOLCALLS = 4  # сколько вызовов тулов исполняем за один проход direct-шага
+# History-masking ВНУТРИ шага: сколько последних ToolMessage держим полными (старые сворачиваем).
+MASK_KEEP_TOOLMSGS = 4
+
+
+def _mask_old_tool_msgs(msgs: list, keep: int = MASK_KEEP_TOOLMSGS) -> None:
+    """
+    Маскинг контекста ВНУТРИ шага («забывать ход мысли выполненного, оставить результат»):
+    старые ToolMessage (кроме последних `keep`) сворачиваются в заглушку — анти-квадратичный
+    рост контекста длинной direct-цепочки (браузер: открыть→see→клик→…). tool_call_id и
+    парность с AIMessage СОХРАНЯЮТСЯ (только укорачиваем content) — структура не рвётся.
+    """
+    tool_idxs = [i for i, m in enumerate(msgs) if m.__class__.__name__ == "ToolMessage"]
+    if len(tool_idxs) <= keep:
+        return
+    for i in tool_idxs[:-keep]:
+        m = msgs[i]
+        c = getattr(m, "content", "") or ""
+        if isinstance(c, str) and len(c) > 80 and not c.startswith("[свёрнуто"):
+            msgs[i] = ToolMessage(
+                content=f"[свёрнуто: результат шага использован, {len(c)} симв.]",
+                tool_call_id=getattr(m, "tool_call_id", ""))
 
 
 def _compress_tools(tools: list, cap: int = TOOL_OUTPUT_CAP) -> list:
@@ -1530,6 +1551,7 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
             s, _flag = sanitize_tool_output(s, source=tc.get("name", "инструмент"))  # анти-инъекция
             msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
         rounds += 1
+        _mask_old_tool_msgs(msgs)  # свернуть старые наблюдения (анти-квадратичность шага)
         resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
 
     text = strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp))
@@ -1679,7 +1701,12 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     idx = state.get("current_step", 0)
     step = subtasks[idx]
     prior = state.get("step_results", [])
-    prior_text = "\n".join(f"{i+1}. {r['goal']} → {r['result'][:200]}" for i, r in enumerate(prior)) or "(нет)"
+    # Маскинг выполненного: вперёд идёт РЕЗУЛЬТАТ шага (не ход мысли — он и так не сохраняется).
+    # Последние 2 шага — полнее (межшаговая зависимость: список из шага N фильтрует шаг N+1),
+    # старые — короче (свёрнуты). Так контекст не растёт линейно с числом шагов, но цепочка цела.
+    prior_text = "\n".join(
+        f"{i+1}. {r['goal']} → {r['result'][:600 if i >= len(prior) - 2 else 200]}"
+        for i, r in enumerate(prior)) or "(нет)"
 
     # Если выбран stash — даём исполнителю ТОЧНЫЕ имена существующих наборов данных,
     # чтобы не гадать имя (eval: аналитика искала не тот стэш → 0%).
