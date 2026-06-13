@@ -35,12 +35,41 @@ def _install_hint() -> str:
     )
 
 
+def _backend() -> str:
+    try:
+        from src.cli_config import get_cli
+        return (get_cli("browser_backend") or "extension").lower()
+    except Exception:  # noqa: BLE001
+        return "extension"
+
+
+# PUPPETEER-БЭКЕНД: open/see идут через pp_* (Puppeteer ЖДЁТ оседания тяжёлого SPA, потом наш
+# снапшот на отрендеренной странице — видит динамику, которую снапшот-без-ожидания пропускал;
+# живой провал: карточки товаров Я.Еды). Клики/ввод/медиа — по тому же снапшоту, без изменений.
+_PP_OP = {"open_url": "pp_open", "see": "pp_see"}
+
+
 async def _route(op: str, *args):
     """Физический веб = РАСШИРЕНИЕ (твой браузер). Нет расширения → просим поставить.
     Песочное окно (playwright) — только если юзер ЯВНО выбрал его: cli.browser_backend='window'."""
     br = _bridge()
     br.ensure_server()  # идемпотентно: гарантируем, что мост поднят (REPL/бот/сервер)
     if br.connected():
+        # backend=puppeteer|hybrid: open/see через Puppeteer-ожидание (тяжёлые SPA). Иначе как было.
+        if _backend() in ("puppeteer", "hybrid") and op in _PP_OP:
+            kw = {"url": args[0]} if args else {}
+            for attempt in range(2):  # SW мог дёрнуться/заснуть → один ретрай ДО фолбэка
+                try:
+                    res = await br._send(_PP_OP[op], **kw)
+                    # «не подключено»/ошибка моста — это НЕ результат страницы: ретрай/фолбэк,
+                    # НЕ отдаём слепой снапшот (он соврёт «товаров нет», хотя pptr их видит).
+                    if isinstance(res, str) and not res.startswith(("[расширение", "pp ошибка")):
+                        return res
+                except Exception:  # noqa: BLE001
+                    pass
+                if attempt == 0:
+                    await asyncio.sleep(1.5)  # дать SW/WS переподключиться
+            # оба раза pptr не дал страницу → обычный снапшот как последний шанс
         return await getattr(br, op)(*args)
     backend = "extension"
     try:
@@ -121,6 +150,30 @@ async def browser_type(item: int, text: str, submit: bool = True) -> str:
         submit: Press Enter after typing (default True).
     """
     return await _route("type_into", int(item), text, bool(submit))
+
+
+@tool
+async def browser_tap(item: int) -> str:
+    """TRUSTED-click an element by its snapshot number (real gesture via CDP). Use when a normal
+    browser_click did NOT react — React/SPA buttons (e.g. «+»/«В корзину» on Я.Еда/Лавка) often
+    ignore a plain DOM click and need a real tap.
+
+    Args:
+        item: Element number from the snapshot (the «+»/add button).
+    """
+    return await _route("tap", int(item))
+
+
+@tool
+async def browser_click_text(text: str) -> str:
+    """Click an element by its VISIBLE TEXT — use when the numbered snapshot does NOT list the
+    item you need (dynamic dropdowns/overlays of SPA sites: autocomplete results, custom menus).
+    Finds the most specific visible element containing that text and clicks its clickable parent.
+
+    Args:
+        text: The exact visible text of the item to click (e.g. a search-result title).
+    """
+    return await _route("click_text", text)
 
 
 @tool

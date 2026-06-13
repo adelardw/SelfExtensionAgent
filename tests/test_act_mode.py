@@ -50,7 +50,7 @@ def test_act_node_escalates_without_tool_calls(monkeypatch):
     async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         return "Открываю Яндекс Почту в браузере.", [AIMessage(content="Открываю...")]
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
-    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["device_control"])
+    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: ["device_control"])
     monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [object()])
     out = asyncio.run(A.act_node({"query": "открой яндекс почту"}))
     assert out == {"mode": "deliberate"}
@@ -67,7 +67,7 @@ def test_act_node_succeeds_with_tool_call(monkeypatch):
             {"name": "open_url", "args": {"url": "https://mail.yandex.ru"}, "id": "1"}])
         return "Открыл mail.yandex.ru в браузере.", [ai]
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
-    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["device_control"])
+    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: ["device_control"])
     monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [object()])
     out = asyncio.run(A.act_node({"query": "открой яндекс почту"}))
     assert out.get("final_answer", "").startswith("Открыл") and "mode" not in out
@@ -77,7 +77,7 @@ def test_act_node_succeeds_with_tool_call(monkeypatch):
 def test_act_node_no_tools_goes_deliberate(monkeypatch):
     import asyncio
     import src.agent as A
-    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: [])
+    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: [])
     monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [])
     out = asyncio.run(A.act_node({"query": "сделай что-то странное"}))
     assert out == {"mode": "deliberate"}
@@ -100,6 +100,7 @@ def test_force_mode_bypasses_reflexion_llm(monkeypatch):
         raise AssertionError("reflexion не должен звать LLM при force_mode")
     monkeypatch.setattr(A, "_structured", _boom)
     out = asyncio.run(A.reflexion_node({"query": "включи музыку", "force_mode": "act"}))
-    assert out == {"mode": "act", "needs_clarify_gate": False}
+    assert out["mode"] == "act" and out["needs_clarify_gate"] is False
+    assert out["mode_confidence"] == 1.0  # форс = полная уверенность (SGR-поле)
     out = asyncio.run(A.reflexion_node({"query": "x", "force_mode": "clarify"}))  # clarify не форсируем
     assert out != {"mode": "clarify", "needs_clarify_gate": False} or True

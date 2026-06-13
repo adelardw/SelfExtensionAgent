@@ -4,6 +4,7 @@ warnings.filterwarnings("ignore", message="Pydantic serializer warnings", catego
 warnings.filterwarnings("ignore", message="urllib3")  # RequestsDependencyWarning о версиях
 
 import asyncio
+import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -70,6 +71,7 @@ COMMANDS = {
     "/config":   "настройки: модель · режим работы · мышление · гранты",
     "/auto":     "режим работы: /auto — полный авто · /auto accept · /auto off",
     "/model":    "модель: /model api · /model ollama [имя]",
+    "/backend":  "браузер-движок: /backend puppeteer|hybrid|extension (puppeteer ждёт SPA)",
     "/voice":    "голосовой ввод (один запрос)",
     "/attach":   "приложить файл к сессии (pdf/image/audio/video)",
     "/kb":       "база знаний: add <файл> · ls · mkdir <папка> · find <запрос>",
@@ -154,7 +156,15 @@ def render_result(result: dict) -> None:
     meta = Table.grid(padding=(0, 2))
     meta.add_column(style="dim", justify="right")
     meta.add_column()
-    meta.add_row("режим", Text(lbl, style=style))
+    # SGR-прозрачность: режим + ПОЧЕМУ + уверенность ВЫБОРА режима (мягкий сигнал, не гейт).
+    mc = result.get("mode_confidence")
+    mode_cell = Text(lbl, style=style)
+    if mc is not None and mc > 0:
+        mc_col = "green" if mc >= 0.7 else "yellow" if mc >= 0.4 else "red"
+        mode_cell.append(f"  ({mc:.0%})", style=f"dim {mc_col}")
+    meta.add_row("режим", mode_cell)
+    if result.get("mode_rationale"):
+        meta.add_row("почему", Text(result["mode_rationale"][:90], style="dim"))
     if result.get("aim"):
         meta.add_row("цель", result["aim"])
     if result.get("standing_goal"):
@@ -326,17 +336,33 @@ def _augment_attachments(query: str) -> str:
 
 
 def _resolve_choice(raw: str, opts: list[str]) -> str:
-    """Ответ на вопрос с вариантами: номер → вариант; префикс текста варианта → вариант;
-    «сам реши/не знаю/любой» → допущение (''); иначе — свой текст как есть."""
+    """Ответ на вопрос с вариантами. МУЛЬТИСЕЛЕКТ: «1,3» → несколько вариантов; можно
+    добавить свой текст («1,3; ещё вот это» или «1 свой текст»). Номер → вариант; префикс
+    текста → вариант; «сам реши/не знаю/любой» → допущение (''); иначе — свой текст."""
     raw = (raw or "").strip()
     if not raw:
         return ""
-    if raw.isdigit() and 1 <= int(raw) <= len(opts):
-        return opts[int(raw) - 1]
     low = raw.lower()
     if low in ("сам", "сам реши", "не знаю", "любой", "без разницы", "на твое усмотрение",
                "на твоё усмотрение", "skip", "пропусти"):
         return ""
+    # Мультиселект: несколько номеров через запятую/пробел (+ опц. свой текст хвостом).
+    parts = [p.strip() for p in re.split(r"[,;]+", raw) if p.strip()]
+    picked, extra = [], []
+    multi = len(parts) > 1 or (parts and re.match(r"^\d", parts[0]))
+    if multi:
+        for p in parts:
+            m = re.match(r"^(\d+)\b(.*)$", p)
+            if m and 1 <= int(m.group(1)) <= len(opts):
+                picked.append(opts[int(m.group(1)) - 1])
+                if m.group(2).strip():
+                    extra.append(m.group(2).strip())
+            else:
+                extra.append(p)
+        if picked or extra:
+            return "; ".join(picked + extra)
+    if raw.isdigit() and 1 <= int(raw) <= len(opts):
+        return opts[int(raw) - 1]
     for o in opts:  # «яндекс» матчит вариант «Яндекс Музыка»
         if o.lower().startswith(low) or low in o.lower():
             return o
@@ -353,7 +379,7 @@ async def _ask_one(i: int, n: int, it: dict) -> str:
         body += f"\n[dim]{why}[/]"
     if opts:
         body += "\n" + "\n".join(f"  [cyan]{j}[/]) {o}" for j, o in enumerate(opts, 1))
-        ph = f"номер 1-{len(opts)} · свой текст · Enter = на моё усмотрение"
+        ph = f"номер(а 1-{len(opts)}, можно «1,3») · + свой текст · Enter = на моё усмотрение"
     else:
         ph = "свободный ответ · Enter = на моё усмотрение"
     console.print(Panel(body, title=f"❓ {i}/{n}", subtitle=f"[dim]{ph}[/]",
@@ -627,6 +653,20 @@ async def main():
                 banner(); continue
             if low.startswith("/model"):
                 cmd_model(query.split()[1:]); continue
+            if low.startswith("/backend"):
+                from src.cli_config import get_cli, set_cli
+                arg = (query.split()[1:] or [""])[0].lower()
+                if arg in ("extension", "puppeteer", "hybrid", "window"):
+                    set_cli("browser_backend", arg)
+                    console.print(f"[green]🧩 браузер-бэкенд → [bold]{arg}[/][/] [dim](сохранено)[/]"
+                                  + ("\n[dim]puppeteer/hybrid: open/see ждут рендер тяжёлого SPA "
+                                     "(Я.Еда/Лавка) — нужен Reload расширения до версии с pp-бэкендом.[/]"
+                                     if arg in ("puppeteer", "hybrid") else ""))
+                else:
+                    cur = get_cli("browser_backend") or "extension"
+                    console.print(f"[cyan]браузер-бэкенд: {cur}[/]  [dim]/backend extension|puppeteer|hybrid|window"
+                                  "  ·  puppeteer/hybrid = Puppeteer-ожидание SPA[/]")
+                continue
             if low == "/facts":
                 cmd_facts(user_id); continue
             if low == "/goal":
@@ -703,6 +743,14 @@ async def run_once(task: str, auto: bool = False) -> int:
     from src.cli_config import get_cli
 
     hitl.load_grants(get_cli("allow") or [])
+    # Мост браузера поднимаем и в автоматизированном пути: расширение успевает подключиться за
+    # время прогона, и агент может (а) играть музыку/видео, (б) ФОНОВО открыть итоговую ссылку
+    # после анализа (критерий «сам открыть наиболее подходящую вкладку»). Идемпотентно.
+    try:
+        from src import browser_bridge
+        browser_bridge.ensure_server()
+    except Exception:  # noqa: BLE001
+        pass
     if auto:
         hitl.set_work_mode("auto")  # автоматизированный запуск = полная автономия
     else:

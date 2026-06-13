@@ -51,7 +51,11 @@ def maybe_promote(store: MemoryStore, user_id: str, recipe_id: int) -> bool:
         return False  # запрет на обучение по взлому — и коллективно тоже
     if store.find_recipe(GLOBAL_UID, r["query"], min_sim=0.45):
         return False  # похожий best-practice уже есть — не дублируем (кластер пула шире)
-    store.add_recipe(GLOBAL_UID, r["query"], json.loads(r["skills"]),
+    # Анти-PII (Thread 2c): текст запроса уходит к ДРУГИМ юзерам как рекомендация → редактируем
+    # перс-данные (email/телефон/карта). Похожесть-матчинг живёт на оставшихся токенах.
+    from .improve.safety import redact_pii
+    safe_query, _n = redact_pii(r["query"])
+    store.add_recipe(GLOBAL_UID, safe_query, json.loads(r["skills"]),
                      json.loads(r["plan"]), r["mode"] or "deliberate",
                      profile=profile_text(store, user_id))
     return True

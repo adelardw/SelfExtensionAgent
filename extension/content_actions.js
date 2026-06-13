@@ -29,6 +29,22 @@ globalThis.agentExec = function agentExec(req) {
     } catch (e) {}
     return false;
   }
+  // [ГРАНИЦА ДЕНЕГ] кнопка НЕОБРАТИМОГО оформления/оплаты заказа — агент не нажимает САМ
+  // (даже в auto: сохранённая карта = one-click заказ без спроса). Зеркало отказа type в картах.
+  const _PAY_RE = new RegExp('оплатить|оформить заказ|подтвердить заказ|оформить и оплатить|'
+    + 'оплата заказа|купить сейчас|заказать за\\s*\\d|оплатить\\s*\\d|place order|pay now|'
+    + 'checkout|buy now', 'i');
+  function payLabel(el) {
+    if (!el) return '';
+    const lbl = (el.getAttribute && (el.getAttribute('aria-label') || el.getAttribute('title')) ||
+                 el.value || el.innerText || el.textContent || '').trim();
+    return _PAY_RE.test(lbl) ? lbl.slice(0, 50) : '';
+  }
+  function payRefusal(lbl) {
+    return '[ГРАНИЦА ОПЛАТЫ] это кнопка ОФОРМЛЕНИЯ/ОПЛАТЫ заказа («' + lbl + '») — агент НЕ '
+      + 'оформляет платный заказ сам. Корзина готова: попроси пользователя подтвердить и нажать '
+      + 'эту кнопку самому (ask_user), не нажимай за него.';
+  }
   function nowTitle() {
     try { const m = navigator.mediaSession && navigator.mediaSession.metadata;
       if (m && m.title) return m.title + (m.artist ? ' — ' + m.artist : ''); } catch (e) {}
@@ -147,6 +163,8 @@ globalThis.agentExec = function agentExec(req) {
     }
     if (req.action === 'click') {
       if (!el) return 'Элемент не найден — сделай see заново.';
+      const pl = payLabel(el);
+      if (pl) return payRefusal(pl);   // [ГРАНИЦА ОПЛАТЫ] финальный платный тап — за человеком
       try { el.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) {}
       el.click();
       return snapshot(`Кликнул [${req.item}].`);
@@ -170,6 +188,60 @@ globalThis.agentExec = function agentExec(req) {
           if (pickAndClick())
             return setTimeout(() => resolve(snapshot('Кликнул по «' + req.selector + '».')), 800);
           if (++tries >= 10) return resolve('Не нашёл элемент по селектору за 5с: ' + req.selector);
+          setTimeout(tick, 500);
+        };
+        tick();
+      });
+    }
+    if (req.action === 'clicktext') {
+      // Клик по элементу с заданным ВИДИМЫМ ТЕКСТОМ — достаёт то, что структурный снапшот не
+      // пронумеровал (динамические дропдауны/оверлеи SPA: результаты autocomplete и пр.).
+      // Общий приём, не пер-сайт. Ждём появления (SPA дорисовывают) до ~5с.
+      const want = (req.text || '').trim().toLowerCase();
+      if (!want) return 'Не указан текст для клика.';
+      // Ближайший КЛИКАБЕЛЬНЫЙ предок (или сам) — то, по чему реально навигируют (ссылка/кнопка).
+      const clickableOf = (el) => {
+        for (let n = el, hops = 0; n && hops < 5; n = n.parentElement, hops++) {
+          const tag = n.tagName ? n.tagName.toLowerCase() : '';
+          if (tag === 'a' || tag === 'button' || (n.getAttribute && n.getAttribute('role') === 'button')
+              || (n.hasAttribute && n.hasAttribute('onclick'))) return n;
+          try { if (getComputedStyle(n).cursor === 'pointer') return n; } catch (e) {}
+        }
+        return null;
+      };
+      const findOne = () => {
+        let best = null, bestLen = Infinity;
+        walk(document.documentElement, document, false, (el) => {
+          if (!el.getBoundingClientRect) return;
+          const tag = el.tagName ? el.tagName.toLowerCase() : '';
+          if (tag === 'input' || tag === 'textarea' || tag === 'select') return;  // не строка ввода
+          const r = el.getBoundingClientRect();
+          if (r.width < 2 || r.height < 2) return;
+          let s; try { s = getComputedStyle(el); } catch (e) { return; }
+          if (s.visibility === 'hidden' || s.display === 'none' || s.opacity === '0') return;
+          const txt = (el.innerText || el.textContent || el.getAttribute('aria-label') || '')
+            .trim().toLowerCase();
+          if (!txt || !(txt === want || txt.includes(want))) return;
+          // Целимся только в то, что реально кликабельно (ссылка/кнопка/pointer) — иначе клик
+          // по голому span ничего не делает (живой провал: anilibria-дропдаун навигирует <a>).
+          const target = clickableOf(el);
+          if (!target) return;
+          if (txt.length < bestLen) { best = target; bestLen = txt.length; }
+        });
+        return best;
+      };
+      return new Promise(resolve => {
+        let tries = 0;
+        const tick = () => {
+          const target = findOne();  // уже кликабельный (ссылка/кнопка/pointer)
+          if (target) {
+            const pl = payLabel(target);
+            if (pl) return resolve(payRefusal(pl));  // [ГРАНИЦА ОПЛАТЫ]
+            try { target.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) {}
+            target.click();
+            return setTimeout(() => resolve(snapshot('Кликнул по тексту «' + req.text + '».')), 900);
+          }
+          if (++tries >= 10) return resolve('Не нашёл на странице кликабельный элемент с текстом «' + req.text + '» — сделай see/read.');
           setTimeout(tick, 500);
         };
         tick();
@@ -215,18 +287,31 @@ globalThis.agentExec = function agentExec(req) {
           if (reP.test(lbl)) { c.click(); n++; break; }
         }
       }
-      // PLAY без играющего звука → жмём кнопку воспроизведения (общая эвристика для
-      // кастомных плееров: Я.Музыка/YouTube/SoundCloud — кнопка с aria-label/текстом play).
+      // PLAY без играющего звука → жмём кнопку воспроизведения. ВАЖНО: сначала КОНТЕКСТНАЯ
+      // кнопка запуска («Слушать»/«Listen»/«Play all/Play») — она грузит НОВЫЙ контекст
+      // (артист/плейлист/избранное), а НЕ глобальный плеер внизу, который возобновил бы СТАРЫЙ
+      // залипший трек (живой баг: «включи избранное» → играл прошлый трек). Только если такой
+      // нет — общая эвристика play (одиночный трек/видео).
       if ((req.mediaAction === 'play' || req.mediaAction === 'toggle') && !isPlaying()) {
-        const re = /\bplay\b|слуша|воспроизв|▶/i;
         const cands = [...document.querySelectorAll(
           'button,[role="button"],a,[aria-label],[title],[data-test-id*="play" i]')];
-        for (const el of cands) {
-          const r = el.getBoundingClientRect();
-          if (r.width < 1 || r.height < 1) continue;
-          const label = (el.getAttribute('aria-label')||el.getAttribute('title')||
+        const labelOf = (el) => (el.getAttribute('aria-label')||el.getAttribute('title')||
                          el.textContent||el.getAttribute('data-test-id')||'').trim();
-          if (re.test(label)) { el.click(); n++; break; }
+        const vis = (el) => { const r = el.getBoundingClientRect(); return r.width >= 1 && r.height >= 1; };
+        // 1) КОНТЕКСТ-запуск: «Слушать»/«Listen»/«Play all/Слушать всё/Воспроизвести всё»
+        const reCtx = /^(слушать|слушать всё|listen|play|play all|воспроизвести всё|играть)$/i;
+        let clicked = false;
+        for (const el of cands) {
+          if (!vis(el)) continue;
+          if (reCtx.test(labelOf(el))) { el.click(); n++; clicked = true; break; }
+        }
+        // 2) Фолбэк: общая эвристика (одиночный трек/видео — нет контекст-кнопки)
+        if (!clicked) {
+          const re = /\bplay\b|слуша|воспроизв|▶/i;
+          for (const el of cands) {
+            if (!vis(el)) continue;
+            if (re.test(labelOf(el))) { el.click(); n++; break; }
+          }
         }
       }
       // Медиа стартует не мгновенно — подождём ~1.5с перед вердиктом (по isPlaying).
@@ -264,6 +349,16 @@ globalThis.agentExec = function agentExec(req) {
       if (!best) return '';
       try { best.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (e) {}
       const r = best.getBoundingClientRect();
+      return Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2);
+    }
+    if (req.action === 'coordnum') {
+      // Центр элемента по НОМЕРУ из снапшота — для TRUSTED-клика (React-кнопки игнорят
+      // обычный el.click(): нужен настоящий жест через CDP). Сначала прокрутить к нему.
+      const e = req.item != null ? findIndexed(req.item) : null;
+      if (!e) return '';
+      try { e.scrollIntoView({ block: 'center', behavior: 'instant' }); } catch (x) {}
+      const r = e.getBoundingClientRect();
+      if (r.width < 1 || r.height < 1) return '';
       return Math.round(r.left + r.width / 2) + ',' + Math.round(r.top + r.height / 2);
     }
     if (req.action === 'locatevideo') {

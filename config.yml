@@ -31,6 +31,12 @@ agent:
   max_steps_per_run: 8        # глобальный потолок исполнений шага на прогон
   max_run_tokens: 120000      # жёсткий токен-бюджет прогона (≈$0.02) — стоп-кран от runaway
   max_run_seconds: 150        # wall-clock дедлайн прогона (сек) — стоп от медленного heavy
+  max_output_tokens: 8000     # потолок ВЫХОДА одного LLM-вызова: structured-output (decompose/…) не должен обрезаться (LengthFinishReasonError) — thinking-модели тратят output на размышление
+  llm_timeout: 60             # потолок одного LLM-вызова (с): 60с = явный хэнг; внутр. дедлайн прогона успевает прерваться до eval-враппера
+intent:
+  min_sim: 0.30               # глоб. порог уверенности intent-роутера (cosine-kNN); калибровано route_eval. Ниже — fallback на регэксп
+  min_sim_per_label:          # PER-LABEL переопределения (тюнинг по confusion-структуре)
+    web_grounding: 0.23       # ниже: его промахи почти все «None» (не кросс) → ловим больше grounding без риска перепутать (recall 76→87%)
 checkpointer:
   backend: sqlite
   sqlite_path: data/checkpoints.db
@@ -39,8 +45,12 @@ memory:
   recall_k: 5
   reflect_every: 5
   recall_budget_chars: 1800
-  embeddings: false
+  embeddings: true              # эмбеддинги памяти вкл (OPEN_ROUTER_API_KEY); recall эмбеддит запрос ОДИН раз
   embedding_model: openai/text-embedding-3-small
+  recall_gate: 0.22             # «recall не всегда»: ассоциативная память (эпизоды/выводы) инжектится только если top_score>=gate; персона-факты всегда. 0=выкл гейт
+  graph_hops: 1                 # GraphRAG-lite: глубина spreading-activation от релевантных сидов (0=выкл графовый recall)
+  graph_decay: 0.6              # затухание буста на хоп
+  graph_seed_min: 0.3           # минимальная релевантность узла, чтобы стать сидом графового пула (PII-контейнмент: нерелевантно→не тянем)
   max_episodes: 2000
   max_facts: 300
   max_reflections: 200

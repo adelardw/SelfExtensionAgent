@@ -99,11 +99,19 @@ def chat(role: str = "fast", temperature: float = 0.0):
     from .runbudget import callback
 
     base, key = _base_and_key()
+    # max_tokens: потолок ВЫХОДА одного вызова. Без него thinking-модель (gemini-2.5-flash-lite)
+    # тратит output на размышление и ОБРЕЗАЕТ structured-JSON (decompose) → LengthFinishReasonError
+    # → деградация «один шаг = весь запрос» (живой баг на GAIA L2). Щедрый кап даёт JSON дозреть.
+    max_out = int(_cfg.get("agent", {}).get("max_output_tokens", 8000))
     # ЖЁСТКИЙ ТАЙМАУТ + мало ретраев: зависший API-вызов не должен морозить агента на
     # дефолтные 600с × ретраи (это плодило «зомби на 0% CPU» в eval и фризы в проде).
+    # 60с: реальный fast/code-вызов <30с; 60с = явный хэнг. Внутренний дедлайн прогона
+    # (MAX_RUN_SECONDS=150) тогда успевает прерваться до враппера eval (240с): +1 вызов ≤60с
+    # = ≤210с (живой баг: TimeoutError на 240с, внутр. стоп не срабатывал при timeout=90).
+    llm_timeout = float(_cfg.get("agent", {}).get("llm_timeout", 60))
     return ChatOpenAI(api_key=key or "x", base_url=base, model=model_for(role),
                       temperature=temperature, callbacks=[callback()],
-                      timeout=90, max_retries=1)
+                      timeout=llm_timeout, max_retries=1, max_tokens=max_out)
 
 
 def active_summary() -> str:

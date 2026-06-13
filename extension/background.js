@@ -1,6 +1,10 @@
-// Service worker: держит WebSocket к локальному агенту (127.0.0.1:8777), принимает
-// команды, исполняет их в активной/целевой вкладке ПОЛЬЗОВАТЕЛЯ через chrome.scripting.
+// Service worker: держит WebSocket к локальному агенту (127.0.0.1:8777), принимает команды,
+// исполняет их в активной/целевой вкладке ПОЛЬЗОВАТЕЛЯ через chrome.scripting.
 // Токен берётся из storage (его кладёт popup при первой настройке).
+// (Puppeteer-бэкенд УБРАН: module-SW + статический импорт 1.9MB бандла грузился на КАЖДОМ
+//  пробуждении SW → тормозил старт воркера/связь, а автозаказ-корзин всё равно отменён.
+//  Код puppeteer сохранён в git/pptr_build, если когда-нибудь понадобится. Расширение снова
+//  лёгкое и быстрое — музыка/видео/поиск работают как раньше.)
 const BRIDGE = "ws://127.0.0.1:8777";
 let ws = null;
 let agentTabId = null;  // вкладка, в которой агент работает (фон — не крадёт фокус)
@@ -155,7 +159,8 @@ async function trustedSoundNudge(tabId) {
 
 async function handle(msg) {
   const a = msg.action, args = msg.args || {};
-  if (a === "ver") return "bg-v12 (video-click)";  // диагностика: какой воркер реально жив
+  if (a === "ver") return "bg-v20 (no-pptr, fast)";  // диагностика: какой воркер реально жив
+  if (a && a.startsWith("pp_")) return "pp-бэкенд отключён (puppeteer убран для скорости)";
   if (a === "tclick") {  // диагностика: trusted-клик по явным координатам
     const tid = await ensureTab(null);
     const target = { tabId: tid };
@@ -167,6 +172,24 @@ async function handle(msg) {
     const tabId = await ensureTab(args.url.startsWith("http") ? args.url : "https://" + args.url);
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content_actions.js"] });
     return await runInTab(tabId, { action: "see", note: "Открыл " + args.url });
+  }
+  if (a === "tap") {  // TRUSTED-клик по элементу из снапшота (React-кнопки, что игнорят DOM-клик)
+    const tabId = await ensureTab(null);
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["content_actions.js"] });
+    const loc = await runInTab(tabId, { action: "coordnum", item: args.item });
+    if (typeof loc !== "string" || !loc.includes(",")) return "tap: элемент не найден — сделай see заново.";
+    const [x, y] = loc.split(",").map(Number);
+    const target = { tabId };
+    try {
+      await chrome.debugger.attach(target, "1.3");
+      await new Promise(r => setTimeout(r, 250));  // перевёрстка под инфо-полоску дебага
+      const loc2 = await runInTab(tabId, { action: "coordnum", item: args.item });  // координаты ПОСЛЕ полосы
+      const [x2, y2] = (typeof loc2 === "string" && loc2.includes(",")) ? loc2.split(",").map(Number) : [x, y];
+      await cdpClick(target, x2, y2);
+    } catch (e) { return "tap не вышел: " + e.message; }
+    finally { try { await chrome.debugger.detach(target); } catch (e) {} }
+    await new Promise(r => setTimeout(r, 600));
+    return await runInTab(tabId, { action: "see", note: "Тапнул [" + args.item + "] (trusted)." });
   }
   const tabId = await ensureTab(null);
   // СТАРТ ЗВУКА ТРЕБУЕТ ВИДИМОСТИ: в скрытой странице (visibilityState=hidden) веб-плееры

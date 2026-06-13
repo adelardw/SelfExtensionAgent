@@ -59,6 +59,18 @@ def test_empty_user_falls_back_to_global():
     assert ps.get_user_fewshots("", "step_execution") == []  # пустой user → ничего личного
 
 
+def test_similarity_retrieval_ranks_relevant_first():
+    # Thread 3a: query → few-shot ранжируется по ПОХОЖЕСТИ, не по голому score.
+    ps.add_fewshot("step_execution", "найди свежие новости про погоду в городе", "ответ погода", 0.9)
+    ps.add_fewshot("step_execution", "посчитай факториал числа рекурсивно кодом", "ответ факториал", 0.5)
+    # запрос про вычисление факториала → similarity выбирает факториал (хотя его score ниже)
+    out = ps.format_fewshots("step_execution", k=1, query="вычисли факториал большого числа")
+    assert "факториал" in out and "погода" not in out
+    # без query → старый порядок по score (погода 0.9 первой)
+    out2 = ps.format_fewshots("step_execution", k=1, query="")
+    assert "погода" in out2
+
+
 def test_feedback_negative_marker():
     neg = feedback._NEG_MARK + " прошлый ответ был слабым"
     pos = "похожая задача уже успешно решалась"

@@ -81,7 +81,13 @@ def ensure_python_package(module_name: str) -> tuple[bool, str]:
         return False, "uv не найден в PATH"
     pkg = MODULE_TO_PKG.get(module_name, module_name)
     try:
-        res = subprocess.run([uv, "add", pkg], capture_output=True, text=True, timeout=300)
+        # Таймаут 120с (не 300): `uv add` резолвит весь lock и может надолго подвиснуть на
+        # «Resolving dependencies…», морозя интерактивную задачу. Лучше быстро сдаться с
+        # честным сообщением, чем 5-минутный фриз (живой баг: заказ суши завис на установке).
+        res = subprocess.run([uv, "add", pkg], capture_output=True, text=True, timeout=120)
+    except subprocess.TimeoutExpired:
+        return False, (f"uv add {pkg}: установка зависимости заняла >120с и прервана — навык "
+                       "не стоит этой задержки; реши задачу без него (например, через браузер/веб-поиск)")
     except Exception as e:  # noqa: BLE001
         return False, f"uv add {pkg}: {type(e).__name__}: {e}"
     if res.returncode != 0:

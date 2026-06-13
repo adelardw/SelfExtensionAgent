@@ -56,8 +56,13 @@ def _overlap(a: str, b: str) -> float:
 class MemoryStore:
     """Потокобезопасный (check_same_thread=False) синхронный стор для одного процесса."""
 
-    def __init__(self, db_path: str, embedder: Optional[Embedder] = None):
+    def __init__(self, db_path: str, embedder: Optional[Embedder] = None,
+                 graph_hops: int = 1, graph_decay: float = 0.6, graph_seed_min: float = 0.3):
         self.embedder = embedder or NullEmbedder()
+        # GraphRAG-lite: spreading-activation в recall от РЕЛЕВАНТНЫХ сидов.
+        self._graph_hops = graph_hops
+        self._graph_decay = graph_decay
+        self._graph_seed_min = graph_seed_min
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -264,8 +269,37 @@ class MemoryStore:
                 (user_id, key, value, importance, time.time(), source_episode, emb, tags_json),
             )
             fact_id = cur.lastrowid
+            self._conn.commit()
+            # GraphRAG-lite densify: связать новый факт с семантически близкими (без LLM/сети —
+            # cosine по УЖЕ сохранённым векторам). Только при эмбеддингах; upsert не densify-им.
+            if emb:
+                self._densify_fact(user_id, fact_id, emb)
+            return fact_id
         self._conn.commit()
         return fact_id
+
+    def _densify_fact(self, user_id: str, fact_id: int, emb_json: str,
+                      top_n: int = 3, min_sim: float = 0.6) -> None:
+        """Ребро fact↔fact к топ-N семантически близких фактов того же юзера (cosine≥min_sim).
+        Без сети: сравниваем с уже сохранёнными векторами. Дешёвый автограф памяти."""
+        try:
+            vec = json.loads(emb_json)
+        except Exception:  # noqa: BLE001
+            return
+        scored = []
+        for r in self._conn.execute(
+            "SELECT id, embedding FROM facts WHERE user_id=? AND id!=? AND embedding IS NOT NULL",
+            (user_id, fact_id),
+        ).fetchall():
+            try:
+                sim = cosine(vec, json.loads(r["embedding"]))
+            except Exception:  # noqa: BLE001
+                continue
+            if sim >= min_sim:
+                scored.append((sim, r["id"]))
+        scored.sort(reverse=True)
+        for _sim, other_id in scored[:top_n]:
+            self.add_edge(user_id, "fact", fact_id, "fact", other_id, relation="similar")
 
     # ── graph edges (взаимосвязанная память) ─────────────────────────
 
@@ -573,12 +607,16 @@ class MemoryStore:
 
     # ── retrieval scoring (Generative Agents) ─────────────────────────
 
-    def _relevance(self, query: str, text: str, emb_json: Optional[str]) -> float:
+    def _relevance(self, query: str, text: str, emb_json: Optional[str],
+                   qvec: Optional[list] = None) -> float:
+        # qvec — ПРЕДВЫЧИСЛЕННЫЙ эмбеддинг запроса (один на весь recall). Без него embed
+        # вызывался бы на КАЖДЫЙ кандидат → N синхронных HTTP-вызовов на один recall
+        # (латентность + деньги). Передаём qvec сверху; embed тут — лишь фолбэк.
         if self.embedder.enabled and emb_json:
-            qvec = self.embedder.embed(query)
-            if qvec:
+            qv = qvec if qvec is not None else self.embedder.embed(query)
+            if qv:
                 try:
-                    return cosine(qvec, json.loads(emb_json))
+                    return cosine(qv, json.loads(emb_json))
                 except Exception:  # noqa: BLE001
                     pass
         return _overlap(query, text)
@@ -588,22 +626,26 @@ class MemoryStore:
         age = max(0.0, time.time() - ts)
         return math.exp(-age / _RECENCY_HALFLIFE)
 
-    def _score(self, query: str, text: str, ts: float, importance: float, emb_json: Optional[str]) -> float:
+    def _score(self, query: str, text: str, ts: float, importance: float,
+               emb_json: Optional[str], qvec: Optional[list] = None) -> float:
         return (
             _W_RECENCY * self._recency(ts)
-            + _W_RELEVANCE * self._relevance(query, text, emb_json)
+            + _W_RELEVANCE * self._relevance(query, text, emb_json, qvec)
             + _W_IMPORTANCE * importance
         )
 
-    def _rank_episodes(self, user_id: str, query: str, k: int) -> list[sqlite3.Row]:
+    def _rank_episodes(self, user_id: str, query: str, k: int,
+                       qvec: Optional[list] = None) -> list[sqlite3.Row]:
         """
         Гибридное ранжирование эпизодов:
           • если активен TurboVec-индекс (эмбеддинги + достаточно данных) —
             ANN-кандидаты по вектору, затем дореранк по recency+importance;
           • иначе — линейный скоринг recency+relevance(token)+importance.
+        qvec — предвычисленный эмбеддинг запроса (переиспользуем, не эмбеддим повторно).
         """
         if self._vindex and self._vindex.active and self.embedder.enabled:
-            qvec = self.embedder.embed(query)
+            if qvec is None:
+                qvec = self.embedder.embed(query)
             if qvec:
                 user_ids = [
                     r["id"] for r in self._conn.execute(
@@ -631,20 +673,24 @@ class MemoryStore:
         for ep in self._conn.execute(
             "SELECT * FROM episodes WHERE user_id=?", (user_id,)
         ).fetchall():
-            s = self._score(query, ep["query"] + " " + ep["answer"], ep["ts"], 0.4, ep["embedding"])
+            s = self._score(query, ep["query"] + " " + ep["answer"], ep["ts"], 0.4, ep["embedding"], qvec)
             scored.append((s, ep))
         scored.sort(key=lambda x: x[0], reverse=True)
         return [ep for s, ep in scored[:k] if s > 0.15]
 
-    def _rank_facts(self, user_id: str, query: str) -> list[sqlite3.Row]:
+    def _rank_facts(self, user_id: str, query: str, qvec: Optional[list] = None,
+                    boost: Optional[dict] = None) -> list[sqlite3.Row]:
         """
         Гибкий отбор персональных фактов под запрос: score = важность + релевантность
         (по эмбеддингам/токенам ключа+значения+тегов). Устойчивая персона (язык, имя —
         высокий importance) держится всегда, а тематические факты всплывают под запрос.
+        boost — GraphRAG-lite: факт, связанный с релевантным сидом, поднимается, даже если
+        сам по себе лексически нерелевантен (ассоциативный recall).
         """
         facts = self.get_facts(user_id)
         if not facts:
             return []
+        boost = boost or {}
 
         def fscore(f) -> float:
             tags = ""
@@ -653,48 +699,112 @@ class MemoryStore:
                     tags = " ".join(json.loads(f["tags"] or "[]"))
                 except Exception:  # noqa: BLE001
                     tags = ""
-            rel = self._relevance(query, f"{f['key']} {f['value']} {tags}", f["embedding"])
-            return _W_IMPORTANCE * f["importance"] + _W_RELEVANCE * rel
+            rel = self._relevance(query, f"{f['key']} {f['value']} {tags}", f["embedding"], qvec)
+            graph = boost.get(("fact", f["id"]), 0.0)
+            return _W_IMPORTANCE * f["importance"] + _W_RELEVANCE * (rel + graph)
 
         return sorted(facts, key=fscore, reverse=True)
 
+    def _graph_boost(self, user_id: str, query: str, qvec: Optional[list],
+                     seed_eps: list) -> dict:
+        """
+        GraphRAG-lite spreading-activation: boost[(type,id)] = seed_rel·decay^hop, расходясь
+        от РЕЛЕВАНТНЫХ эпизод-сидов по memory_edges (per-user через neighbors). PII-контейнмент:
+        узел становится сидом ТОЛЬКО при релевантности ≥ graph_seed_min — нерелевантный запрос
+        не тянет связанные перс-данные. Глубина — graph_hops.
+        """
+        if self._graph_hops <= 0:
+            return {}
+        frontier = []
+        for ep in seed_eps:
+            r = self._relevance(query, ep["query"] + " " + ep["answer"], ep["embedding"], qvec)
+            if r >= self._graph_seed_min:
+                frontier.append(("episode", ep["id"], r))
+        boost: dict = {}
+        for _hop in range(self._graph_hops):
+            nxt = []
+            for (t, i, r) in frontier:
+                for nb in self.neighbors(user_id, t, i):
+                    key = (nb["type"], nb["id"])
+                    b = r * self._graph_decay
+                    if b > boost.get(key, 0.0):
+                        boost[key] = b
+                        nxt.append((nb["type"], nb["id"], b))
+            frontier = nxt
+            if not frontier:
+                break
+        return boost
+
     def recall(self, user_id: str, query: str, k: int = 5, budget: int = 1800) -> str:
+        """Текст памяти. Обёртка над recall_scored — обратная совместимость (тул/тесты)."""
+        text, _ = self.recall_scored(user_id, query, k=k, budget=budget)
+        return text
+
+    def recall_scored(self, user_id: str, query: str, k: int = 5, budget: int = 1800,
+                      gate: float = 0.0, qvec: Optional[list] = None) -> tuple[str, float]:
         """
         Адаптивно собирает контекст памяти под бюджет символов (анти-bloat):
         факты о пользователе + релевантные эпизоды + выводы добавляются жадно по
-        приоритету, пока не исчерпан budget. При большой памяти попадают только
-        самые ценные чанки, а не всё подряд.
+        приоритету, пока не исчерпан budget.
+
+        Возвращает (текст, top_score). top_score — макс. РЕЛЕВАНТНОСТЬ (0..1) лучшего
+        эпизода/вывода к запросу. ГЕЙТ («recall не всегда»): если gate>0 и top_score<gate —
+        АССОЦИАТИВНЫЕ секции (эпизоды/выводы) опускаются, факты-персона остаются (дешёвая
+        персона всегда; ассоциативная память — только когда реально релевантна).
+
+        Запрос эмбеддится ОДИН раз (qvec) и переиспользуется во всех _relevance — без
+        N синхронных HTTP-вызовов на кандидат (иначе recall с эмбеддингами блокировал бы).
         """
-        facts = self._rank_facts(user_id, query)
-        top_eps = self._rank_episodes(user_id, query, k)
+        # qvec может прийти ПРЕДВЫЧИСЛЕННЫМ (recall_node считает его async один раз и
+        # переиспользует для intent-роутера) — тогда тут НЕ эмбеддим повторно.
+        if qvec is None and self.embedder.enabled:
+            qvec = self.embedder.embed(query)
+        # Эпизоды — первыми: они служат СИДАМИ графового пула (GraphRAG-lite). Затем boost
+        # тянет связанные факты/выводы вверх (ассоциативный recall: факт, релевантный ЧЕРЕЗ
+        # связь с релевантным эпизодом, а не лексически).
+        top_eps = self._rank_episodes(user_id, query, k, qvec)
+        boost = self._graph_boost(user_id, query, qvec, top_eps)
+        facts = self._rank_facts(user_id, query, qvec, boost)
 
         scored_refl = []
         for rf in self._conn.execute(
             "SELECT * FROM reflections WHERE user_id=?", (user_id,)
         ).fetchall():
-            s = self._score(query, rf["insight"], rf["ts"], rf["importance"], rf["embedding"])
+            s = self._score(query, rf["insight"], rf["ts"], rf["importance"], rf["embedding"], qvec)
+            s += _W_RELEVANCE * boost.get(("reflection", rf["id"]), 0.0)  # GraphRAG-lite boost
             scored_refl.append((s, rf))
         scored_refl.sort(key=lambda x: x[0], reverse=True)
 
         if not facts and not top_eps and not scored_refl:
-            return "Пока нет сохранённой памяти о пользователе."
+            return "Пока нет сохранённой памяти о пользователе.", 0.0
 
-        # Кандидаты-строки в порядке приоритета: факты > выводы > эпизоды.
+        # top_score = макс. РЕЛЕВАНТНОСТЬ (не полный score с recency) лучшего эпизода/вывода:
+        # сигнал «есть ли в памяти релевантное запросу» для гейта ассоциативной части.
+        ep_rel = max((self._relevance(query, ep["query"] + " " + ep["answer"], ep["embedding"], qvec)
+                      for ep in top_eps), default=0.0)
+        rf_rel = max((self._relevance(query, rf["insight"], rf["embedding"], qvec)
+                      for _, rf in scored_refl), default=0.0)
+        top_score = max(ep_rel, rf_rel)
+        # gate>0 и ничего релевантного → ассоциативную память НЕ инжектим (только персона).
+        assoc = (gate <= 0.0) or (top_score >= gate)
+
+        # Кандидаты-строки в порядке приоритета: факты (персона) > выводы > эпизоды.
         sections: list[tuple[str, list[str]]] = []
         sections.append((
             "[Что я знаю о пользователе]",
             [f"- {f['key']}: {f['value']}" for f in facts],
         ))
-        sections.append((
-            "[Выводы из опыта]",
-            [f"- {rf['insight']}" for s, rf in scored_refl if s > 0.2],
-        ))
-        ep_lines = []
-        for ep in top_eps:
-            when = time.strftime("%Y-%m-%d", time.localtime(ep["ts"]))
-            tag = "✓" if ep["outcome"] == "ok" else "⚠ слабый ответ"
-            ep_lines.append(f"- ({when}) «{ep['query'][:80]}» [{tag}]")
-        sections.append(("[Похожие прошлые задачи]", ep_lines))
+        if assoc:
+            sections.append((
+                "[Выводы из опыта]",
+                [f"- {rf['insight']}" for s, rf in scored_refl if s > 0.2],
+            ))
+            ep_lines = []
+            for ep in top_eps:
+                when = time.strftime("%Y-%m-%d", time.localtime(ep["ts"]))
+                tag = "✓" if ep["outcome"] == "ok" else "⚠ слабый ответ"
+                ep_lines.append(f"- ({when}) «{ep['query'][:80]}» [{tag}]")
+            sections.append(("[Похожие прошлые задачи]", ep_lines))
 
         blocks: list[str] = []
         used = 0
@@ -710,7 +820,8 @@ class MemoryStore:
             if picked:
                 blocks.append(header + "\n" + "\n".join(picked))
 
-        return "\n\n".join(blocks) if blocks else "Пока нет релевантной памяти."
+        text = "\n\n".join(blocks) if blocks else "Пока нет релевантной памяти."
+        return text, top_score
 
     def prune(self, max_episodes: int = 2000, max_facts: int = 300, max_reflections: int = 200) -> dict:
         """

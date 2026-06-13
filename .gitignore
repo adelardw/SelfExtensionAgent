@@ -16,3 +16,7 @@ data/
 config.local.yml
 data/browser_bridge.token
 data/browser_bridge.log
+
+# intent-роутер: кодбук = runtime-состояние (seed-кэш + выученные экземпляры), как memory.db
+data/intent_codebook.json
+data/route_examples.db

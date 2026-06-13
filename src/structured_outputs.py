@@ -103,6 +103,11 @@ class ReflexionDecision(BaseModel):
     )
     needs_tools: bool = Field(description="Нужны ли внешние инструменты/навыки для ответа")
     rationale: str = Field(description="Кратко почему выбран этот режим")
+    mode_confidence: float = Field(
+        description="Насколько ты УВЕРЕН, что выбран ПРАВИЛЬНЫЙ режим (0.0 — сомневаюсь между "
+                    "режимами; 1.0 — очевидно). Честно: при пограничном выборе ставь ниже.",
+        ge=0.0, le=1.0, default=0.8,
+    )
     ambiguity: float = Field(
         description="Насколько запрос НЕОДНОЗНАЧЕН/недоопределён, 0.0 (всё ясно) – 1.0 (непонятно что хотят). "
                     "Высокое значение → дешевле переспросить, чем гадать (ambiguity-гейт).",

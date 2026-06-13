@@ -111,7 +111,7 @@ def click_element(app_name: str, label: str) -> str:
         app_name: Application name.
         label: Visible text/label of the element to press.
     """
-    if os.getenv("AGENT_DRY_RUN"):
+    if os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1":
         return f"[dry-run] press '{label}' in {app_name}"
     app, err = _guard(app_name)
     if err:
@@ -132,7 +132,7 @@ def set_field(app_name: str, label: str, text: str) -> str:
         label: Label/placeholder of the field.
         text: Text to put into the field.
     """
-    if os.getenv("AGENT_DRY_RUN"):
+    if os.getenv("AGENT_DRY_RUN") or os.getenv("AGENT_EVAL_MODE") == "1":
         return f"[dry-run] set '{label}' = '{text[:40]}' in {app_name}"
     app, err = _guard(app_name)
     if err:

@@ -105,6 +105,7 @@ def test_routing_prefers_extension_when_connected(monkeypatch):
     calls = {"ext": 0}
     monkeypatch.setattr(br, "connected", lambda: True)
     monkeypatch.setattr(br, "ensure_server", lambda: None)
+    monkeypatch.setattr(m, "_backend", lambda: "extension")  # дефолт-бэкенд (не puppeteer из конфига)
     async def _ext_open(url): calls["ext"] += 1; return f"ext:{url}"
     monkeypatch.setattr(br, "open_url", _ext_open)
     out = asyncio.run(m.browser_open.ainvoke({"url": "music.yandex.ru"}))
@@ -207,7 +208,7 @@ def test_act_does_not_lie_about_playback(monkeypatch):
         tm = ToolMessage(content="Кликнул [3]. Страница: 'Поиск'", tool_call_id="1")  # НЕ играет
         return "Включил трек, играет.", [ai, tm]
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
-    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["browser_control"])
+    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: ["browser_control"])
     monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [object()])
     # Изоляция от ЖИВОГО расширения: если оно подключено к WS-мосту во время прогона,
     # act дёрнул бы реальный media('play') и трек заиграл бы → тест проверяет именно
@@ -232,7 +233,10 @@ def test_act_accepts_confirmed_playback(monkeypatch):
         tm = ToolMessage(content="play: затронуто 1/1; ♪ ЗВУК ИГРАЕТ", tool_call_id="1")
         return "Включил трек, играет.", [ai, tm]
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
-    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["browser_control"])
+    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: ["browser_control"])
     monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [object()])
     out = asyncio.run(A.act_node({"query": "включи трек X"}))
-    assert out.get("final_answer", "").startswith("Включил") and "mode" not in out
+    # Подтверждённый плей («ЗВУК ИГРАЕТ») → принят как успех. Ответ — ЧИСТЫЙ детерминированный
+    # («Запустил, играет…»), а не сырой вывод модели (без утечки снапшота/рассуждений).
+    ans = out.get("final_answer", "").lower()
+    assert ("играет" in ans or "запустил" in ans) and "mode" not in out

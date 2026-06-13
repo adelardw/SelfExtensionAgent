@@ -11,6 +11,7 @@ GAIA — held-out бенчмарк (validation Level 1, текстовые за�
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import sys
@@ -97,7 +98,7 @@ def _wilson(k: int, n: int) -> tuple[float, float]:
     return max(0.0, center - half), min(1.0, center + half)
 
 
-def _load_tasks(n: int, levels: tuple = (1, 2, 3)) -> list[dict]:
+def _load_tasks(n: int, levels: tuple = (1, 2, 3), offset: int = 0) -> list[dict]:
     """Грузит ВСЕ уровни validation (репрезентативно). n<=0 → весь набор."""
     import pandas as pd
     from huggingface_hub import hf_hub_download
@@ -114,16 +115,16 @@ def _load_tasks(n: int, levels: tuple = (1, 2, 3)) -> list[dict]:
         per_level[lvl] = [{"q": str(r[qcol]), "a": str(r[acol]),
                            "file": str(r.get(fcol) or "").strip() if fcol else "", "level": lvl}
                           for _, r in df.iterrows()]
-    if n <= 0:
-        return [r for lvl in levels for r in per_level[lvl]]
-    # РЕПРЕЗЕНТАТИВНО: round-robin по уровням, чтобы срез из n охватывал все сложности
-    rows, i = [], 0
-    while len(rows) < n and any(i < len(per_level[lvl]) for lvl in levels):
+    # СТАБИЛЬНЫЙ глобальный порядок (round-robin по уровням) — один и тот же при любых
+    # offset/limit, чтобы отказоустойчивый прогон по чанкам резюмировался детерминированно.
+    full, i = [], 0
+    while any(i < len(per_level[lvl]) for lvl in levels):
         for lvl in levels:
-            if i < len(per_level[lvl]) and len(rows) < n:
-                rows.append(per_level[lvl][i])
+            if i < len(per_level[lvl]):
+                full.append(per_level[lvl][i])
         i += 1
-    return rows
+    sliced = full[offset:] if n <= 0 else full[offset:offset + n]
+    return sliced
 
 
 def _attach_file(task: dict) -> str:
@@ -148,53 +149,72 @@ def _attach_file(task: dict) -> str:
         return f"{task['q']}\n\n(файл {task['file']} не удалось прочитать: {e})"
 
 
-async def run(n: int = 8) -> None:
+async def run(n: int = 8, offset: int = 0, jsonl: str | None = None) -> None:
+    """Прогон n задач с глобальным offset. Если задан jsonl — каждый результат пишется
+    строкой JSON СРАЗУ (инкрементально, flush) → отказоустойчивый драйвер резюмирует после
+    нативного краша (SIGABRT в либе) с точки, где остановились (см. scripts/gaia_resilient.py)."""
     from src.agent import build_graph
     from src.usage import TokenTracker, cost_of
 
-    tasks = _load_tasks(n)
+    tasks = _load_tasks(n, offset=offset)
     graph = build_graph()
     nfiles = sum(1 for t in tasks if t.get("file"))
-    print(f"\n{'='*100}\nGAIA validation (held-out, ВСЕ уровни, {len(tasks)} задач, с файлами: {nfiles})\n{'='*100}")
+    print(f"\n{'='*100}\nGAIA validation (offset={offset}, {len(tasks)} задач, с файлами: {nfiles})\n{'='*100}")
     correct, tot_cost = 0, 0.0
     by_lvl: dict = {1: [0, 0], 2: [0, 0], 3: [0, 0]}  # level → [correct, total]
-    for i, t in enumerate(tasks, 1):
-        query = _attach_file(t) + GAIA_PROTOCOL  # файл (если есть) + протокол FINAL ANSWER
-        tr = TokenTracker()
-        t0 = time.monotonic()
-        try:
-            r = await asyncio.wait_for(
-                graph.ainvoke({"query": query, "user_id": f"gaia_{i}", "chat_history": []},
-                              config={"recursion_limit": 50, "callbacks": [tr]}),
-                timeout=SCENARIO_TIMEOUT,
-            )
-            ans = r.get("final_answer", "") or ""
-            mode = r.get("mode", "?")
-        except Exception as e:  # noqa: BLE001
-            ans, mode = f"[err {type(e).__name__}]", "error"
-        final = _extract_final(ans)
-        ok = gaia_score(final, t["a"])
-        correct += ok
-        lvl = t.get("level", 1)
-        by_lvl[lvl][0] += ok
-        by_lvl[lvl][1] += 1
-        cost = cost_of(tr.input, tr.output)
-        tot_cost += cost
-        tag = "📎" if t.get("file") else "  "
-        print(f"[{i}]{tag}L{lvl}{'✅' if ok else '❌'} gold={t['a'][:25]!r} финал={final[:25]!r} {round(time.monotonic()-t0)}с ${cost:.4f}",
-              flush=True)
+    jf = open(jsonl, "a", encoding="utf-8") if jsonl else None
+    try:
+        for j, t in enumerate(tasks):
+            gidx = offset + j + 1  # глобальный 1-based индекс задачи
+            query = _attach_file(t) + GAIA_PROTOCOL  # файл (если есть) + протокол FINAL ANSWER
+            tr = TokenTracker()
+            t0 = time.monotonic()
+            try:
+                r = await asyncio.wait_for(
+                    graph.ainvoke({"query": query, "user_id": f"gaia_{gidx}", "chat_history": []},
+                                  config={"recursion_limit": 50, "callbacks": [tr]}),
+                    timeout=SCENARIO_TIMEOUT,
+                )
+                ans = r.get("final_answer", "") or ""
+                mode = r.get("mode", "?")
+            except Exception as e:  # noqa: BLE001
+                ans, mode = f"[err {type(e).__name__}]", "error"
+            final = _extract_final(ans)
+            ok = gaia_score(final, t["a"])
+            correct += ok
+            lvl = t.get("level", 1)
+            by_lvl[lvl][0] += ok
+            by_lvl[lvl][1] += 1
+            cost = cost_of(tr.input, tr.output)
+            tot_cost += cost
+            tag = "📎" if t.get("file") else "  "
+            print(f"[{gidx}]{tag}L{lvl}{'✅' if ok else '❌'} gold={t['a'][:25]!r} финал={final[:25]!r} {round(time.monotonic()-t0)}с ${cost:.4f}",
+                  flush=True)
+            if jf:  # ИНКРЕМЕНТАЛЬНО (до перехода к след. задаче) — переживёт нативный краш
+                jf.write(json.dumps({"idx": gidx, "level": lvl, "ok": bool(ok), "gold": t["a"],
+                                     "final": final[:200], "mode": mode, "cost": cost}, ensure_ascii=False) + "\n")
+                jf.flush()
+    finally:
+        if jf:
+            jf.close()
     n_tot = len(tasks)
-    lo, hi = _wilson(correct, n_tot)
-    print(f"\n{'='*100}")
-    print(f"GAIA validation (все уровни): {correct}/{n_tot} = {correct/n_tot:.1%}  "
-          f"[95% Wilson CI: {lo:.1%}–{hi:.1%}]  ·  стоимость ${tot_cost:.4f}")
-    for lvl in (1, 2, 3):
-        c, tnum = by_lvl[lvl]
-        if tnum:
-            print(f"  Level {lvl}: {c}/{tnum} = {c/tnum:.0%}")
-    print("=" * 100)
+    if n_tot:
+        lo, hi = _wilson(correct, n_tot)
+        print(f"\n{'='*100}")
+        print(f"GAIA (offset={offset}, {n_tot} задач): {correct}/{n_tot} = {correct/n_tot:.1%}  "
+              f"[95% Wilson CI: {lo:.1%}–{hi:.1%}]  ·  стоимость ${tot_cost:.4f}")
+        for lvl in (1, 2, 3):
+            c, tnum = by_lvl[lvl]
+            if tnum:
+                print(f"  Level {lvl}: {c}/{tnum} = {c/tnum:.0%}")
+        print("=" * 100)
 
 
 if __name__ == "__main__":
-    n = int(sys.argv[1]) if len(sys.argv) > 1 else 0  # 0 = весь validation (165)
-    asyncio.run(run(n))
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("n", nargs="?", type=int, default=0)  # 0 = весь validation (165)
+    ap.add_argument("--offset", type=int, default=0)
+    ap.add_argument("--jsonl", type=str, default=None)
+    a = ap.parse_args()
+    asyncio.run(run(a.n, offset=a.offset, jsonl=a.jsonl))
