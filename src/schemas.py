@@ -15,6 +15,7 @@ class GeneralGraphState(TypedDict):
     memory_context: str       # инъектируемый блок долгой памяти
     own_docs: bool            # AutoRAG нашёл СОБСТВЕННЫЕ документы юзера (БЗ/сессия) → reflexion глушит мнимый clarify
     implicit_feedback: str    # гипотеза о неявной обратной связи пользователя
+    query_emb: list           # эмбеддинг запроса, посчитанный в recall ОДИН раз — переиспользуется (intent-роутер, без лишних вызовов)
 
     # ── Self-reflection (goal) ──
     aim: str                  # цель текущего запроса

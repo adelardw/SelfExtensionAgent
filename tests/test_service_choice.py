@@ -127,7 +127,7 @@ def test_act_confirmed_play_mentions_service(monkeypatch):
         return "play: действий 1; ♪ ЗВУК ИГРАЕТ (Believer — Imagine Dragons) · https://music.yandex.ru/album/1"
 
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
-    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2: ["browser_control"])
+    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: ["browser_control"])
     monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [object()])
     monkeypatch.setattr(A.browser_bridge, "connected", lambda: True)
     monkeypatch.setattr(A.browser_bridge, "media", _fake_media)

@@ -65,6 +65,7 @@ from .structured_outputs import (
 from . import bandit
 from . import browser_bridge
 from . import clarify
+from . import intent
 from . import collective
 from . import habits
 from . import interaction
@@ -275,11 +276,19 @@ async def recall_node(state: GeneralGraphState) -> dict:
     query = state["query"]
     browser_bridge.set_user_domains(query)  # анти-тайпсквоттинг: домены, явно названные юзером
 
-    # recall эмбеддит запрос (синхронный HTTP) → в to_thread, чтобы не блокировать event loop.
+    # Эмбеддинг запроса считаем ОДИН раз (async, вне loop) и переиспользуем: в recall (гейт/
+    # graph) И в intent-роутере (universal routing) — ноль лишних сетевых вызовов в hot-path.
+    query_emb = None
+    try:
+        if memory_store.embedder.enabled:
+            query_emb = await memory_store.embedder.aembed(query)
+    except Exception:  # noqa: BLE001
+        query_emb = None
     # Гейт RECALL_GATE: ассоциативная память (эпизоды/выводы) — только при релевантности;
     # персона-факты остаются всегда («recall не всегда должен быть»).
     memory_context, _recall_score = await asyncio.to_thread(
-        memory_store.recall_scored, user_id, query, k=RECALL_K, budget=RECALL_BUDGET, gate=RECALL_GATE)
+        memory_store.recall_scored, user_id, query, k=RECALL_K, budget=RECALL_BUDGET,
+        gate=RECALL_GATE, qvec=query_emb)
     summary = memory_store.get_summary(user_id)
     if summary:
         memory_context = f"[Саммари сессии]\n{summary}\n\n{memory_context}"
@@ -334,6 +343,7 @@ async def recall_node(state: GeneralGraphState) -> dict:
     return {
         "user_id": user_id,
         "memory_context": memory_context,
+        "query_emb": query_emb or [],  # переиспользуется intent-роутером (без лишних эмбеддингов)
         # Структурный флаг «в контексте есть собственные документы юзера» — reflexion читает
         # его, а не ищет фразы-маркеры в memory_context (текст меняется, флаг — нет).
         "own_docs": bool(kb_bits),
@@ -450,7 +460,8 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     # synthesize дампит память и сочиняет адреса/сайты): запрос про конкретные внешние факты БЕЗ
     # физ-интента → ВСЕГДА act, где act_node идёт детерминированным грунтованным поиском (сам
     # ищет headless, синтез строго из находок). Анти-галлюцинация — жёсткое требование проекта.
-    if mode != "clarify" and _needs_web_grounding(state["query"]) and not _wants_physical_browser(state["query"]):
+    _qe = state.get("query_emb") or None
+    if mode != "clarify" and _needs_web_grounding(state["query"], _qe) and not _wants_physical_browser(state["query"], _qe):
         if mode != "act":
             print(f"[Reflexion] нужны реальные внешние факты (адреса/цены/сайты/процедура) → "
                   f"{mode}→act (детерминированный грунтованный поиск, не выдумываю)")
@@ -475,7 +486,7 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     return {"mode": mode, "needs_clarify_gate": soft}
 
 
-def _skills_for_act(query: str, top: int = 2) -> list[str]:
+def _skills_for_act(query: str, top: int = 2, qvec: list | None = None) -> list[str]:
     """Дешёвый ToolSearch для act-режима: BM25 по ПОЛНЫМ md навыков (описание в реестре
     обрезано — ключевые слова инструментов теряются), без LLM: селектор-LLM был бы
     дороже самого действия. device_control добирается ВСЕГДА (если есть): act — это
@@ -503,7 +514,8 @@ def _skills_for_act(query: str, top: int = 2) -> list[str]:
     # анализ и крадёт фокус (живой фидбек: «отвлёкся на открытую ссылку, анализ должен быть
     # скрытым»). Так read=headless гарантирован структурно, а не уговорами промпта.
     base_hands = ["web_search"]
-    if _wants_physical_browser(query):
+    phys = _wants_physical_browser(query, qvec)
+    if phys:
         base_hands = ["browser_control", "device_control", "web_search"]
     for base in base_hands:
         if base in registry and base not in picked:
@@ -511,7 +523,7 @@ def _skills_for_act(query: str, top: int = 2) -> list[str]:
     # Если физ-интента нет, но BM25 затащил ФИЗ-навык по лексике md — убираем (чтение headless,
     # без видимых окон/кликов/кражи фокуса). Любой навык, открывающий окна/жмущий/делающий
     # скриншоты, отвлекает юзера → для анализа недопустим.
-    if not _wants_physical_browser(query):
+    if not phys:
         picked = [p for p in picked if p not in _PHYSICAL_SKILLS]
     return picked
 
@@ -575,10 +587,14 @@ _NON_MEDIA = ("свет", "лампу", "лампочк", "комп", "ноут"
               "фонар", "духов", "колонк", "микроволн")
 
 
-def _is_play_intent(query: str) -> bool:
-    """Запрос на ВОСПРОИЗВЕДЕНИЕ медиа. Ловит и «включи музыку X», и «включи <артист> <трек>»
-    БЕЗ слова «трек» (живой баг: «включи sewerslvt blooming iridescent flower» не распознан).
-    Для дожима плея и анти-лжи (успех = реальный звук). Эвристика, не маршрутизация."""
+def _is_play_intent(query: str, qvec: list | None = None) -> bool:
+    """Запрос на ВОСПРОИЗВЕДЕНИЕ медиа. УНИВЕРСАЛЬНО (любой язык): при готовом эмбеддинге
+    запроса — embedding-классификатор интента; иначе русско-регэксп (fallback). Ловит и
+    «включи музыку X», и «включи <артист> <трек>» без слова «трек»."""
+    if qvec:
+        c = intent.get_router().classify(query, qvec)
+        if c:
+            return c["label"] == "play_media"
     q = (query or "").lower()
     if not any(v in q for v in _PLAY_VERB):
         return False
@@ -628,24 +644,32 @@ _COMPARE_RE = re.compile(r"сравни|чем\s+отлич|что\s+лучше|
 _PRODUCTISH_RE = re.compile(r"[a-z]{2,}|\d{2,}", re.I)
 
 
-def _needs_web_grounding(query: str) -> bool:
+def _needs_web_grounding(query: str, qvec: list | None = None) -> bool:
     """Запрос требует РЕАЛЬНЫХ внешних фактов (адреса/сайты/цены/где купить/как оформить/
     лучшие в городе/сравнить товары) → нельзя из памяти, нужен веб-поиск. Анти-выдумка (жёсткое
-    требование). False-positive безопасен (просто заземлимся), false-negative = выдумка."""
+    требование). UNION: русско-регэксп (пол НЕ ослаблен) ИЛИ embedding-классификатор (ловит
+    ДРУГИЕ языки, где регэксп молчит) — универсальное покрытие без регресса по галлюцинациям.
+    False-positive безопасен (просто заземлимся), false-negative = выдумка."""
     q = query or ""
-    if _GROUND_RE.search(q):
+    if _GROUND_RE.search(q) or (_COMPARE_RE.search(q) and _PRODUCTISH_RE.search(q)):
         return True
-    # «сравни iPhone 16 и Samsung S24» (модель/бренд) → грунтуем; «сравни рекурсию и итерацию»
-    # (чистое понятие, без латиницы/чисел) → нет, модель знает сама.
-    return bool(_COMPARE_RE.search(q) and _PRODUCTISH_RE.search(q))
+    # universal: при готовом эмбеддинге — классификатор добивает не-русские «where to buy / price».
+    if qvec:
+        c = intent.get_router().classify(query, qvec)
+        if c and c["label"] == "web_grounding":
+            return True
+    return False
 
 
-def _wants_physical_browser(query: str) -> bool:
+def _wants_physical_browser(query: str, qvec: list | None = None) -> bool:
     """Нужен ли ФИЗИЧЕСКИЙ браузер (вкладка в окне юзера). Да — для воспроизведения
     (музыка/видео) и явных действий на сайте (открой/войди/корзина/клик). НЕТ — для
-    поиска/анализа/рекомендаций/фактов: это ЧТЕНИЕ, оно идёт HEADLESS (web_search), чтобы
-    НЕ открывать видимую вкладку и НЕ отвлекать юзера (живой фидбек: «отвлёкся на открытую
-    ссылку — анализ должен быть в скрытом режиме»). Эвристика-гейт рук, не маршрутизация."""
+    поиска/анализа/рекомендаций/фактов (ЧТЕНИЕ → HEADLESS, не крадём фокус). УНИВЕРСАЛЬНО:
+    при готовом эмбеддинге — embedding-классификатор (любой язык); иначе регэксп (fallback)."""
+    if qvec:
+        c = intent.get_router().classify(query, qvec)
+        if c:
+            return c["label"] in ("physical_browser", "play_media")
     q = (query or "").lower()
     return _is_play_intent(q) or bool(_PHYS_RE.search(q))
 
@@ -795,15 +819,16 @@ async def act_node(state: GeneralGraphState) -> dict:
     Не вызван ни один инструмент / исполнитель сказал ESCALATE → эскалация в deliberate.
     """
     query = state["query"]
+    _qe = state.get("query_emb") or None  # переиспользуем эмбеддинг запроса для intent-роутера
     # ЯДРО ЦЕЛИ — надёжный поисковик: запрос про реальные внешние факты (адреса/сайты/цены/
     # «где купить»/«как оформить»/«лучшие в городе») и БЕЗ физ-интента → ДЕТЕРМИНИРОВАННЫЙ
     # грунтованный поиск (сами ищем headless, синтез строго из находок, чистим выдуманные URL,
     # открываем лучшую ссылку фоном). Не отдаём это на волю модели — она дампит память.
-    if _needs_web_grounding(query) and not _wants_physical_browser(query):
+    if _needs_web_grounding(query, _qe) and not _wants_physical_browser(query, _qe):
         res = await _research_answer(state, query)
         if "final_answer" in res:
             return res  # иначе (res={'mode':'deliberate'}) — провалились, идём обычным путём
-    picked = _skills_for_act(query)
+    picked = _skills_for_act(query, qvec=_qe)
     tools = get_all_loaded_skill_tools(picked)  # HITL-обёртки внутри (skills.confirm)
     if not tools:
         return {"mode": "deliberate"}  # нечем действовать напрямую — обычный путь
@@ -836,7 +861,7 @@ async def act_node(state: GeneralGraphState) -> dict:
     # ЗАЗЕМЛЕНИЕ ВОСПРОИЗВЕДЕНИЯ: на просьбу «включи/поставь/запусти трек/видео/музыку»
     # успех = РЕАЛЬНЫЙ звук, подтверждённый результатом тула («ЗВУК ИГРАЕТ»/«играет N»),
     # а не слова модели и не общая заглушка. Иначе — честный статус + последний снапшот.
-    play_intent = _is_play_intent(query)
+    play_intent = _is_play_intent(query, _qe)
     tool_msgs = [m for m in msgs if m.__class__.__name__ == "ToolMessage"]
     tool_texts = " ".join(m.content for m in tool_msgs if isinstance(getattr(m, "content", ""), str))
     # СТРАНИЦА-ОШИБКА: на 404/«не найдена» нельзя заявлять воспроизведение, даже если
@@ -2073,6 +2098,26 @@ async def reflect_node(state: GeneralGraphState) -> dict:
             if not eval_mode:
                 add_fewshot("reflexion", query, mode, score)
             add_user_fewshot(user_id, "reflexion", query, mode, score)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # КОДБУК ПРАВИЛЬНЫХ РОУТОВ растёт из фидбек-лупа: валидированный успешный прогон →
+    # (запрос → сработавший маршрут) в universal intent-роутер. Лейбл из РЕАЛЬНОГО поведения
+    # прогона (не из догадки классификатора). Переиспользуем query_emb (без лишнего эмбеддинга).
+    # В eval НЕ растим (анти-оверфит: бенч-запросы не должны течь в роутер всех юзеров).
+    if outcome == "ok" and not reacted_negative and query and not eval_mode and state.get("query_emb"):
+        try:
+            _sel = state.get("selected_skills", []) or []
+            if state.get("web_research_used"):
+                _label = "web_grounding"
+            elif any(s in _PHYSICAL_SKILLS for s in _sel):
+                _label = "physical_browser"
+            elif mode in ("reason", "fast"):
+                _label = "self_contained"
+            else:
+                _label = None
+            if _label:
+                intent.get_router().add_exemplar(query, _label, state.get("query_emb") or None)
         except Exception:  # noqa: BLE001
             pass
 
