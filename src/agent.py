@@ -125,6 +125,11 @@ HABIT_K: int = config.agent.get("habit_k", 3)
 # эпизодов. Выключается одной строкой конфига, если живьём окажется шумом.
 BANDIT_PRIOR: bool = config.agent.get("bandit_prior", True)
 MAX_REVISIONS: int = config.agent.get("max_revisions", 1)
+# Thread 3c: heavy НЕ предсказывается reflexion'ом, а ЗАРАБАТЫВАЕТСЯ рантайм-evidence.
+# Сквозной deep-ревью (дорогой) запускается ТОЛЬКО когда артефакт реально большой и многошаговый
+# (не по догадке — мисс-класс вверх в heavy = самый дорогой баг: eval ловил 928k токенов).
+REVIEW_MIN_ARTIFACT: int = config.agent.get("review_min_artifact_chars", 1200)
+REVIEW_MIN_STEPS: int = config.agent.get("review_min_steps", 3)
 RETRY_CONF: float = config.agent.get("retry_confidence", 0.5)
 STEP_ITER_LIMIT: int = config.agent.get("step_iter_limit", 16)
 # Глобальный бюджет прогона: сколько ВСЕГО исполнений шага допустимо на один запрос
@@ -453,6 +458,13 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     # отзывы, товары, цены, фильмы, что есть/какие есть) НЕЛЬЗЯ отвечать из памяти — модель
     # сочиняет правдоподобные, но ложные результаты (живой баг: выдумала 5 обзоров Sony XM5 с
     # фейк-каналами). Такой запрос всегда идёт в реальное действие/исполнение, не fast/reason.
+
+    # Thread 3c: heavy НЕ предсказывается. Дешёвая модель плохо угадывает «большую» задачу, а
+    # цена ошибки вверх катастрофична (deep-ревью + раунды доработки). heavy→deliberate; сквозной
+    # ревью включится САМ в route_after_synthesize, если артефакт ОКАЖЕТСЯ большим (_earned_review).
+    # (force_mode='heavy' через /config обрабатывается раньше отдельным early-return — там уважаем.)
+    if mode == "heavy":
+        mode = "deliberate"
 
     # Средняя неоднозначность на путях с инструментами → не гадать молча, а собрать
     # батч уточнений ПЕРЕД исполнением (clarify_gate). Низкая — пропускаем (нулевая цена).
@@ -2262,11 +2274,26 @@ def route_after_step(state: GeneralGraphState) -> str:
     return "synthesize"
 
 
+def _earned_review(state: GeneralGraphState) -> bool:
+    """Thread 3c: сквозной deep-ревью ЗАРАБОТАН рантайм-evidence (не предсказан режимом).
+    Условия (все, дёшево считаются): артефакт реально большой И многошаговый И есть rubric
+    (многокритериальная задача) И force_mode='heavy' ИЛИ авто. Так дорогой ревью платится
+    ТОЛЬКО когда задача ОКАЗАЛАСЬ большой, а не когда модель угадала «heavy» наперёд."""
+    if state.get("force_mode") == "heavy":
+        return True  # юзер явно потребовал тщательность — уважаем
+    answer = state.get("final_answer", "") or ""
+    steps_done = sum(1 for s in (state.get("subtasks") or []) if s.get("status") == "done")
+    return (len(answer) >= REVIEW_MIN_ARTIFACT
+            and steps_done >= REVIEW_MIN_STEPS
+            and bool(state.get("goal_rubric")))
+
+
 def route_after_synthesize(state: GeneralGraphState) -> str:
-    """Heavy-режим: после сборки решения — сквозной ревью (пока есть бюджет раундов);
-    остальные режимы идут сразу на финальную валидацию."""
+    """Сквозной ревью — ЗАРАБОТАННАЯ эскалация (Thread 3c): запускается, когда собранный
+    артефакт ОКАЗАЛСЯ большим/многошаговым (evidence), а не по предсказанному режиму heavy.
+    Остальное идёт сразу на финальную валидацию."""
     # Бюджет/время исчерпаны → пропускаем дорогой deep-ревью, сразу валидация.
-    if state.get("mode") == "heavy" and state.get("revision_rounds", 0) < MAX_REVISIONS \
+    if _earned_review(state) and state.get("revision_rounds", 0) < MAX_REVISIONS \
             and not runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
         return "review"
     return "validation"

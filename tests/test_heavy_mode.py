@@ -19,13 +19,21 @@ def test_heavy_routing():
         route_after_synthesize,
     )
 
-    # heavy идёт по deliberate-пути (goal → router), не в fast_answer
+    # heavy (если задан force_mode) идёт по deliberate-пути (goal → router), не в fast_answer
     assert route_after_reflexion({"mode": "heavy"}) == "goal"
     assert route_after_goal({"mode": "heavy"}) == "router"
 
-    # после сборки: heavy с бюджетом раундов → review; deliberate → сразу validation
-    assert route_after_synthesize({"mode": "heavy", "revision_rounds": 0}) == "review"
-    assert route_after_synthesize({"mode": "heavy", "revision_rounds": MAX_REVISIONS}) == "validation"
+    # Thread 3c: сквозной ревью — ЗАРАБОТАННАЯ эскалация (артефакт большой+многошаговый+rubric),
+    # а НЕ предсказанный режим heavy. Дешёвые рантайм-сигналы, не догадка модели.
+    earned = {"final_answer": "x" * 1500, "goal_rubric": ["c1"],
+              "subtasks": [{"status": "done"} for _ in range(3)], "revision_rounds": 0}
+    assert route_after_synthesize(earned) == "review"
+    # маленький артефакт / мало шагов → ревью НЕ заработан → сразу validation
+    assert route_after_synthesize({"final_answer": "коротко", "revision_rounds": 0}) == "validation"
+    # заработан, но бюджет раундов исчерпан → validation
+    assert route_after_synthesize({**earned, "revision_rounds": MAX_REVISIONS}) == "validation"
+    # явный force_mode='heavy' (юзер потребовал тщательность) → review даже без большого артефакта
+    assert route_after_synthesize({"force_mode": "heavy", "revision_rounds": 0}) == "review"
     assert route_after_synthesize({"mode": "deliberate", "revision_rounds": 0}) == "validation"
 
     # ревью добавил fix-подшаги → обратно в шаговый цикл; чисто → validation
