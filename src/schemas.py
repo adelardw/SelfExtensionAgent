@@ -24,6 +24,8 @@ class GeneralGraphState(TypedDict):
 
     # ── Self-Reflexion Choice (meta-controller) ──
     mode: str                 # "fast" | "reason" | "act" | "deliberate" | "heavy" | "clarify" — тип мышления
+    mode_confidence: float    # SGR: уверенность reflexion в выборе режима (display + мягкий сигнал, НЕ гейт — самооценка не калибрована)
+    mode_rationale: str       # SGR: краткая причина выбора режима (прозрачность в CLI)
     force_mode: str           # юзер зафиксировал режим в /config — reflexion не выбирает ("" = авто)
     revision_rounds: int      # heavy: сколько раундов «сквозной ревью → доработка» уже прошло
     steps_executed: int       # глобальный счётчик исполнений шага на прогон (бюджет от runaway)
