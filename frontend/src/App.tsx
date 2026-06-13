@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, FileText } from "lucide-react"
+import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, FileText, ChevronDown, Check } from "lucide-react"
 
 type Thread = { thread_id: string; title: string; favorite?: number }
 type Msg = { role: "user" | "assistant"; content: string }
@@ -21,6 +21,8 @@ function md(s: string): string {
   s = s.replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>")
   s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>")
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
+  // авто-ссылки на «голые» URL (не трогаем те, что уже внутри href="…")
+  s = s.replace(/(?<!["(])(https?:\/\/[^\s<>")]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>')
   s = s.replace(/(?:^|\n)((?:[-*] .*(?:\n|$))+)/g, (_m, b: string) => "\n<ul>" + b.trim().split("\n").map(l => "<li>" + l.replace(/^[-*] /, "") + "</li>").join("") + "</ul>")
   s = s.replace(/(?:^|\n)((?:\d+\. .*(?:\n|$))+)/g, (_m, b: string) => "\n<ol>" + b.trim().split("\n").map(l => "<li>" + l.replace(/^\d+\. /, "") + "</li>").join("") + "</ol>")
   return s.split(/\n{2,}/).map(p => /^\s*<(h\d|ul|ol|pre)/.test(p) ? p : "<p>" + p.replace(/\n/g, "<br>") + "</p>").join("")
@@ -72,8 +74,20 @@ export default function App() {
       const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, thread_id: cur, query: text }) })
       if (!r.ok) throw new Error("HTTP " + r.status)
       const d = await r.json()
-      setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: d.answer || "(пусто)" }; return c })
-      if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads()
+      if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title)
+      // мягкий «стрим»: ответ набегает, markdown формируется на лету (из мутного в яркое)
+      const full = d.answer || "(пусто)"
+      const total = full.length, per = Math.max(1, Math.ceil(total / Math.min(total, 90)))
+      await new Promise<void>(res => {
+        let n = 0
+        const tick = () => {
+          n = Math.min(total, n + per)
+          setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: full.slice(0, n) }; return c })
+          if (n < total) window.setTimeout(tick, 16); else res()
+        }
+        tick()
+      })
+      loadThreads()
     } catch (e: any) {
       setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: "⚠ ошибка: " + e.message }; return c })
     } finally { setBusy(false); ta.current?.focus() }
@@ -192,15 +206,21 @@ export default function App() {
             <div className="max-w-3xl mx-auto px-7 py-8">
               <AnimatePresence initial={false}>
                 {msgs.map((m, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: [0.22, 0.7, 0.2, 1] }} className="pb-9">
-                    <div className="text-[11px] font-bold tracking-[0.09em] mb-2.5"
-                      style={{ color: m.role === "user" ? "var(--muted)" : "var(--accent)" }}>
-                      {m.role === "user" ? "ВЫ" : "АГЕНТ"}
-                    </div>
-                    {m.role === "user"
-                      ? <div className="text-[15px] leading-relaxed whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{m.content}</div>
-                      : m.content === "…" ? <Dots /> : <div className="md" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: md(m.content) }} />}
-                  </motion.div>
+                  m.role === "user" ? (
+                    <motion.div key={i} initial={{ opacity: 0, y: 6, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.4, ease: [0.22, 0.7, 0.2, 1] }} className="pt-3 pb-6">
+                      <div className="text-[20px] font-semibold leading-snug tracking-[-0.02em] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{m.content}</div>
+                    </motion.div>
+                  ) : (
+                    <motion.div key={i} initial={{ opacity: 0.3, y: 6, filter: "blur(7px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.55, ease: [0.22, 0.7, 0.2, 1] }} className="pb-10">
+                      <div className="flex items-center gap-2 mb-3.5">
+                        <span className="grid place-items-center w-[18px] h-[18px] rounded-[5px] text-[9px] font-bold" style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>S</span>
+                        <span className="text-[11px] font-bold tracking-[0.1em]" style={{ color: "var(--accent)" }}>АГЕНТ</span>
+                      </div>
+                      {m.content === "…" || m.content === ""
+                        ? <Dots />
+                        : <div className="md" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: md(m.content) }} />}
+                    </motion.div>
+                  )
                 ))}
               </AnimatePresence>
             </div>
@@ -275,10 +295,8 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         <div className="space-y-4">
           <div>
             <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>Провайдер</label>
-            <select value={provider} onChange={e => setProvider(e.target.value)} className={field} style={fst}>
-              <option value="openrouter">OpenRouter</option>
-              <option value="ollama">Ollama (локально)</option>
-            </select>
+            <Dropdown value={provider} onChange={setProvider}
+              options={[{ v: "openrouter", l: "OpenRouter" }, { v: "ollama", l: "Ollama (локально)" }]} />
           </div>
           <div>
             <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>Endpoint (base_url)</label>
@@ -298,6 +316,41 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
         </div>
       </motion.div>
     </motion.div>
+  )
+}
+
+function Dropdown({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: { v: string; l: string }[] }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h)
+  }, [])
+  const cur = options.find(o => o.v === value)
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={() => setOpen(o => !o)} className="w-full flex items-center px-3 py-2.5 rounded-lg text-[13.5px] transition-colors"
+        style={{ background: "var(--surface)", color: "var(--ink)" }}>
+        {cur?.l || value}
+        <ChevronDown size={16} className="ml-auto transition-transform" style={{ color: "var(--muted)", transform: open ? "rotate(180deg)" : "none" }} />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6, scale: 0.98 }} transition={{ duration: 0.14 }}
+            className="absolute left-0 right-0 mt-1.5 p-1 rounded-lg z-10" style={{ background: "var(--surface2)", boxShadow: "var(--sh3)" }}>
+            {options.map(o => (
+              <button key={o.v} onClick={() => { onChange(o.v); setOpen(false) }}
+                className="w-full flex items-center px-2.5 py-2 rounded-md text-[13.5px] transition-colors"
+                style={{ color: "var(--ink)", background: o.v === value ? "var(--accent-soft)" : "transparent" }}
+                onMouseEnter={e => { if (o.v !== value) e.currentTarget.style.background = "var(--surface)" }}
+                onMouseLeave={e => { if (o.v !== value) e.currentTarget.style.background = "transparent" }}>
+                {o.l}{o.v === value && <Check size={15} className="ml-auto" style={{ color: "var(--accent)" }} />}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   )
 }
 
