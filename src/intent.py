@@ -36,32 +36,53 @@ MAX_PER_LABEL = 60      # потолок выученных экземпляро
 
 LABELS = ("web_grounding", "physical_browser", "play_media", "self_contained")
 
-# Курируемый мультиязычный seed (RU+EN). Иллюстрирует КЛАССЫ маршрута, не конкретные сценарии.
+# Курируемый МУЛЬТИЯЗЫЧНЫЙ seed (RU/EN/ES/DE/FR/…). Иллюстрирует КЛАССЫ маршрута, не сценарии.
+# База решает cold-start: новый юзер с 1-го запроса получает осмысленный роут БЕЗ своих данных
+# (RecSys content-based cold-start). Per-user адаптация нарастает поверх. Богатый, разноязыкий
+# seed = пол универсальности; границы классов разведены (особенно web_grounding ↔ self_contained).
 _SEED: dict[str, list[str]] = {
+    # СВЕЖИЕ ВНЕШНИЕ ФАКТЫ (нельзя из памяти → веб): купить/цена/адрес/лучшие/новости/процедура.
     "web_grounding": [
         "где купить недорогие наушники", "where can I buy cheap headphones",
-        "лучшие рестораны суши в москве", "best sushi places near me",
-        "сколько сейчас стоит биткоин", "current price of bitcoin",
-        "как оформить загранпаспорт", "how to apply for a passport",
-        "свежие новости про ИИ", "latest news about AI",
-        "адрес ближайшей аптеки", "address of the nearest pharmacy",
+        "¿dónde puedo comprar un portátil barato?", "wo kann ich günstige kopfhörer kaufen",
+        "лучшие рестораны суши рядом", "best sushi restaurants near me", "meilleurs restaurants près de moi",
+        "сколько сейчас стоит биткоин", "current price of bitcoin", "precio actual del bitcoin",
+        "как оформить загранпаспорт", "how do I apply for a passport", "comment obtenir un passeport",
+        "свежие новости про ИИ сегодня", "latest news about AI today", "noticias recientes sobre IA",
+        "адрес и часы работы ближайшей аптеки", "opening hours of the nearest pharmacy",
+        "какой ноутбук купить до 1000 долларов", "which laptop should I buy under 1000",
+        "сравни iphone 16 и samsung s24 по цене", "compare iphone 16 vs samsung s24 price",
+        "отзывы на робот-пылесос xiaomi", "reviews of the xiaomi robot vacuum",
+        "расписание поездов москва спб", "train schedule today",
     ],
+    # ДЕЙСТВИЕ В БРАУЗЕРЕ ЮЗЕРА под логином/визуал (открыть/войти/корзина/клик/заполнить).
     "physical_browser": [
         "открой сайт github и залогинься", "open my email and log in",
-        "добавь товар в корзину на озоне", "add this item to my cart",
-        "зайди в мой личный кабинет", "go to my account page",
+        "abre mi correo e inicia sesión", "öffne meine mails und melde dich an",
+        "добавь товар в корзину на озоне", "add this item to my shopping cart",
+        "зайди в мой личный кабинет банка", "go to my bank account page",
         "нажми кнопку оформить заказ", "click the checkout button on the site",
+        "заполни форму на этом сайте", "fill in the form on this page",
+        "покажи мои заказы на маркетплейсе", "show my orders on the marketplace",
     ],
+    # ВОСПРОИЗВЕДЕНИЕ медиа (музыка/видео/фильм) — реальный звук/картинка.
     "play_media": [
-        "включи музыку группы radiohead", "play some jazz music",
+        "включи музыку группы radiohead", "play some jazz music", "pon algo de jazz",
         "поставь фильм дюна", "play the movie Dune", "включи трек на ютубе",
-        "play this song on spotify", "запусти видео с котиками",
+        "play this song on spotify", "запусти видео с котиками", "spiele lofi beats ab",
+        "поставь следующую песню", "play the next track", "включи подкаст",
     ],
+    # ОТВЕТ ИЗ ЗНАНИЙ/РАССУЖДЕНИЯ (мат/код/объяснение понятия/перевод/приветствие) — без веба.
     "self_contained": [
-        "посчитай среднюю скорость поезда", "what is 17 times 23",
-        "объясни что такое рекурсия", "explain how recursion works",
+        "посчитай среднюю скорость поезда", "what is 17 times 23", "cuánto es 17 por 23",
+        "объясни что такое рекурсия", "explain how recursion works", "explica cómo funciona la recursión",
+        "что такое квантовая запутанность простыми словами", "explain quantum entanglement simply",
+        "как работает алгоритм быстрой сортировки", "how does quicksort work",
         "напиши функцию факториала на python", "write a python factorial function",
+        "в чём разница между списком и кортежем", "what is the difference between a list and a tuple",
         "привет как дела", "hello how are you", "переведи фразу на английский",
+        "придумай план изучения ml на 3 месяца", "outline a 3-month plan to learn machine learning",
+        "почему небо голубое", "why is the sky blue", "pourquoi le ciel est bleu",
     ],
 }
 
@@ -89,14 +110,26 @@ class IntentRouter:
     def enabled(self) -> bool:
         return self._emb().enabled
 
+    def _model_name(self) -> str:
+        return getattr(self._emb(), "model", "") or "unknown"
+
     def _load(self) -> None:
         if self._loaded:
             return
+        data = {}
         if CODEBOOK_FILE.exists():
             try:
-                self._entries = json.loads(CODEBOOK_FILE.read_text(encoding="utf-8")).get("entries", [])
+                data = json.loads(CODEBOOK_FILE.read_text(encoding="utf-8"))
             except Exception:  # noqa: BLE001
-                self._entries = []
+                data = {}
+        self._entries = data.get("entries", [])
+        # ФИКСИРОВАННЫЙ эмбеддер (инвариант): кодбук тегирован моделью. Сменилась модель → старые
+        # векторы в ДРУГОМ пространстве, cosine с ними мусор → ИНВАЛИДИРУЕМ (дроп) и пере-сидим.
+        # Гарантирует, что весь кодбук И query_emb из recall живут в ОДНОМ пространстве.
+        stored = data.get("model", "")
+        if stored and self.enabled and stored != self._model_name():
+            print(f"[Intent] эмбеддер сменился ({stored} → {self._model_name()}) — кодбук пере-сидится")
+            self._entries = []
         # seed (один раз) — только если эмбеддер жив
         if not any(not e.get("learned") for e in self._entries) and self.enabled:
             seed = [(t, lbl) for lbl, ts in _SEED.items() for t in ts]
@@ -120,7 +153,8 @@ class IntentRouter:
     def _save(self) -> None:
         try:
             CODEBOOK_FILE.parent.mkdir(parents=True, exist_ok=True)
-            CODEBOOK_FILE.write_text(json.dumps({"entries": self._entries}, ensure_ascii=False), encoding="utf-8")
+            payload = {"model": self._model_name() if self.enabled else "", "entries": self._entries}
+            CODEBOOK_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         except Exception:  # noqa: BLE001
             pass
 

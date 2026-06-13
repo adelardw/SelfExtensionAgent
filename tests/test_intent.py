@@ -22,9 +22,20 @@ class _FakeEmb:
         return [0.0, 0.0, 0.0, 1.0]       # self_contained
 
 
+# Контролируемый seed: каждая фраза чисто маппится мок-эмбеддером в свой класс (тест логики
+# роутера развязан от СОДЕРЖИМОГО реального _SEED — обогащение seed не ломает тесты).
+_TEST_SEED = {
+    "web_grounding": ["where to buy cheap stuff", "где купить дёшево"],
+    "physical_browser": ["open site and log in", "открой сайт и залогинься"],
+    "play_media": ["play music", "включи музыку"],
+    "self_contained": ["explain concept", "объясни понятие"],
+}
+
+
 @pytest.fixture()
 def router(tmp_path, monkeypatch):
     monkeypatch.setattr(intent, "CODEBOOK_FILE", tmp_path / "codebook.json")
+    monkeypatch.setattr(intent, "_SEED", _TEST_SEED)
     r = intent.IntentRouter()
     r._embedder = _FakeEmb()
     return r
@@ -70,6 +81,25 @@ def test_cap_per_label(router):
         router.add_exemplar(f"buy item number {i} cheap", "web_grounding")
     learned = [e for e in router._entries if e.get("learned") and e["label"] == "web_grounding"]
     assert len(learned) <= intent.MAX_PER_LABEL
+
+
+def test_model_change_invalidates_codebook(tmp_path, monkeypatch):
+    import json as _j
+    monkeypatch.setattr(intent, "CODEBOOK_FILE", tmp_path / "cb.json")
+
+    class _E1(_FakeEmb):
+        model = "model-A"
+
+    class _E2(_FakeEmb):
+        model = "model-B"
+
+    r1 = intent.IntentRouter(); r1._embedder = _E1(); r1.classify("warmup")
+    saved = _j.loads((tmp_path / "cb.json").read_text())
+    assert saved["model"] == "model-A" and saved["entries"]
+    # другой эмбеддер → кодбук инвалидируется и пере-сидится в НОВОМ пространстве
+    r2 = intent.IntentRouter(); r2._embedder = _E2(); r2._load()
+    saved2 = _j.loads((tmp_path / "cb.json").read_text())
+    assert saved2["model"] == "model-B" and saved2["entries"]
 
 
 def test_route_corpus_logs_pos_and_neg(tmp_path, monkeypatch):
