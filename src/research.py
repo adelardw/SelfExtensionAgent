@@ -84,10 +84,13 @@ _alt_prompt = ChatPromptTemplate.from_messages([
 
 _synth_prompt = ChatPromptTemplate.from_messages([
     ("system",
-     "Собери ответ на ИСХОДНЫЙ вопрос из ПРОВЕРЕННЫХ фактов ниже. Если проверенных фактов не "
-     "хватает для полного ответа — ЧЕСТНО скажи, что установлено, а что нет; НЕ выдумывай "
-     "недостающее. Ответ по существу, кратко, на языке вопроса. Где уместно — укажи источник."),
-    ("human", "Вопрос: {question}\n\nПроверенные факты:\n{facts}"),
+     "Собери ответ на ИСХОДНЫЙ вопрос. Приоритет — ПРОВЕРЕННЫЕ факты. Если их не хватает — "
+     "посмотри СЫРЫЕ НАХОДКИ (реальные результаты поиска и текст страниц) и ИЗВЛЕКИ ответ ИЗ "
+     "НИХ: это чтение реальных источников, не выдумка. НЕ отвечай «невозможно определить», если "
+     "ответ есть в находках — извлеки его (посчитай/перечисли/назови). Выдумывать СВЕРХ "
+     "найденного нельзя: если ответа реально нет ни в фактах, ни в находках — честно скажи, "
+     "чего не хватает. Ответ по существу, кратко, на языке вопроса; где уместно — источник."),
+    ("human", "Вопрос: {question}\n\nПроверенные факты:\n{facts}\n\nСырые находки (реальные источники):\n{evidence}"),
 ])
 
 
@@ -141,13 +144,15 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
         pages = "\n\n".join(r for r in reads if isinstance(r, str) and r.strip())[:5000]
         evidence = (snippets + ("\n\n" + pages if pages else "")).strip()
         if not evidence:
-            return {"subq": sq_q, "found": False, "fact": "(нет результатов поиска)", "conf": 0.0, "sources": urls}
+            return {"subq": sq_q, "found": False, "fact": "(нет результатов поиска)", "conf": 0.0, "sources": urls, "evidence": ""}
         try:
             fc = await (_verify_prompt | fast.with_structured_output(FactCheck)).ainvoke(
                 {"subq": sq_q, "known": known or "(пока ничего)", "evidence": evidence[:6000]})
-            return {"subq": sq_q, "found": fc.found, "fact": fc.fact, "conf": fc.confidence, "sources": urls}
+            return {"subq": sq_q, "found": fc.found, "fact": fc.fact, "conf": fc.confidence,
+                    "sources": urls, "evidence": evidence[:2500]}
         except Exception:  # noqa: BLE001
-            return {"subq": sq_q, "found": False, "fact": "(не удалось проверить)", "conf": 0.0, "sources": urls}
+            return {"subq": sq_q, "found": False, "fact": "(не удалось проверить)", "conf": 0.0,
+                    "sources": urls, "evidence": evidence[:2500]}
 
     facts: list[dict] = []
     for sq in subqs:
@@ -181,8 +186,17 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
         f"- {f['subq']} → {f['fact']} (уверенность {f['conf']:.0%}"
         + (f", источник: {f['sources'][0]}" if f['sources'] else "") + ")"
         for f in verified) or "(достоверных фактов не установлено)"
+    # АНТИ-«сдался»: если проверенных фактов МЕНЬШЕ, чем под-вопросов, отдаём синтезу СЫРЫЕ
+    # НАХОДКИ (реальные сниппеты/текст страниц) — пусть извлечёт ответ ИЗ НИХ (это чтение
+    # реальных источников, не выдумка), а не отвечает «невозможно определить» при наличии данных.
+    # Живой баг GAIA L1 (Mercedes Sosa albums): research сдавался, хотя ответ был в находках.
+    evidence_blob = "(находок нет)"
+    if len(verified) < len(facts):
+        ev = "\n\n".join(f"[{f['subq']}]\n{f.get('evidence', '')}" for f in facts if f.get("evidence"))
+        evidence_blob = ev[:6000] or "(находок нет)"
     try:
-        ans = await (_synth_prompt | fast).ainvoke({"question": question, "facts": facts_text})
+        ans = await (_synth_prompt | fast).ainvoke(
+            {"question": question, "facts": facts_text, "evidence": evidence_blob})
         answer = ans.content if hasattr(ans, "content") else str(ans)
     except Exception:  # noqa: BLE001
         answer = facts_text
