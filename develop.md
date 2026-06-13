@@ -133,10 +133,14 @@ seed решает cold-start (RecSys content-based). РАСТЁТ из фидб�
 (валидированный успех, лейбл из реального поведения). КОРПУС `route_examples.db` (pos+neg, reward
 0/1) — сырьё для будущего contrastive (kNN-тюнинг / CatBoost-head / локальный эмбеддер); на
 live-роутинг не влияет; в eval не пишется. Тесты: `tests/test_intent.py` (8), 271 passed.
-**СТАТ-ОЦЕНКА** (`src/eval/route_eval.py`, 102 размеченных мультиязычных кейса ВНЕ seed):
-порог `intent.min_sim` калиброван свипом 0.45→0.30 → **accuracy 78%→93.1%** [Wilson 86.5–96.6%],
-fallback 46%→16%, web_grounding recall 43%→82%; per-label: physical/play 100%, self_contained 93%,
-web_grounding 82%; перекрёстных ошибок почти нет. Это «тюнинг kNN на корпусе» (порог по данным).
+**СТАТ-ОЦЕНКА** (`src/eval/route_eval.py`, **303** размеченных мультиязычных кейса ВНЕ seed):
+порог `intent.min_sim` калиброван свипом на 102 → 0.30 (acc 93%); на **303 держит 90.4%**
+[Wilson 86.6–93.3%, CI ±3.5%] → порог НЕ оверфитнут (обобщился со 102 на 303). Per-label:
+play 100%, physical 97%, self_contained 91%, **web_grounding 76%** (14 None + 6 кросс) — самый
+слабый и самый важный (анти-галлюцинация). Рычаги улучшения web_grounding (не сделано, чтобы не
+оверфитить eval): per-label порог (у web_grounding кросс-ошибок мало → ниже порог = чистый плюс),
+богаче web_grounding-seed, накопление реальных экземпляров из фидбек-лупа. route_eval = honest
+regression-гард роутинга (под него же будущие kNN-тюнинг/CatBoost-head).
 ОТЛОЖЕНО (по нарастающей): reward-взвешенный kNN + per-user калибровка порогов → CatBoost-head
 (когда корпус ≥~1k, holdout>kNN) → fine-tuned ЛОКАЛЬНЫЙ роут-эмбеддер (скрыт+бесплатен+развязан,
 нужна локальная инфра). Guardrail: голова=прайор гейтов (не оракул), exploration=бандит, holdout
