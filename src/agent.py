@@ -410,7 +410,8 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     # Юзер зафиксировал режим в /config — мета-контроллер не выбирает (и не тратит вызов).
     forced = (state.get("force_mode") or "").strip().lower()
     if forced in ("fast", "reason", "act", "deliberate", "heavy"):
-        return {"mode": forced, "needs_clarify_gate": False}
+        return {"mode": forced, "needs_clarify_gate": False,
+                "mode_confidence": 1.0, "mode_rationale": "режим зафиксирован пользователем (/config)"}
 
     # Бандит-прайор (контур C): Beta/Thompson по похожим эпизодам юзера — добавляет
     # НЕГАТИВНОЕ свидетельство (few-shots несут только успехи). Прайор, не диктат;
@@ -434,7 +435,8 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
         }, state["query"])
     except Exception as e:  # noqa: BLE001
         print(f"[Reflexion] failed, fallback deliberate: {e}")
-        return {"mode": "deliberate"}  # безопасный фолбэк (не мисхэндлит action-задачи)
+        return {"mode": "deliberate", "mode_confidence": 0.0,
+                "mode_rationale": "reflexion не распарсился → безопасный фолбэк deliberate"}
 
     mem = state.get("memory_context", "") or ""
     # AutoRAG-провенанс: если в контексте есть СОБСТВЕННЫЕ документы юзера (приложенные файлы
@@ -447,7 +449,8 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     # Ambiguity-гейт (идея Ouroboros): слишком неоднозначно → переспросить, а не гадать.
     if decision.ambiguity >= AMBIGUITY_GATE and decision.mode != "clarify" and not (has_own and decision.ambiguity < 0.85):
         need = decision.missing_info or "уточни, что именно нужно"
-        return {"mode": "clarify", "memory_context": f"⚠ Неясно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}"}
+        return {"mode": "clarify", "memory_context": f"⚠ Неясно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}",
+                "mode_confidence": decision.mode_confidence, "mode_rationale": f"неоднозначно: {need}"}
     # Гейт ОБОСНОВАННОСТИ (ход юзера: reflexion проверяет, может ли ДОСТОВЕРНО ответить сам).
     # reason/fast без надёжной базы знаний легко выдумывает → заземляем через инструменты.
     mode = decision.mode
@@ -483,7 +486,9 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     # Средняя неоднозначность на путях с инструментами → не гадать молча, а собрать
     # батч уточнений ПЕРЕД исполнением (clarify_gate). Низкая — пропускаем (нулевая цена).
     soft = CLARIFY_SOFT_GATE <= decision.ambiguity < AMBIGUITY_GATE
-    return {"mode": mode, "needs_clarify_gate": soft}
+    return {"mode": mode, "needs_clarify_gate": soft,
+            # SGR: уверенность в выборе режима + причина (display + мягкий сигнал, НЕ гейт).
+            "mode_confidence": decision.mode_confidence, "mode_rationale": decision.rationale}
 
 
 def _skills_for_act(query: str, top: int = 2, qvec: list | None = None) -> list[str]:

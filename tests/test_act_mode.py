@@ -100,6 +100,7 @@ def test_force_mode_bypasses_reflexion_llm(monkeypatch):
         raise AssertionError("reflexion не должен звать LLM при force_mode")
     monkeypatch.setattr(A, "_structured", _boom)
     out = asyncio.run(A.reflexion_node({"query": "включи музыку", "force_mode": "act"}))
-    assert out == {"mode": "act", "needs_clarify_gate": False}
+    assert out["mode"] == "act" and out["needs_clarify_gate"] is False
+    assert out["mode_confidence"] == 1.0  # форс = полная уверенность (SGR-поле)
     out = asyncio.run(A.reflexion_node({"query": "x", "force_mode": "clarify"}))  # clarify не форсируем
     assert out != {"mode": "clarify", "needs_clarify_gate": False} or True
