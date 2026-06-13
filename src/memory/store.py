@@ -741,7 +741,7 @@ class MemoryStore:
         return text
 
     def recall_scored(self, user_id: str, query: str, k: int = 5, budget: int = 1800,
-                      gate: float = 0.0) -> tuple[str, float]:
+                      gate: float = 0.0, qvec: Optional[list] = None) -> tuple[str, float]:
         """
         Адаптивно собирает контекст памяти под бюджет символов (анти-bloat):
         факты о пользователе + релевантные эпизоды + выводы добавляются жадно по
@@ -755,7 +755,10 @@ class MemoryStore:
         Запрос эмбеддится ОДИН раз (qvec) и переиспользуется во всех _relevance — без
         N синхронных HTTP-вызовов на кандидат (иначе recall с эмбеддингами блокировал бы).
         """
-        qvec = self.embedder.embed(query) if self.embedder.enabled else None
+        # qvec может прийти ПРЕДВЫЧИСЛЕННЫМ (recall_node считает его async один раз и
+        # переиспользует для intent-роутера) — тогда тут НЕ эмбеддим повторно.
+        if qvec is None and self.embedder.enabled:
+            qvec = self.embedder.embed(query)
         # Эпизоды — первыми: они служат СИДАМИ графового пула (GraphRAG-lite). Затем boost
         # тянет связанные факты/выводы вверх (ассоциативный recall: факт, релевантный ЧЕРЕЗ
         # связь с релевантным эпизодом, а не лексически).
