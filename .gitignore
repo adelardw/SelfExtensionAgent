@@ -20,3 +20,7 @@ data/browser_bridge.log
 # intent-роутер: кодбук = runtime-состояние (seed-кэш + выученные экземпляры), как memory.db
 data/intent_codebook.json
 data/route_examples.db
+
+# frontend (Vite/React)
+frontend/node_modules/
+frontend/dist/

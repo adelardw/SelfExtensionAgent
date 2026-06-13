@@ -32,12 +32,17 @@ for pkg in (
     except Exception as e:  # пакет может отсутствовать на части платформ
         print(f"[spec] collect_all({pkg}) пропущен: {e}")
 
-# Наш код как ресурсы: дефолтный config.yml + навыки + веб-GUI (читаются в рантайме).
+# Наш код как ресурсы: дефолтный config.yml + навыки + собранный GUI (frontend/dist).
+# GUI собирается до упаковки: `cd frontend && npm install && npm run build`.
 datas += [
     (str(ROOT / "config.yml"), "."),
     (str(ROOT / "src" / "skills"), "src/skills"),
-    (str(ROOT / "src" / "webui"), "src/webui"),
 ]
+_dist = ROOT / "frontend" / "dist"
+if _dist.is_dir():
+    datas += [(str(_dist), "frontend/dist")]
+else:
+    print("[spec] frontend/dist отсутствует — GUI не попадёт в бинарь (сначала npm run build)")
 hiddenimports += collect_submodules("src")
 
 a = Analysis(

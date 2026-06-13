@@ -19,9 +19,14 @@ TELEGRAM_BOT_TOKEN=...               # опц. — Telegram-бот
 uvicorn src.server:app --port 8000   # HTTP API + веб-GUI на http://localhost:8000/
 .venv/bin/python desktop.py          # нативное окно с чат-GUI (uv sync --group gui)
 ```
-**GUI**: сервер отдаёт чат-интерфейс на `/` (открой в браузере), либо `desktop.py` —
-нативное окно ОС (системный webview, без Electron). Тонкий клиент + мозг: окно говорит
-с `/chat` локального сервера.
+**GUI** — отдельный фронт на **React + Vite + Tailwind** (шрифт Geist), мозг остаётся на
+Python (FastAPI). Тонкий клиент + мозг.
+```bash
+cd frontend && npm install && npm run build   # собрать GUI (один раз)
+# затем сервер отдаёт его на http://localhost:8000/
+cd frontend && npm run dev                     # ИЛИ dev-режим (HMR), проксирует API на :8000
+```
+`desktop.py` — нативное окно ОС (системный webview, без Electron) поверх того же сервера.
 
 ## 0.1. Кроссплатформенность и упаковка
 

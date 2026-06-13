@@ -19,7 +19,8 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 
@@ -30,17 +31,22 @@ from .tracing import diagnose, trace_store
 
 app = FastAPI(title="Self-Extension Agent", version="0.2.0")
 
-_WEBUI = Path(__file__).resolve().parent / "webui" / "index.html"
+# GUI — собранный React/Vite-фронт (frontend/dist). Тонкий клиент + мозг: сервер отдаёт
+# статику, она говорит с /chat. Собрать: `cd frontend && npm install && npm run build`.
+_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if (_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
 
 
 @app.get("/", response_class=HTMLResponse)
-def webui() -> HTMLResponse:
-    """Веб-GUI: чат-интерфейс, говорит с /chat. Отдаётся самим сервером (тонкий клиент +
-    мозг): открой http://localhost:8000/ в браузере или запусти нативное окно desktop.py."""
-    if _WEBUI.exists():
-        return HTMLResponse(_WEBUI.read_text(encoding="utf-8"))
-    return HTMLResponse("<h1>self-extension-agent</h1><p>web UI не найден (src/webui/index.html)</p>",
-                        status_code=404)
+def webui():
+    """Веб-GUI на http://localhost:8000/ (или нативное окно desktop.py)."""
+    idx = _DIST / "index.html"
+    if idx.exists():
+        return FileResponse(idx)
+    return HTMLResponse(
+        "<h1>self-extension</h1><p>GUI не собран. Выполни: "
+        "<code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code></p>", status_code=404)
 _cfg = OmegaConf.load("config.yml")
 _last_request = time.time()
 _idle_done = False  # чтобы не гонять improve повторно за один idle-период
