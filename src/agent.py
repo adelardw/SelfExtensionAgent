@@ -2101,23 +2101,25 @@ async def reflect_node(state: GeneralGraphState) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
-    # КОДБУК ПРАВИЛЬНЫХ РОУТОВ растёт из фидбек-лупа: валидированный успешный прогон →
-    # (запрос → сработавший маршрут) в universal intent-роутер. Лейбл из РЕАЛЬНОГО поведения
-    # прогона (не из догадки классификатора). Переиспользуем query_emb (без лишнего эмбеддинга).
-    # В eval НЕ растим (анти-оверфит: бенч-запросы не должны течь в роутер всех юзеров).
-    if outcome == "ok" and not reacted_negative and query and not eval_mode and state.get("query_emb"):
+    # МАРШРУТ из РЕАЛЬНОГО поведения прогона (не из догадки классификатора).
+    _route_label = None
+    if query and not eval_mode:
+        _sel = state.get("selected_skills", []) or []
+        if state.get("web_research_used"):
+            _route_label = "web_grounding"
+        elif any(s in _PHYSICAL_SKILLS for s in _sel):
+            _route_label = "physical_browser"
+        elif mode in ("reason", "fast"):
+            _route_label = "self_contained"
+    if _route_label:
         try:
-            _sel = state.get("selected_skills", []) or []
-            if state.get("web_research_used"):
-                _label = "web_grounding"
-            elif any(s in _PHYSICAL_SKILLS for s in _sel):
-                _label = "physical_browser"
-            elif mode in ("reason", "fast"):
-                _label = "self_contained"
-            else:
-                _label = None
-            if _label:
-                intent.get_router().add_exemplar(query, _label, state.get("query_emb") or None)
+            # (1) LIVE-КОДБУК растёт ТОЛЬКО на успехах (прайор retrieval'а), reuse query_emb.
+            if outcome == "ok" and not reacted_negative and state.get("query_emb"):
+                intent.get_router().add_exemplar(query, _route_label, state.get("query_emb") or None)
+            # (2) КОРПУС для будущего contrastive-обучения: позитивы И негативы (reward 0/1),
+            # только для валидируемых режимов (есть реальная оценка). Не влияет на live-роутинг.
+            if validated:
+                intent.log_route_example(query, _route_label, 1 if outcome == "ok" else 0, user_id)
         except Exception:  # noqa: BLE001
             pass
 
