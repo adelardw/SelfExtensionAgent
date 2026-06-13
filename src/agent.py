@@ -411,7 +411,8 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
             "memory_context": mem_for_prompt,
             "chat_history": _format_chat_history(state),
             # few-shots маршрутизации: «такой запрос → такой режим» (учит не над-эскалировать).
-            "fewshots": format_fewshots("reflexion", k=4, user_id=state.get("user_id", "")),
+            "fewshots": format_fewshots("reflexion", k=4, user_id=state.get("user_id", ""),
+                                        query=state["query"]),  # similarity-retrieved (kNN маршрутизации)
         }, state["query"])
     except Exception as e:  # noqa: BLE001
         print(f"[Reflexion] failed, fallback deliberate: {e}")
@@ -1725,7 +1726,7 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         # При рецепте план уже проверен — длинные few-shots лишние (бенч: контекст-инфляция
         # тёплых прогонов съедала экономию артефактов).
         fewshots=format_fewshots("step_execution", k=(1 if state.get("recipe_id") else 3),
-                                 user_id=state.get("user_id", "")),
+                                 user_id=state.get("user_id", ""), query=step.get("goal", "")),
         capability_hint=cap_hint,
         clarifications=clarify.format_ledger(),
         prior_steps=prior_text,

@@ -59,11 +59,16 @@ cosine≥0.6 (`fact↔fact similar`), сравнивая уже сохранён
 доказан детерминированно (`test_graph_boost_lifts_connected_fact`); live — без регресса.
 ОТКРЫТО: graph-pull эпизодов вне top-k (сейчас boost только факты/выводы); fact-seeds (>1 хоп).
 
-### Thread 3a — kNN routing мягких сигналов (безопасно)
-`src/intent.py` `IntentClassifier` (exemplar-стор, cosine-kNN, растёт из журнала, cold-start
-из regex-тест-кейсов). `format_fewshots` → similarity-retrieved. `bandit.mode_prior` Jaccard→
-эмбеддинги (флаг). `_wants_physical_browser`/`_is_play_intent` → классификатор, регэксп=fallback.
-**Done:** physical/play мультиязычно и обучаемо. Тест: `tests/test_intent.py`.
+### Thread 3a — similarity-retrieved few-shots   ✅ ЧАСТИЧНО (2026-06-13)
+СДЕЛАНО: `format_fewshots(query=…)` ранжирует примеры ПО ПОХОЖЕСТИ к запросу (kNN
+маршрутизации), а не по голому score (было `prompt_store.py:181`). Дёшево — token-overlap
+Jaccard (без сети в hot-path); персональные остаются приоритетнее глобальных, baseline-пол
+сохранён. Подключено в reflexion (`query=state['query']`) и step_executor (`query=step.goal`).
+Тест: `test_similarity_retrieval_ranks_relevant_first`. 263 passed.
+ОТЛОЖЕНО (осознанно): embedding-kNN `IntentClassifier` для physical/play —
+НЕ GAIA-релевантен (GAIA не про музыку/браузер), добавил бы embedding-вызов в hot-path;
+регэксп там — high-precision энфорсмент, оставлен. Вернуться при фокусе на daily-ассистента.
+`bandit.mode_prior` Jaccard→эмбеддинги — тоже отложено (текущий Jaccard работает).
 
 ### Thread 3b — анти-галлюцинационный пол (ТОЛЬКО за eval-доказательством)
 Убрать дублирующий оверрайд `_needs_web_grounding→act` (`agent.py:433`); решение —
