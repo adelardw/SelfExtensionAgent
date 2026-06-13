@@ -22,6 +22,7 @@ dependencies = [
     "openai>=2.26.0",
     "opendataloader-pdf>=2.4.7",
     "openpyxl>=3.1.5",
+    "prompt-toolkit>=3.0.0",
     "pydantic>=2.12.5",
     "pymupdf>=1.27.2.3",
     # macOS-only (AX/keystroke управление окнами). Гейт по платформе — иначе
@@ -31,6 +32,7 @@ dependencies = [
     "python-docx>=1.2.0",
     "python-pptx>=1.0.2",
     "pyyaml>=6.0.3",
+    "rich>=13.0.0",
     "swebench>=4.1.0",
     "textgrad>=0.1.8",
     "turbovec>=0.7.0",
