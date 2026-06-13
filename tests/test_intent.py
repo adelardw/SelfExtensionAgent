@@ -72,6 +72,19 @@ def test_cap_per_label(router):
     assert len(learned) <= intent.MAX_PER_LABEL
 
 
+def test_route_corpus_logs_pos_and_neg(tmp_path, monkeypatch):
+    # Корпус для будущего contrastive: позитивы И негативы (reward 0/1), append-only.
+    monkeypatch.setattr(intent, "_CORPUS_DB", str(tmp_path / "corpus.db"))
+    monkeypatch.setattr(intent, "_corpus_conn", None)
+    intent.log_route_example("где купить ноут", "web_grounding", 1, "u1")
+    intent.log_route_example("включи музыку", "play_media", 0, "u1")     # негатив
+    intent.log_route_example("", "web_grounding", 1)                      # пустой текст → игнор
+    intent.log_route_example("x", "bad_label", 1)                         # неизвестный лейбл → игнор
+    st = intent.corpus_stats()
+    assert st["total"] == 2 and st["pos"] == 1 and st["neg"] == 1
+    assert st["by_route"]["play_media"]["neg"] == 1
+
+
 def test_persistence(router, tmp_path, monkeypatch):
     router.classify("warmup")
     router.add_exemplar("открой мой банк-аккаунт", "physical_browser")

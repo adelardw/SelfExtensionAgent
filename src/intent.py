@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import time
 from pathlib import Path
 from typing import Optional
@@ -189,3 +190,55 @@ def get_router() -> IntentRouter:
     if _ROUTER is None:
         _ROUTER = IntentRouter()
     return _ROUTER
+
+
+# ── Корпус маршрутов для БУДУЩЕГО contrastive-обучения локального эмбеддера ──────────
+# Хранит (текст, маршрут, reward 0/1) — позитивы И негативы. Append-only, ОТДЕЛЁН от
+# live-кодбука (тот растёт только на успехах и влияет на retrieval; корпус — сырьё для
+# обучения и НЕ влияет на рантайм). Метка = (маршрут + исход), НЕ «маршрут верный/неверный»
+# (провал мог быть из-за исполнения) — это шум, который чистится при обучении.
+_CORPUS_DB = os.getenv("AGENT_ROUTE_CORPUS") or "data/route_examples.db"
+_corpus_conn: Optional[sqlite3.Connection] = None
+
+
+def _corpus() -> sqlite3.Connection:
+    global _corpus_conn
+    if _corpus_conn is None:
+        Path(_CORPUS_DB).parent.mkdir(parents=True, exist_ok=True)
+        _corpus_conn = sqlite3.connect(_CORPUS_DB, check_same_thread=False)
+        _corpus_conn.execute(
+            "CREATE TABLE IF NOT EXISTS route_examples ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, ts REAL, "
+            "text TEXT, route TEXT, reward INTEGER)")
+        _corpus_conn.commit()
+    return _corpus_conn
+
+
+def log_route_example(text: str, route: str, reward: int, user_id: str = "") -> None:
+    """Append (текст, маршрут, reward 0/1) в корпус. Сырьё для будущего contrastive-обучения
+    локального эмбеддера; на live-роутинг НЕ влияет. Тихо игнорирует сбои (не ломает reflect)."""
+    if not (text or "").strip() or route not in LABELS:
+        return
+    try:
+        c = _corpus()
+        c.execute("INSERT INTO route_examples (user_id, ts, text, route, reward) VALUES (?,?,?,?,?)",
+                  (user_id or "default", time.time(), text[:500], route, 1 if reward else 0))
+        c.commit()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def corpus_stats() -> dict:
+    """Сводка корпуса (для диагностики/решения «пора обучать»): всего / pos / neg / по маршрутам."""
+    try:
+        c = _corpus()
+        rows = c.execute("SELECT route, reward, COUNT(*) FROM route_examples GROUP BY route, reward").fetchall()
+    except Exception:  # noqa: BLE001
+        return {"total": 0}
+    out: dict = {"total": 0, "pos": 0, "neg": 0, "by_route": {}}
+    for route, reward, cnt in rows:
+        out["total"] += cnt
+        out["pos" if reward else "neg"] += cnt
+        br = out["by_route"].setdefault(route, {"pos": 0, "neg": 0})
+        br["pos" if reward else "neg"] += cnt
+    return out
