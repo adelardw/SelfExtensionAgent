@@ -110,6 +110,12 @@ tool_call_id и парность с AIMessage СОХРАНЯЮТСЯ (струк
 всего (rubric) — уже есть. Тесты: `tests/test_context_masking.py` (4: свёртка/noop/идемпотентность/
 короткие), 262 passed.
 
+### БАГИ, найденные живым GAIA-прогоном (не unit-тестами) — ИСПРАВЛЕНО
+- **LengthFinishReasonError в decompose** (GAIA L2 задача 5): `chat()` строился БЕЗ `max_tokens`
+  → thinking-модель (gemini-2.5-flash-lite) тратила output на размышление и ОБРЕЗАЛА
+  structured-JSON → фолбэк «один шаг = весь запрос» → провал. ФИКС: `agent.max_output_tokens=8000`
+  в `llm.chat()`. Проверено: сложный 6-шаговый decompose проходит без обрезки. 263 passed.
+
 ### Порядок — СТАТУС (ветка etap0-recall-embeddings)
 ✅ 0+1 (эмбеддинги+recall-гейт) → ✅ 2 (GraphRAG-lite) → ✅ 2c (анти-PII) → ✅ 4 (маскинг) →
 ✅ 3a (similarity few-shots; embedding-kNN physical/play отложен) → ✅ 3c (heavy earned) →
