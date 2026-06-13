@@ -77,13 +77,14 @@ high-precision СТРАХОВКИ. **Доказательство до комм�
 `_before_after_eval` (доля выдуманных URL/фактов ДО vs ПОСЛЕ), коммит только при after≤before,
 иначе откат. Тест: расширить `tests/test_research_grounding.py`. **Риск ВЫСОКИЙ.**
 
-### Thread 3c — heavy НЕ предсказывается, а ЗАРАБАТЫВАЕТСЯ (см. обсуждение)
-reflexion выбирает только fast/reason/act/deliberate (дёшево, мисс-класс самокорректируется
-лестницей act→deliberate). heavy УБРАТЬ из стартовых режимов; `review` (`agent.py:1843`)
-триггерится РАНТАЙМ-сигналами: validation conf<порог И бюджет остался И rubric недозакрыт
-И артефакт большой (длина/число шагов). Мисс-класс «вверх» в heavy = самый дорогой баг
-(eval: 928k токенов) → платим за deep-ревью ТОЛЬКО по заземлённой нехватке, не по догадке.
-**Done:** нет апфронт-heavy; review платится по evidence; токен-регресс не вырос (bench).
+### Thread 3c — heavy НЕ предсказывается, а ЗАРАБАТЫВАЕТСЯ   ✅ СДЕЛАНО (2026-06-13)
+reflexion-авто `mode=='heavy'→'deliberate'` (heavy убран из стартовых; force_mode='heavy'
+через /config уважается отдельным early-return). `_earned_review(state)`: сквозной deep-ревью
+запускается ТОЛЬКО когда артефакт ОКАЗАЛСЯ большим — `len(final_answer)≥REVIEW_MIN_ARTIFACT(1200)`
+И done-шагов≥`REVIEW_MIN_STEPS(3)` И есть `goal_rubric` (всё дёшево, рантайм-evidence). Мисс-класс
+вверх в heavy = самый дорогой баг (eval: 928k токенов) → платим за ревью по факту, не по догадке.
+`route_after_synthesize` использует `_earned_review` вместо `mode=='heavy'`. Тест: `test_heavy_routing`
+обновлён (earned/малый-артефакт/бюджет/force_mode). 263 passed.
 
 ### Thread 2c — анти-PII детерминированный пол («не разглашать» = близнец «не выдумывать»)   ✅ СДЕЛАНО (2026-06-13)
 (a) GraphRAG-поверхность — закрыто в Thread 2 (PII-контейнмент: нерелевантно→не тянем, per-user).
