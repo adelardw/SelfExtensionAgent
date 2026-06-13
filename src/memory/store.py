@@ -56,8 +56,13 @@ def _overlap(a: str, b: str) -> float:
 class MemoryStore:
     """Потокобезопасный (check_same_thread=False) синхронный стор для одного процесса."""
 
-    def __init__(self, db_path: str, embedder: Optional[Embedder] = None):
+    def __init__(self, db_path: str, embedder: Optional[Embedder] = None,
+                 graph_hops: int = 1, graph_decay: float = 0.6, graph_seed_min: float = 0.3):
         self.embedder = embedder or NullEmbedder()
+        # GraphRAG-lite: spreading-activation в recall от РЕЛЕВАНТНЫХ сидов.
+        self._graph_hops = graph_hops
+        self._graph_decay = graph_decay
+        self._graph_seed_min = graph_seed_min
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -264,8 +269,37 @@ class MemoryStore:
                 (user_id, key, value, importance, time.time(), source_episode, emb, tags_json),
             )
             fact_id = cur.lastrowid
+            self._conn.commit()
+            # GraphRAG-lite densify: связать новый факт с семантически близкими (без LLM/сети —
+            # cosine по УЖЕ сохранённым векторам). Только при эмбеддингах; upsert не densify-им.
+            if emb:
+                self._densify_fact(user_id, fact_id, emb)
+            return fact_id
         self._conn.commit()
         return fact_id
+
+    def _densify_fact(self, user_id: str, fact_id: int, emb_json: str,
+                      top_n: int = 3, min_sim: float = 0.6) -> None:
+        """Ребро fact↔fact к топ-N семантически близких фактов того же юзера (cosine≥min_sim).
+        Без сети: сравниваем с уже сохранёнными векторами. Дешёвый автограф памяти."""
+        try:
+            vec = json.loads(emb_json)
+        except Exception:  # noqa: BLE001
+            return
+        scored = []
+        for r in self._conn.execute(
+            "SELECT id, embedding FROM facts WHERE user_id=? AND id!=? AND embedding IS NOT NULL",
+            (user_id, fact_id),
+        ).fetchall():
+            try:
+                sim = cosine(vec, json.loads(r["embedding"]))
+            except Exception:  # noqa: BLE001
+                continue
+            if sim >= min_sim:
+                scored.append((sim, r["id"]))
+        scored.sort(reverse=True)
+        for _sim, other_id in scored[:top_n]:
+            self.add_edge(user_id, "fact", fact_id, "fact", other_id, relation="similar")
 
     # ── graph edges (взаимосвязанная память) ─────────────────────────
 
@@ -644,15 +678,19 @@ class MemoryStore:
         scored.sort(key=lambda x: x[0], reverse=True)
         return [ep for s, ep in scored[:k] if s > 0.15]
 
-    def _rank_facts(self, user_id: str, query: str, qvec: Optional[list] = None) -> list[sqlite3.Row]:
+    def _rank_facts(self, user_id: str, query: str, qvec: Optional[list] = None,
+                    boost: Optional[dict] = None) -> list[sqlite3.Row]:
         """
         Гибкий отбор персональных фактов под запрос: score = важность + релевантность
         (по эмбеддингам/токенам ключа+значения+тегов). Устойчивая персона (язык, имя —
         высокий importance) держится всегда, а тематические факты всплывают под запрос.
+        boost — GraphRAG-lite: факт, связанный с релевантным сидом, поднимается, даже если
+        сам по себе лексически нерелевантен (ассоциативный recall).
         """
         facts = self.get_facts(user_id)
         if not facts:
             return []
+        boost = boost or {}
 
         def fscore(f) -> float:
             tags = ""
@@ -662,9 +700,40 @@ class MemoryStore:
                 except Exception:  # noqa: BLE001
                     tags = ""
             rel = self._relevance(query, f"{f['key']} {f['value']} {tags}", f["embedding"], qvec)
-            return _W_IMPORTANCE * f["importance"] + _W_RELEVANCE * rel
+            graph = boost.get(("fact", f["id"]), 0.0)
+            return _W_IMPORTANCE * f["importance"] + _W_RELEVANCE * (rel + graph)
 
         return sorted(facts, key=fscore, reverse=True)
+
+    def _graph_boost(self, user_id: str, query: str, qvec: Optional[list],
+                     seed_eps: list) -> dict:
+        """
+        GraphRAG-lite spreading-activation: boost[(type,id)] = seed_rel·decay^hop, расходясь
+        от РЕЛЕВАНТНЫХ эпизод-сидов по memory_edges (per-user через neighbors). PII-контейнмент:
+        узел становится сидом ТОЛЬКО при релевантности ≥ graph_seed_min — нерелевантный запрос
+        не тянет связанные перс-данные. Глубина — graph_hops.
+        """
+        if self._graph_hops <= 0:
+            return {}
+        frontier = []
+        for ep in seed_eps:
+            r = self._relevance(query, ep["query"] + " " + ep["answer"], ep["embedding"], qvec)
+            if r >= self._graph_seed_min:
+                frontier.append(("episode", ep["id"], r))
+        boost: dict = {}
+        for _hop in range(self._graph_hops):
+            nxt = []
+            for (t, i, r) in frontier:
+                for nb in self.neighbors(user_id, t, i):
+                    key = (nb["type"], nb["id"])
+                    b = r * self._graph_decay
+                    if b > boost.get(key, 0.0):
+                        boost[key] = b
+                        nxt.append((nb["type"], nb["id"], b))
+            frontier = nxt
+            if not frontier:
+                break
+        return boost
 
     def recall(self, user_id: str, query: str, k: int = 5, budget: int = 1800) -> str:
         """Текст памяти. Обёртка над recall_scored — обратная совместимость (тул/тесты)."""
@@ -687,14 +756,19 @@ class MemoryStore:
         N синхронных HTTP-вызовов на кандидат (иначе recall с эмбеддингами блокировал бы).
         """
         qvec = self.embedder.embed(query) if self.embedder.enabled else None
-        facts = self._rank_facts(user_id, query, qvec)
+        # Эпизоды — первыми: они служат СИДАМИ графового пула (GraphRAG-lite). Затем boost
+        # тянет связанные факты/выводы вверх (ассоциативный recall: факт, релевантный ЧЕРЕЗ
+        # связь с релевантным эпизодом, а не лексически).
         top_eps = self._rank_episodes(user_id, query, k, qvec)
+        boost = self._graph_boost(user_id, query, qvec, top_eps)
+        facts = self._rank_facts(user_id, query, qvec, boost)
 
         scored_refl = []
         for rf in self._conn.execute(
             "SELECT * FROM reflections WHERE user_id=?", (user_id,)
         ).fetchall():
             s = self._score(query, rf["insight"], rf["ts"], rf["importance"], rf["embedding"], qvec)
+            s += _W_RELEVANCE * boost.get(("reflection", rf["id"]), 0.0)  # GraphRAG-lite boost
             scored_refl.append((s, rf))
         scored_refl.sort(key=lambda x: x[0], reverse=True)
 

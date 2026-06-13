@@ -177,6 +177,10 @@ memory_store = MemoryStore(
         config.get("memory", {}).get("embeddings", False),
         config.get("memory", {}).get("embedding_model"),
     ),
+    # GraphRAG-lite: spreading-activation в recall (0 хопов = выкл).
+    graph_hops=config.get("memory", {}).get("graph_hops", 1),
+    graph_decay=config.get("memory", {}).get("graph_decay", 0.6),
+    graph_seed_min=config.get("memory", {}).get("graph_seed_min", 0.3),
 )
 
 # Автообновление реестра навыков при старте: подхватить orphan-скиллы,
