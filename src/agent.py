@@ -75,7 +75,7 @@ from .memory import (
     feedback_is_negative, feedback_strip_marker,
 )
 from .improve import get_prompt as get_prompt_override, maybe_auto_improve, maybe_improve_user
-from .improve.safety import sanitize_tool_output
+from .improve.safety import sanitize_tool_output, strip_ungrounded_pii
 from .improve.prompt_store import format_fewshots, add_fewshot, add_user_fewshot
 from .external import get_external_context, format_external_context
 from .mcp_client import suggest_server, get_mcp_tools, discover_mcp, approve_server, try_connect_discovered
@@ -763,7 +763,9 @@ async def _finalize_act(query: str, msgs: list, memory_context: str) -> str:
             "query": query, "memory_context": memory_context or "Память пуста.",
             "findings": findings[-6000:],  # хвост — самые свежие/итоговые находки
         })
-        return strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp)) or ""
+        out = strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp)) or ""
+        # Анти-PII (Thread 2c): email в ответе должен быть в находках/запросе/памяти, иначе выдумка.
+        return strip_ungrounded_pii(out, query + "\n" + (memory_context or "") + "\n" + findings)
     except Exception as e:  # noqa: BLE001
         print(f"[Act-finalize] {type(e).__name__} → сырой output")
         return ""
@@ -954,6 +956,8 @@ async def fast_answer_node(state: GeneralGraphState) -> dict:
     })
     resp = await llm.ainvoke([SystemMessage(content=sys_text), HumanMessage(content=state["query"])])
     answer = resp.content if hasattr(resp, "content") else str(resp)
+    # Анти-PII пол (Thread 2c): email из памяти легитимен (recall данных юзера ему же), выдуманный — нет.
+    answer = strip_ungrounded_pii(answer, state["query"] + "\n" + state.get("memory_context", ""))
     return {"final_answer": answer}
 
 
@@ -987,6 +991,8 @@ async def reason_node(state: GeneralGraphState) -> dict:
             pass
     if not answer.strip():
         answer = "Не удалось сформулировать ответ — переформулируй вопрос, пожалуйста."
+    # Анти-PII пол (Thread 2c): reason без инструментов — выдуманный email особенно вероятен.
+    answer = strip_ungrounded_pii(answer, state["query"] + "\n" + state.get("memory_context", ""))
     return {"final_answer": answer}
 
 
@@ -1848,6 +1854,9 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         why = "бюджет прогона исчерпан" if cut else "не все шаги завершены"
         answer = (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным. {progress}. "
                   "Проверь и скажи, продолжить ли с места остановки.")
+    # Анти-PII пол (Thread 2c): выдуманный email (нет в запросе/находках/памяти) → убрать.
+    grounded = state["query"] + "\n" + state.get("memory_context", "") + "\n" + results_text
+    answer = strip_ungrounded_pii(answer, grounded)
     return {"final_answer": answer}
 
 
