@@ -274,7 +274,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # 271 tests, mostly without LLM (memory/retrieval/router/security/…)
+.venv/bin/python -m pytest tests/ -q   # 272 tests, mostly without LLM (memory/retrieval/router/security/…)
 ```
 Graph-build tests require an API key (the LLM is built on import), the rest run offline.
 A quick pass of everyday scenarios through the real graph: `python -m src.eval.daily_eval [N]`.
@@ -314,8 +314,10 @@ main.py / bot.py      REPL / Telegram
 
 ## Status
 
-Implemented and tested (186 tests): the core, **6 thinking modes** (incl. act with
-auto-escalation), per-step execution with **action grounding**, memory + **memory-as-tool (3
+Implemented and tested (272 tests): the core, **6 thinking modes** (incl. act with
+auto-escalation; **heavy review earned by runtime evidence**), a **universal embedding intent
+router** (any language, route_eval 94%), **conditional recall + GraphRAG-lite memory**, per-step
+execution with **action grounding** + **context masking**, memory + **memory-as-tool (3
 tiers)** + **a LightRAG knowledge base** (+AutoRAG), personalization + **an interaction journal**,
 **per-user self-improvement** + measurable accept/revert, **experience amortization**
 (recipes/habits/collective tier; live bench: −13% tokens, quality 78%→98% on a warm pass), a
@@ -326,11 +328,11 @@ learning bans, incl. collective), universal files (pdf/excel/docx/pptx/video/gif
 tracing/self-diagnosis, on-demand device (cross-platform), DeepAgent, eval harnesses
 (daily/GAIA/AssistantBench/amortize), REPL/Telegram/FastAPI.
 
-Deferred (see `ARCHITECTURE.md`): history-masking of the long ReAct context (owned by LangGraph),
-graph-RAG for GLOBAL memory (the document KB is already on LightRAG), free dynamic composition of
-modules (the act→deliberate ladder is the first step), inheriting strong MCPs via before/after
-comparison, LLM generalization of recipes before collective promotion, cross-platform UI automation
-outside macOS.
+Deferred (see `ARCHITECTURE.md`): a trained local route head (kNN tuning / CatBoost on the
+accumulated route corpus), removing the regex grounding-floor behind a fabrication eval, raising
+L2/L3 GAIA (multi-hop + files — the cheap-tier ceiling), free dynamic composition of modules
+(the act→deliberate ladder is the first step), inheriting strong MCPs via before/after comparison,
+LLM generalization of recipes before collective promotion, cross-platform UI automation outside macOS.
 
 ---
 ---
@@ -611,7 +613,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ## Тесты
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # 271 тест, в осн. без LLM (память/retrieval/роутер/безопасность/…)
+.venv/bin/python -m pytest tests/ -q   # 272 теста, в осн. без LLM (память/retrieval/роутер/безопасность/…)
 ```
 Тесты сборки графа требуют API-ключ (LLM строится на импорте), остальные — оффлайн.
 Быстрый прогон повседневных сценариев через реальный граф: `python -m src.eval.daily_eval [N]`.
@@ -651,8 +653,10 @@ main.py / bot.py      REPL / Telegram
 
 ## Статус
 
-Реализовано и протестировано (186 тестов): ядро, **6 режимов мышления** (вкл. act с
-автоэскалацией), по-пунктовое исполнение с **заземлением действий**, память +
+Реализовано и протестировано (272 теста): ядро, **6 режимов мышления** (вкл. act с
+автоэскалацией; **heavy-ревью зарабатывается рантайм-evidence**), **универсальный
+embedding-роутер интентов** (любой язык, route_eval 94%), **условный recall + GraphRAG-lite
+память**, по-пунктовое исполнение с **заземлением действий** + **маскинг контекста**, память +
 **память-как-tool (3 яруса)** + **база знаний на LightRAG** (+AutoRAG), персонализация +
 **журнал взаимодействий**, **per-user само-улучшение** + измеримый accept/revert,
 **амортизация опыта** (рецепты/привычки/коллективный ярус; живой бенч: −13% токенов,
@@ -664,8 +668,9 @@ HITL + **анти-injection в выводах тулов и AutoRAG** + запр
 трейсинг/самодиагностика, device on-demand (кроссплатформенно), DeepAgent, eval-харнессы
 (daily/GAIA/AssistantBench/amortize), REPL/Telegram/FastAPI.
 
-Отложено (см. `ARCHITECTURE.md`): history-masking длинного
-ReAct-контекста (владеет LangGraph), граф-RAG для ГЛОБАЛЬНОЙ памяти (БЗ документов уже
-на LightRAG), свободная динамическая композиция модулей (лестница act→deliberate — первый
-шаг), наследование сильных MCP через before/after-сравнение, LLM-генерализация рецептов
-перед коллективным промоушеном, кроссплатформенный UI-automation вне macOS.
+Отложено (см. `ARCHITECTURE.md`): обучаемая локальная голова роутера (kNN-тюнинг / CatBoost
+на накопленном корпусе маршрутов), снятие регэксп-грунтинг-пола за fabrication-eval, подъём
+L2/L3 GAIA (мультихоп + файлы — потолок дешёвого тира), свободная динамическая композиция
+модулей (лестница act→deliberate — первый шаг), наследование сильных MCP через before/after-
+сравнение, LLM-генерализация рецептов перед коллективным промоушеном, кроссплатформенный
+UI-automation вне macOS.
