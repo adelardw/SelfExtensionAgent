@@ -121,6 +121,24 @@ tool_call_id и парность с AIMessage СОХРАНЯЮТСЯ (струк
 - GAIA вообще брутален (топ-агенты L1 ~40-50%, GPT-4+плагины ~15% — из шапки `gaia_runner`):
   реалистичная цель дешёвого тира — конкурентная точность, не «100%».
 
+### УНИВЕРСАЛЬНЫЙ embedding-РОУТЕР ИНТЕНТОВ (любой язык) + кодбук   ✅ СДЕЛАНО (2026-06-13, по запросу юзера)
+`src/intent.py` — `IntentRouter`: cosine-kNN кодбук маршрутов {web_grounding/physical_browser/
+play_media/self_contained}, мультиязычный (от эмбеддингов; live: ES/DE/FR ВНЕ seed ловятся).
+Заменяет русско-регэксп-костыли: `_needs_web_grounding`=UNION(регэксп∨классификатор) — пол НЕ
+ослаблен, +другие языки; `_wants_physical_browser`/`_is_play_intent`=классификатор+регэксп-fallback.
+**Ноль лишних токенов:** переиспускает `state.query_emb` из recall (классификатор зовётся ТОЛЬКО
+при готовом qvec). **Фиксированный эмбеддер (инвариант):** кодбук тегирован моделью, смена →
+инвалидация+пере-seed (одно векторное пространство для кодбука И query_emb). Богатый мультиязычный
+seed решает cold-start (RecSys content-based). РАСТЁТ из фидбек-лупа: reflect→add_exemplar
+(валидированный успех, лейбл из реального поведения). КОРПУС `route_examples.db` (pos+neg, reward
+0/1) — сырьё для будущего contrastive (kNN-тюнинг / CatBoost-head / локальный эмбеддер); на
+live-роутинг не влияет; в eval не пишется. Тесты: `tests/test_intent.py` (8), 271 passed.
+ОТЛОЖЕНО (по нарастающей): reward-взвешенный kNN + per-user калибровка порогов → CatBoost-head
+(когда корпус ≥~1k, holdout>kNN) → fine-tuned ЛОКАЛЬНЫЙ роут-эмбеддер (скрыт+бесплатен+развязан,
+нужна локальная инфра). Guardrail: голова=прайор гейтов (не оракул), exploration=бандит, holdout
+против дрейфа, deterministic-полы как сетка. RecSys-рамка: routing=constrained contextual
+recommendation; брать дисциплину дебиаса (exploration/off-policy/propensity), не тяжёлые модели.
+
 ### L1-переусложнение + TimeoutError — ИСПРАВЛЕНО (2026-06-13, диагностика трейсом)
 - **L1 «сдаётся» (gold не достигается):** диагностика 3 L1-задач показала корень — `agentic_research`
   отвечал «невозможно определить», хотя ответ был в находках (Mercedes Sosa albums: gold=3).
