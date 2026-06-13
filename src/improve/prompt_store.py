@@ -153,17 +153,35 @@ BASE_FEWSHOTS: dict[str, list[dict]] = {
 }
 
 
-def format_fewshots(role: str, k: int = 3, user_id: str = "") -> str:
+def _shot_sim(query: str, shot_q: str) -> float:
+    """Дешёвая лексическая близость запроса к примеру (Jaccard по токенам len>2) — без сети.
+    Локальная (не импортируем memory.store, чтобы не плодить связи improve↔memory)."""
+    ta = {t for t in __import__("re").findall(r"[\wа-яё]+", (query or "").lower()) if len(t) > 2}
+    tb = {t for t in __import__("re").findall(r"[\wа-яё]+", (shot_q or "").lower()) if len(t) > 2}
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
+def format_fewshots(role: str, k: int = 3, user_id: str = "", query: str = "") -> str:
     """
     Примеры для инъекции, по приоритету: ПЕРСОНАЛЬНЫЕ (этого юзера) → глобальные обучаемые →
     встроенный baseline (неизменяемый пол). Так у нового юзера без истории всё равно есть
     базовые принципы, а с опытом сверху ложится то, что заходит ИМЕННО ему.
+
+    query задан → внутри каждого яруса примеры ранжируются ПО ПОХОЖЕСТИ к запросу (а не по
+    голому score): «такой запрос → такой ответ/режим» — kNN-классификатор маршрутизации
+    (Thread 3a), не статический приор. Персональные остаются приоритетнее глобальных.
     """
     base = BASE_FEWSHOTS.get(role, [])
     # Резервируем слоты под baseline (гарантированный ПОЛ), чтобы обучаемые/глобальные —
     # которые могут быть зашумлены (в т.ч. eval-запросами) — не вытеснили принципы полностью.
     base_quota = min(len(base), max(1, k // 2)) if base else 0
     learn_k = k - base_quota
+
+    def _ranked(pool: list[dict]) -> list[dict]:
+        # query → similarity-retrieved (kNN по лексике); иначе порядок score (как было).
+        return sorted(pool, key=lambda s: _shot_sim(query, s["query"]), reverse=True) if query else pool
 
     shots: list[dict] = []
     seen: set[str] = set()
@@ -177,9 +195,11 @@ def format_fewshots(role: str, k: int = 3, user_id: str = "") -> str:
                 shots.append(s)
                 seen.add(key)
 
-    _add(get_user_fewshots(user_id, role, learn_k), learn_k)  # персональные (приоритет)
-    _add(get_fewshots(role, learn_k), learn_k)                # обучаемые глобальные
-    _add(base, k)                                             # встроенный baseline — гарантированный пол
+    # Берём ПОЛНЫЕ пулы (до MAX_FEWSHOTS) и ранжируем по похожести — иначе similarity видела бы
+    # лишь топ-k по score. Персональные всё равно идут первыми (персонализация > усреднение).
+    _add(_ranked(get_user_fewshots(user_id, role, MAX_FEWSHOTS)), learn_k)  # персональные
+    _add(_ranked(get_fewshots(role, MAX_FEWSHOTS)), learn_k)                # глобальные обучаемые
+    _add(base, k)                                                          # baseline — гарантированный пол
     if not shots:
         return "Примеров пока нет."
     return "\n\n".join(f"Пример {i+1}:\nЗапрос: {s['query']}\nХороший ответ: {s['answer']}" for i, s in enumerate(shots))
