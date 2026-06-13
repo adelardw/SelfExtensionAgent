@@ -69,6 +69,9 @@ WORK_LABEL = {
 # Слэш-команды с описаниями: автодополнение при вводе «/» (как в qwen-code/claude-code CLI).
 COMMANDS = {
     "/config":   "настройки: модель · режим работы · мышление · гранты",
+    "/chats":    "история чатов: /chats — список · /chats N — открыть · /fav · /compress · /rename",
+    "/fav":      "избранное: /fav — отметить текущий чат · /fav N — чат из /chats",
+    "/compress": "сжать чат в саммари-индекс (полная история сохраняется): /compress [N]",
     "/auto":     "режим работы: /auto — полный авто · /auto accept · /auto off",
     "/model":    "модель: /model api · /model ollama [имя]",
     "/backend":  "браузер-движок: /backend puppeteer|hybrid|extension (puppeteer ждёт SPA)",
@@ -140,7 +143,8 @@ def banner() -> None:
         f"Режимы мышления: {legend}\n"
         f"Физический веб: [dim]просто скажи словами — «включи музыку <A>», «открой моё избранное», "
         f"«поставь паузу», «найди фильм <X>», «закажи <еду>» — агент сам выберет сервис и сделает[/]\n"
-        f"Команды: [dim]/config /model /auto /voice /help /new /facts /goal /diagnose /traces /improve /usage  ·  exit[/]\n"
+        f"Команды: [dim]/config /model /auto /chats /new /voice /help /facts /goal /diagnose /traces /improve /usage  ·  exit[/]\n"
+        f"Чаты: [dim]/chats — история и переход · /fav — ★избранное · /compress — сжать в саммари[/]\n"
         f"Подтверждения: [dim]отвечай словами — «да» · «да, всегда» (больше не спрашивать) · «да, но …» · «нет, …» · или скажи, как сделать иначе[/]\n"
         f"Файлы: [dim]/attach <файл> — в сессию (tmp, мультимодал)  ·  /kb add|ls|mkdir|find — личная база знаний (граф)[/]\n"
         f"Автозапуск: [dim]uv run main.py \"задача\" [--auto] — one-shot без REPL (для скриптов/cron)[/]"
@@ -421,6 +425,61 @@ async def _repl_clarify(items: list[dict]) -> list[str]:
     return answers
 
 
+def _fmt_age(ts: float) -> str:
+    import time
+    d = max(0.0, time.time() - (ts or 0))
+    if d < 90:        return "только что"
+    if d < 3600:      return f"{int(d // 60)}м назад"
+    if d < 86400:     return f"{int(d // 3600)}ч назад"
+    return f"{int(d // 86400)}д назад"
+
+
+def cmd_chats(user_id: str, favorites_only: bool = False) -> list[dict]:
+    """Показать список чатов (тредов) и вернуть его — номер строки = выбор для /chats N."""
+    from src import chat_store
+    rows = chat_store.list_threads(user_id, limit=30, favorites_only=favorites_only)
+    if not rows:
+        console.print("[dim]Пока нет сохранённых чатов. Начни диалог — он появится тут.[/]")
+        return rows
+    tbl = Table(title="★ Избранные чаты" if favorites_only else "История чатов",
+                title_style="bold cyan", show_lines=False, expand=False)
+    tbl.add_column("#", style="dim", justify="right")
+    tbl.add_column("", justify="center")          # ★
+    tbl.add_column("чат")
+    tbl.add_column("реплик", justify="right", style="dim")
+    tbl.add_column("обновлён", style="dim")
+    for i, r in enumerate(rows, 1):
+        star = "[yellow]★[/]" if r["favorite"] else "[dim]·[/]"
+        title = r["title"] or "(без названия)"
+        if r["compressed"]:
+            title += " [dim]🗜[/]"
+        tbl.add_row(str(i), star, title, str(r["msg_count"] // 2), _fmt_age(r["updated_at"]))
+    console.print(tbl)
+    console.print("[dim]/chats N — открыть · /fav N — ★ · /compress N — сжать[/]")
+    return rows
+
+
+async def _compress_thread(thread_id: str) -> str | None:
+    """Сжать полную историю треда в плотное саммари-индекс (память для продолжения),
+    сохранить в chat_store; полная история в messages остаётся (саммари = индекс на неё)."""
+    from langchain_core.messages import SystemMessage, HumanMessage
+    from src import chat_store
+    from src.agent import llm
+    msgs = chat_store.get_messages(thread_id)
+    if len(msgs) < 4:
+        return None
+    convo = "\n".join(f"{m['role']}: {m['content'][:700]}" for m in msgs)
+    resp = await llm.ainvoke([
+        SystemMessage(content=(
+            "Сожми диалог в ПЛОТНОЕ саммари: ключевые факты, принятые решения, важный контекст, "
+            "открытые задачи/договорённости. Это будет памятью-индексом для продолжения чата — "
+            "без воды, по делу, на языке диалога.")),
+        HumanMessage(content=convo[:14000])])
+    summary = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+    chat_store.set_summary(thread_id, summary)
+    return summary
+
+
 async def cmd_attach(args: list[str], session_id: str) -> None:
     """Приложить файл(ы) к ТЕКУЩЕЙ сессии (tmp, мультимодал — pdf/image/audio/video)."""
     paths = [Path(a).expanduser() for a in args]
@@ -569,10 +628,14 @@ async def main():
         print(f"[bridge] не поднялся: {e}")
     async with make_checkpointer() as checkpointer:
         graph = build_graph(checkpointer)
+        from src import chat_store
         thread_id = str(uuid.uuid4())
         user_id = "local"
         chat_history: list[dict] = []
+        chat_list: list[dict] = []  # последний показанный /chats — для выбора по номеру
         banner()
+        if chat_store.list_threads(user_id, limit=1):
+            console.print("[dim]💬 есть сохранённые чаты — /chats для списка и перехода.[/]")
 
         # Чат из браузерного расширения (side panel) → тот же граф, своя ветка истории.
         ext_thread = str(uuid.uuid4())
@@ -634,6 +697,62 @@ async def main():
                 chat_history = []
                 console.print("[dim]Новый тред (приложенные файлы сессии очищены).[/]")
                 continue
+            if low == "/chats" or low.startswith("/chats ") or low.startswith("/open"):
+                parts = query.split()
+                arg = parts[1] if len(parts) > 1 else ""
+                if arg.isdigit():  # /chats N — перейти в чат (грузим его контекст + чекпоинт)
+                    idx = int(arg) - 1
+                    if not (0 <= idx < len(chat_list)):
+                        console.print("[red]Нет такого номера — сначала /chats[/]"); continue
+                    clear_session(thread_id)
+                    thread_id = chat_list[idx]["thread_id"]   # тот же thread_id → чекпоинтер продолжит
+                    t = chat_store.get_thread(thread_id) or {}
+                    recent = chat_store.get_messages(thread_id, last=20)
+                    if t.get("summary"):  # сжатый чат: память = саммари-индекс + хвост реплик
+                        chat_history = [{"role": "assistant",
+                                         "content": f"[память прошлого чата]: {t['summary']}"}] + recent[-6:]
+                    else:
+                        chat_history = recent[-20:]
+                    console.print(f"[green]↩ Открыт чат:[/] [bold]{t.get('title','?')}[/] "
+                                  f"[dim]({t.get('msg_count',0)//2} реплик · продолжаю контекст)[/]")
+                    for m in recent[-4:]:
+                        who = "[cyan]ты[/]" if m["role"] == "user" else "[magenta]агент[/]"
+                        console.print(f"  {who}: [dim]{' '.join(m['content'].split())[:150]}[/]")
+                else:
+                    chat_list = cmd_chats(user_id)
+                continue
+            if low == "/fav" or low.startswith("/fav "):
+                parts = query.split()
+                tid = thread_id
+                if len(parts) > 1 and parts[1].isdigit():
+                    idx = int(parts[1]) - 1
+                    if not (0 <= idx < len(chat_list)):
+                        console.print("[red]Нет номера — сначала /chats[/]"); continue
+                    tid = chat_list[idx]["thread_id"]
+                if not chat_store.get_thread(tid):
+                    console.print("[dim]Чат ещё не сохранён (нет ни одного обмена).[/]"); continue
+                new = chat_store.toggle_favorite(tid)
+                console.print(f"[yellow]★ избранное: {'включено' if new else 'выключено'}[/]")
+                continue
+            if low == "/compress" or low.startswith("/compress "):
+                parts = query.split()
+                tid = thread_id
+                if len(parts) > 1 and parts[1].isdigit():
+                    idx = int(parts[1]) - 1
+                    if 0 <= idx < len(chat_list):
+                        tid = chat_list[idx]["thread_id"]
+                with console.status("[cyan]Сжимаю чат в саммари…", spinner="dots"):
+                    s = await _compress_thread(tid)
+                if s:
+                    console.print(f"[green]🗜 Чат сжат[/] [dim](полная история сохранена, саммари — индекс):[/]\n{s[:500]}")
+                    if tid == thread_id:  # текущий чат: контекст ужимаем до саммари
+                        chat_history = [{"role": "assistant", "content": f"[сжатая память]: {s}"}]
+                else:
+                    console.print("[dim]Слишком короткий чат для сжатия (нужно несколько обменов).[/]")
+                continue
+            if low.startswith("/rename "):
+                chat_store.rename(thread_id, query.split(" ", 1)[1])
+                console.print("[green]Переименовал текущий чат.[/]"); continue
             if low in ("/config", "/settings", "config"):
                 await cmd_config(); continue
             if low.startswith("/auto"):
@@ -722,6 +841,8 @@ async def main():
                 chat_history += [{"role": "user", "content": query},
                                  {"role": "assistant", "content": answer}]
                 chat_history = chat_history[-20:]
+                # Постоянный лог чата (история тредов /chats: заголовок, время, полная история).
+                chat_store.record_turn(thread_id, user_id, query, answer)
                 render_result(result)
                 di, do = tracker.input - pre_in, tracker.output - pre_out
                 add_alltime(di, do, tracker.calls - pre_calls)
