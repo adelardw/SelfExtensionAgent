@@ -33,17 +33,22 @@ from .memory.embedder import build_embedder, cosine
 CODEBOOK_FILE = Path(os.getenv("AGENT_INTENT_CODEBOOK") or "data/intent_codebook.json")
 
 
-def _cfg_min_sim() -> float:
-    # Калибровано на route_eval (102 кейса): 0.45→acc 78%/fallback 46%; 0.30→acc 93%/fallback 16%/
-    # web_grounding recall 43%→82%, без перекрёстных ошибок. Конфигурируемо (тюнинг kNN на корпусе).
+def _cfg_intent() -> dict:
     try:
         from omegaconf import OmegaConf
-        return float((OmegaConf.load("config.yml").get("intent", {}) or {}).get("min_sim", 0.30))
+        c = OmegaConf.load("config.yml").get("intent", {}) or {}
+        return {"min_sim": float(c.get("min_sim", 0.30)),
+                "per_label": dict(c.get("min_sim_per_label", {}) or {})}
     except Exception:  # noqa: BLE001
-        return 0.30
+        return {"min_sim": 0.30, "per_label": {}}
 
 
-MIN_SIM = _cfg_min_sim()  # ниже порога — «не уверен» → fallback на регэксп/рассуждение
+# Калибровано на route_eval: глоб. порог 0.45→0.30 (acc 78→93%); PER-LABEL порог для
+# web_grounding ниже (0.23) — его ошибки почти все «None», не кросс → ниже порог конвертирует
+# None→web_grounding почти без риска перепутать класс (recall 76→87%, self_contained цел).
+_INTENT_CFG = _cfg_intent()
+MIN_SIM = _INTENT_CFG["min_sim"]                     # глобальный порог «уверенности»
+MIN_SIM_PER_LABEL = _INTENT_CFG["per_label"]         # переопределения на лейбл (тюнинг kNN на корпусе)
 MAX_PER_LABEL = 60      # потолок выученных экземпляров на лейбл (анти-переполнение, LRU по ts)
 
 LABELS = ("web_grounding", "physical_browser", "play_media", "self_contained")
@@ -196,7 +201,8 @@ class IntentRouter:
             if lbl in per_label and s > per_label[lbl]:
                 per_label[lbl] = s   # 1-NN на лейбл (макс. близость к классу) — робастно на малом кодбуке
         best = max(per_label, key=per_label.get)
-        if per_label[best] < MIN_SIM:
+        thr = MIN_SIM_PER_LABEL.get(best, MIN_SIM)  # per-label порог (web_grounding ниже)
+        if per_label[best] < thr:
             return None  # не уверен → fallback
         return {"label": best, "score": per_label[best], "scores": per_label}
 

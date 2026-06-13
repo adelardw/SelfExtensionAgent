@@ -34,7 +34,9 @@ agent:
   max_output_tokens: 8000     # потолок ВЫХОДА одного LLM-вызова: structured-output (decompose/…) не должен обрезаться (LengthFinishReasonError) — thinking-модели тратят output на размышление
   llm_timeout: 60             # потолок одного LLM-вызова (с): 60с = явный хэнг; внутр. дедлайн прогона успевает прерваться до eval-враппера
 intent:
-  min_sim: 0.30               # порог уверенности intent-роутера (cosine-kNN); калибровано route_eval (102 кейса): acc 93%, fallback 16%. Ниже — fallback на регэксп
+  min_sim: 0.30               # глоб. порог уверенности intent-роутера (cosine-kNN); калибровано route_eval. Ниже — fallback на регэксп
+  min_sim_per_label:          # PER-LABEL переопределения (тюнинг по confusion-структуре)
+    web_grounding: 0.23       # ниже: его промахи почти все «None» (не кросс) → ловим больше grounding без риска перепутать (recall 76→87%)
 checkpointer:
   backend: sqlite
   sqlite_path: data/checkpoints.db
