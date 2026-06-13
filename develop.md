@@ -45,13 +45,19 @@ similarity (`prompt_store.py:181`); (5) `memory.embeddings:false` — recall н�
 только персона (score 0.000), релевантный → +эпизоды (0.429). Тесты: `tests/test_recall_gate.py`
 (5 кейсов). Глубже — тулы `search_memory`/`recall_history` (не тронуты).
 
-### Thread 2 — GraphRAG-lite (НЕ второй LightRAG)
-Densify без LLM: `add_fact` связывает с топ-N фактов по cosine (`fact↔fact`). Spreading
-activation в recall: seed=top-vector-hits → 1–2 хопа `neighbors` (per-user!) с hop-decay →
-merge `seed_sim+λ·proximity` → бюджет-пак. Конфиг `memory.graph_hops/graph_decay`.
-**Done:** мультихоп достаёт связанное, чего не видит flat; write-cost не вырос; A/B recall.
-Тест: `tests/test_memory_graph.py`. **PII-РИСК (см. обсуждение):** хопы РАСШИРЯЮТ
-recall-поверхность → гейт Thread 1 + строгая user_id-изоляция рёбер обязательны.
+### Thread 2 — GraphRAG-lite (НЕ второй LightRAG)   ✅ СДЕЛАНО (2026-06-13)
+Densify без LLM/сети: `add_fact._densify_fact` связывает новый факт с топ-3 фактов по
+cosine≥0.6 (`fact↔fact similar`), сравнивая уже сохранённые векторы. Spreading-activation:
+`_graph_boost` расходится от РЕЛЕВАНТНЫХ эпизод-сидов (rel≥graph_seed_min) по `neighbors`
+(per-user!) с decay → boost фактов/выводов в `_rank_facts`+reflections. Конфиг
+`graph_hops=1/graph_decay=0.6/graph_seed_min=0.3` (в конструкторе стора). Тесты:
+`tests/test_memory_graph.py` (5). **PII-контейнмент доказан** (`test_graph_no_pull_when_query_irrelevant`):
+нерелевантный запрос → эпизод НЕ сид → связанное НЕ тянется; рёбра per-user.
+**ЧЕСТНО о ценности:** с включёнными эмбеддингами семантический recall САМ ловит
+лексически-далёкое-но-близкое-по-смыслу → маржинальный выигрыш graph-boost только для
+НЕ-семантических связей (факт, выведенный в релевантном эпизоде, далёкий по смыслу). Механизм
+доказан детерминированно (`test_graph_boost_lifts_connected_fact`); live — без регресса.
+ОТКРЫТО: graph-pull эпизодов вне top-k (сейчас boost только факты/выводы); fact-seeds (>1 хоп).
 
 ### Thread 3a — kNN routing мягких сигналов (безопасно)
 `src/intent.py` `IntentClassifier` (exemplar-стор, cosine-kNN, растёт из журнала, cold-start
