@@ -36,10 +36,13 @@ instead of answering "couldn't determine"). L2/L3 (8%/8%) are the ceiling of thi
 (multi-hop + files). Context: GPT-4+plugins score ~15% on GAIA; top agents ~40–50% on L1 only.
 Reproduce: `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
 
-**Universal intent router** (`src/eval/route_eval.py`, 410 labeled multilingual cases, held out
-of the seed): **94%** overall — `play_media` 100%, `physical_browser` 97%, `self_contained` 93%,
-`web_grounding` 87%. Multilingual via embeddings (es/de/fr/… outside the seed are routed
-correctly). Reproduce: `python -m src.eval.route_eval`.
+**Universal intent router** (`src/eval/route_eval.py`, 570 labeled multilingual cases, ~100/class,
+held out of the seed): **89.3%** overall — `media_control` 93%, `physical_browser` 96%,
+`self_contained` 91%, `web_grounding` 86%, `play_media` 80%. Multilingual via embeddings, incl.
+**ja/zh/ar/ko/hi** outside the seed. (`play`↔`media_control` are semantically close → ~20% of
+play routes to media_control, but a misrouted play still gets browser hands and the act prompt
+plays — only the deterministic nudge is lost; pauses now route correctly instead of auto-playing.)
+Reproduce: `python -m src.eval.route_eval`.
 
 **Amortization** (`scripts/amortize_bench.py`): warm pass **−13% tokens with quality 78%→98%**
 (n=4 — illustrative, not statistically strong). **Tests:** 272, mostly offline (no LLM).
@@ -63,12 +66,13 @@ correctly). Reproduce: `python -m src.eval.route_eval`.
 - **Universal intent router (any language)** (`src/intent.py`) — front-of-pipeline signals (needs
   web grounding / physical browser / media playback) are decided by an embedding-kNN "route
   codebook", not Russian-lexicon regexes: multilingual (es/de/fr/… caught via embeddings); the
-  regex remains as fallback and as an anti-hallucination safeguard (web-grounding = regex OR
-  classifier — the safeguard isn't weakened, plus other languages). The codebook **grows from the
-  feedback loop** (validated run → the route that worked), **reuses the query embedding from
-  recall** (zero extra calls in the hot path), is pinned per model (model change → re-seed).
-  Statistical eval: `python -m src.eval.route_eval` (410 labeled multilingual cases, 100+/class):
-  **accuracy 94%** (play 100% · physical 97% · self_contained 93% · web_grounding 87%). The route
+  routing regexes are **removed** — the classifier alone decides, in any language (output-parsing
+  regexes for fabricated URLs / degenerate repeats / paywalls stay; those aren't the user's
+  language). The codebook **grows from the feedback loop** (validated run → the route that worked),
+  **reuses the query embedding from recall** (zero extra calls in the hot path), is pinned per model
+  (model change → re-seed). A 5th label `media_control` (pause/stop/volume) keeps "pause" from
+  triggering auto-play. Statistical eval: `python -m src.eval.route_eval` (570 cases, ~100/class,
+  incl. ja/zh/ar): **accuracy 89.3%** (media_control 93 · physical 96 · self 91 · web 86 · play 80). The route
   corpus (pos/neg, reward 0/1) accumulates for a future trained local head (kNN tuning / CatBoost
   / fine-tuned embedder).
 - **Experience amortization (recipes + habits + collective tier)** — a successful expensive run
@@ -264,7 +268,7 @@ python -m src.tools.openclaw_import https://github.com/openclaw/openclaw/tree/ma
 # Verify the amortization thesis (PAID live run, ~1–2 cents):
 python scripts/amortize_bench.py
 
-# Statistical eval of the universal intent router (410 labeled multilingual cases):
+# Statistical eval of the universal intent router (570 labeled multilingual cases):
 python -m src.eval.route_eval
 
 # GAIA held-out (fault-tolerant — survives a native crash, resumed from the JSONL):
@@ -278,7 +282,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ```
 Graph-build tests require an API key (the LLM is built on import), the rest run offline.
 A quick pass of everyday scenarios through the real graph: `python -m src.eval.daily_eval [N]`.
-Statistical routing eval (multilingual, 410 cases): `python -m src.eval.route_eval`.
+Statistical routing eval (multilingual, 570 cases): `python -m src.eval.route_eval`.
 
 ## Structure
 
@@ -316,7 +320,7 @@ main.py / bot.py      REPL / Telegram
 
 Implemented and tested (272 tests): the core, **6 thinking modes** (incl. act with
 auto-escalation; **heavy review earned by runtime evidence**), a **universal embedding intent
-router** (any language, route_eval 94%), **conditional recall + GraphRAG-lite memory**, per-step
+router** (any language, route_eval 89.3%), **conditional recall + GraphRAG-lite memory**, per-step
 execution with **action grounding** + **context masking**, memory + **memory-as-tool (3
 tiers)** + **a LightRAG knowledge base** (+AutoRAG), personalization + **an interaction journal**,
 **per-user self-improvement** + measurable accept/revert, **experience amortization**
@@ -373,10 +377,13 @@ UI automation outside macOS.
 Контекст: GPT-4+плагины дают ~15% на GAIA; топ-агенты ~40–50% только на L1. Воспроизведение:
 `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
 
-**Универсальный роутер интентов** (`src/eval/route_eval.py`, 410 размеченных мультиязычных кейсов,
-вне seed): **94%** overall — `play_media` 100%, `physical_browser` 97%, `self_contained` 93%,
-`web_grounding` 87%. Мультиязычность через эмбеддинги (es/de/fr/… вне seed маршрутизируются
-корректно). Воспроизведение: `python -m src.eval.route_eval`.
+**Универсальный роутер интентов** (`src/eval/route_eval.py`, 570 размеченных мультиязычных кейсов,
+~100/класс, вне seed): **89.3%** overall — `media_control` 93%, `physical_browser` 96%,
+`self_contained` 91%, `web_grounding` 86%, `play_media` 80%. Мультиязычность через эмбеддинги, вкл.
+**ja/zh/ar/ko/hi** вне seed. (`play`↔`media_control` семантически близки → ~20% play уходит в
+media_control, но мисроут play не ломает воспроизведение — браузер-руки даются, act играет;
+теряется лишь детерминированный дожим; зато «пауза» больше не запускает плей.)
+Воспроизведение: `python -m src.eval.route_eval`.
 
 **Амортизация** (`scripts/amortize_bench.py`): тёплый проход **−13% токенов при качестве 78%→98%**
 (n=4 — иллюстративно, статистически не сильно). **Тесты:** 272, в основном оффлайн (без LLM).
@@ -398,14 +405,19 @@ UI automation outside macOS.
   **ЗАРАБАТЫВАЕТСЯ** рантайм-evidence (артефакт большой+многошаговый+rubric), а не угадывается
   наперёд — мисс-класс «вверх» в heavy самый дорогой, поэтому платим за ревью по факту.
 - **Универсальный роутер интентов (любой язык)** (`src/intent.py`) — сигналы фронта (нужен
-  веб-грунтинг / физ-браузер / воспроизведение) определяет embedding-kNN «кодбук маршрутов»,
-  а не русско-лексиконные регэкспы: мультиязычно (es/de/fr/… ловятся через эмбеддинги),
-  регэксп остаётся как fallback и как анти-галлюцинационная страховка (web-грунтинг =
-  регэксп ИЛИ классификатор — страховка не ослабляется, плюс другие языки). Кодбук **растёт из фидбек-лупа**
+  веб-грунтинг / физ-браузер / воспроизведение / контроль плеера) определяет embedding-kNN
+  «кодбук маршрутов», а не русско-лексиконные регэкспы. **Регэкспы routing'а УДАЛЕНЫ** —
+  сигналы (`_needs_web_grounding` / `_wants_physical_browser` / `_is_play_intent`) теперь
+  идут ТОЛЬКО через классификатор: мультиязычно (es/de/fr/ja/zh/ar/… ловятся через
+  эмбеддинги, без лексиконных костылей). Кодбук **растёт из фидбек-лупа**
   (валидированный прогон → сработавший маршрут), **переиспользует эмбеддинг запроса из recall**
-  (ноль лишних вызовов в hot-path), фиксирован по модели (смена → пере-seed). Стат-оценка
-  `python -m src.eval.route_eval` (410 размеченных мультиязычных кейсов, 100+/класс):
-  **accuracy 94%** (play 100% · physical 97% · self_contained 93% · web_grounding 87%).
+  (ноль лишних вызовов в hot-path), фиксирован по модели (смена → пере-seed). 5-й лейбл
+  **media_control** (пауза/стоп/громкость) отделён от play_media, чтобы «поставь паузу» НЕ
+  триггерил авто-дожим воспроизведения. Стат-оценка
+  `python -m src.eval.route_eval` (570 размеченных мультиязычных кейсов вкл. JA/ZH/AR/KO/HI,
+  100+/класс): **accuracy 89.3%** [Wilson 86.5–91.6%] (media_control 93% · physical 96% ·
+  self_contained 91% · web_grounding 86% · play_media 80% — разменивается с media_control,
+  семантически близким).
   Корпус маршрутов (pos/neg, reward 0/1) копится для будущего обучения локального head
   (kNN-тюнинг / CatBoost / fine-tuned эмбеддер).
 - **Амортизация опыта (рецепты + привычки + коллективный ярус)** — успешный дорогой
@@ -605,7 +617,7 @@ python -m src.tools.openclaw_import https://github.com/openclaw/openclaw/tree/ma
 # Проверка тезиса амортизации (ПЛАТНЫЙ живой прогон, ~1–2 цента):
 python scripts/amortize_bench.py
 
-# Стат-оценка universal intent-роутера (410 размеченных мультиязычных кейсов):
+# Стат-оценка universal intent-роутера (570 размеченных мультиязычных кейсов):
 python -m src.eval.route_eval
 
 # GAIA held-out (отказоустойчиво — переживает нативный краш, резюмируется по JSONL):
@@ -619,7 +631,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ```
 Тесты сборки графа требуют API-ключ (LLM строится на импорте), остальные — оффлайн.
 Быстрый прогон повседневных сценариев через реальный граф: `python -m src.eval.daily_eval [N]`.
-Стат-оценка роутинга (мультиязык, 410 кейсов): `python -m src.eval.route_eval`.
+Стат-оценка роутинга (мультиязык, 570 кейсов): `python -m src.eval.route_eval`.
 
 ## Структура
 
@@ -657,7 +669,7 @@ main.py / bot.py      REPL / Telegram
 
 Реализовано и протестировано (272 теста): ядро, **6 режимов мышления** (вкл. act с
 автоэскалацией; **heavy-ревью зарабатывается рантайм-evidence**), **универсальный
-embedding-роутер интентов** (любой язык, route_eval 94%), **условный recall + GraphRAG-lite
+embedding-роутер интентов** (любой язык, route_eval 89.3%), **условный recall + GraphRAG-lite
 память**, по-пунктовое исполнение с **заземлением действий** + **маскинг контекста**, память +
 **память-как-tool (3 яруса)** + **база знаний на LightRAG** (+AutoRAG), персонализация +
 **журнал взаимодействий**, **per-user само-улучшение** + измеримый accept/revert,
@@ -670,9 +682,9 @@ HITL + **анти-injection в выводах тулов и AutoRAG** + запр
 трейсинг/самодиагностика, device on-demand (кроссплатформенно), DeepAgent, eval-харнессы
 (daily/GAIA/AssistantBench/amortize), REPL/Telegram/FastAPI.
 
-Отложено (см. `ARCHITECTURE.md`): обучаемая локальная модель выбора маршрута (kNN-тюнинг /
-CatBoost на накопленных примерах); замена жёсткой регэксп-проверки «нужен ли веб-поиск» на
-обучаемый классификатор — но только после проверки, что это не увеличит долю выдуманных ответов;
+Отложено (см. `ARCHITECTURE.md`): обучаемая локальная модель выбора маршрута поверх
+накопленного корпуса pos/neg (kNN-тюнинг / CatBoost / fine-tuned эмбеддер) — сейчас роутер
+работает на seed-кодбуке + фидбек-лупе без обучаемого head;
 подъём L2/L3 GAIA (многошаговые задачи + файлы — потолок дешёвого тира); свободная динамическая
 композиция модулей (лестница act→deliberate — первый шаг); наследование сильных MCP через
 сравнение «до/после»; обезличивание сохранённых сценариев (рецептов) перед тем как делиться ими
