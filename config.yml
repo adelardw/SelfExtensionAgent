@@ -33,6 +33,8 @@ agent:
   max_run_seconds: 150        # wall-clock дедлайн прогона (сек) — стоп от медленного heavy
   max_output_tokens: 8000     # потолок ВЫХОДА одного LLM-вызова: structured-output (decompose/…) не должен обрезаться (LengthFinishReasonError) — thinking-модели тратят output на размышление
   llm_timeout: 60             # потолок одного LLM-вызова (с): 60с = явный хэнг; внутр. дедлайн прогона успевает прерваться до eval-враппера
+intent:
+  min_sim: 0.30               # порог уверенности intent-роутера (cosine-kNN); калибровано route_eval (102 кейса): acc 93%, fallback 16%. Ниже — fallback на регэксп
 checkpointer:
   backend: sqlite
   sqlite_path: data/checkpoints.db
