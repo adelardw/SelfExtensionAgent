@@ -18,14 +18,16 @@ import sqlite3
 import time
 from pathlib import Path
 
-from fastapi import FastAPI
+import tempfile
+
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 
-from . import chat_store
-from .agent import build_graph, memory_store
+from . import chat_store, cli_config, knowledge_base, llm, media
+from .agent import build_graph, memory_store, rebuild_llms
 from .improve import graph_backward
 from .tracing import diagnose, trace_store
 
@@ -78,12 +80,20 @@ async def _build_graph_async() -> None:
 # Рабочий буфер связности реплик: последние N сообщений треда (берём из
 # персистентного chat_store, поверх долгой памяти). Долгая память остаётся опорой.
 _HISTORY_LIMIT = 20
+_THREAD_FILES: dict[str, list[str]] = {}  # thread_id → приложенные файлы (сессионные вложения)
 
 
 class ChatIn(BaseModel):
     user_id: str
     query: str
     thread_id: str | None = None  # тред-разговор (GUI); по умолчанию = user_id (обратная совместимость)
+
+
+class SettingsIn(BaseModel):
+    provider: str | None = None      # "openrouter" | "ollama"
+    model: str | None = None
+    base_url: str | None = None
+    api_key: str | None = None
 
 
 @app.on_event("startup")
@@ -117,8 +127,18 @@ async def chat(inp: ChatIn) -> dict:
     # История треда — из ПЕРСИСТЕНТНОГО chat_store (переживает перезапуск сервера),
     # последние N реплик как рабочий буфер связности.
     history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
+    # Приложенные к треду файлы → подмешиваем их содержимое/описание в запрос.
+    query = inp.query
+    files = _THREAD_FILES.get(tid)
+    if files:
+        try:
+            ctx = await asyncio.to_thread(media.attachment_context, files, inp.query)
+            if ctx:
+                query = f"{inp.query}\n\n=== ПРИЛОЖЕННЫЕ ФАЙЛЫ ===\n{ctx}"
+        except Exception as e:  # noqa: BLE001
+            print(f"[chat] attachment_context failed: {e}")
     r = await _graph.ainvoke(
-        {"query": inp.query, "user_id": inp.user_id,
+        {"query": query, "user_id": inp.user_id, "session_id": tid,
          "chat_history": history + [{"role": "user", "content": inp.query}]},
         config=cfg,
     )
@@ -160,6 +180,62 @@ def chat_favorite(thread_id: str) -> dict:
 def chat_delete(thread_id: str) -> dict:
     chat_store.delete_thread(thread_id)
     return {"deleted": True}
+
+
+@app.post("/upload")
+async def upload(thread_id: str, file: UploadFile = File(...)) -> dict:
+    """Приложить документ/файл к треду (pdf/doc/image/audio/…) — мультимодальное вложение."""
+    suffix = "".join(c for c in (file.filename or "file") if c.isalnum() or c in "._- ")
+    tmp = Path(tempfile.gettempdir()) / f"selfext_{thread_id}_{suffix}"
+    tmp.write_bytes(await file.read())
+    try:
+        stored = await asyncio.to_thread(knowledge_base.add_session_file, thread_id, str(tmp))
+    except Exception:  # noqa: BLE001
+        stored = str(tmp)
+    _THREAD_FILES.setdefault(thread_id, []).append(stored)
+    return {"name": file.filename, "count": len(_THREAD_FILES[thread_id])}
+
+
+@app.post("/transcribe")
+async def transcribe(file: UploadFile = File(...)) -> dict:
+    """Запись с микрофона → текст (STT). Фронт пишет аудио и шлёт сюда."""
+    ext = Path(file.filename or "audio.webm").suffix or ".webm"
+    tmp = Path(tempfile.gettempdir()) / f"selfext_rec{ext}"
+    tmp.write_bytes(await file.read())
+    try:
+        text = await asyncio.to_thread(media.transcribe_audio, str(tmp))
+        return {"text": text or ""}
+    except Exception as e:  # noqa: BLE001
+        return {"text": "", "error": f"{type(e).__name__}: {e}"}
+
+
+@app.get("/settings")
+def get_settings() -> dict:
+    """Текущие настройки провайдера для панели настроек GUI (ключ не раскрываем)."""
+    return {
+        "provider": cli_config.get_cli("provider") or _cfg.get("provider", "openrouter"),
+        "model": cli_config.get_cli("model") or "",
+        "base_url": cli_config.get_cli("base_url") or "",
+        "api_key_source": llm.api_key_source(),
+        "active": llm.active_summary(),
+    }
+
+
+@app.post("/settings")
+def post_settings(s: SettingsIn) -> dict:
+    """Сохранить провайдер/endpoint/ключ (persist в config.local.yml) + живая валидация."""
+    if s.provider is not None:
+        cli_config.set_cli("provider", s.provider)
+    if s.model is not None:
+        cli_config.set_cli("model", s.model)
+    if s.base_url is not None:
+        cli_config.set_cli("base_url", s.base_url or None)
+    if s.api_key is not None:
+        cli_config.set_cli("api_key", s.api_key or None)
+    llm.set_provider(cli_config.get_cli("provider"), cli_config.get_cli("model"))
+    rebuild_llms()
+    ok, msg = llm.validate_credentials()
+    return {"ok": ok, "message": msg, "active": llm.active_summary(), "api_key_source": llm.api_key_source()}
 
 
 @app.get("/diagnose")

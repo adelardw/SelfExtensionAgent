@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Plus, ArrowUp, Star, X, PanelLeft } from "lucide-react"
+import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, FileText } from "lucide-react"
 
 type Thread = { thread_id: string; title: string; favorite?: number }
 type Msg = { role: "user" | "assistant"; content: string }
+type Cfg = { provider?: string; base_url?: string; api_key_source?: string; active?: string }
 
 const uid = (() => {
   let u = localStorage.getItem("agent_uid")
@@ -35,20 +36,25 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [online, setOnline] = useState(false)
   const [sideOpen, setSideOpen] = useState(true)
+  const [attached, setAttached] = useState<string[]>([])
+  const [recording, setRecording] = useState(false)
+  const [transcribing, setTranscribing] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
   const ta = useRef<HTMLTextAreaElement>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const recRef = useRef<MediaRecorder | null>(null)
 
   const loadThreads = useCallback(async () => {
     try { const r = await fetch(`/chats?user_id=${uid}`); setThreads(await r.json()); setOnline(true) }
     catch { setOnline(false) }
   }, [])
-
   useEffect(() => { loadThreads(); const t = setInterval(loadThreads, 15000); return () => clearInterval(t) }, [loadThreads])
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" }) }, [msgs])
 
-  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("Новый чат"); setMode(""); ta.current?.focus() }
+  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("Новый чат"); setMode(""); setAttached([]); ta.current?.focus() }
   const openThread = async (id: string) => {
-    setCur(id)
+    setCur(id); setAttached([])
     try { const d = await (await fetch(`/chats/${id}`)).json(); setTitle(d.thread?.title || "Чат"); setMsgs(d.messages || []) }
     catch { setMsgs([]) }
   }
@@ -56,10 +62,12 @@ export default function App() {
     e.stopPropagation(); await fetch(`/chats/${id}`, { method: "DELETE" })
     if (id === cur) newChat(); else loadThreads()
   }
-  const send = async () => {
-    const text = input.trim(); if (!text || busy) return
+
+  const sendText = async (text: string) => {
+    text = text.trim(); if (!text || busy) return
     setBusy(true); setInput(""); if (ta.current) ta.current.style.height = "auto"
     setMsgs(m => [...m, { role: "user", content: text }, { role: "assistant", content: "…" }])
+    setAttached([])
     try {
       const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, thread_id: cur, query: text }) })
       if (!r.ok) throw new Error("HTTP " + r.status)
@@ -70,13 +78,40 @@ export default function App() {
       setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: "⚠ ошибка: " + e.message }; return c })
     } finally { setBusy(false); ta.current?.focus() }
   }
+  const send = () => sendText(input)
   const onKey = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }
   const grow = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 200) + "px" }
+
+  const onFiles = async (files: FileList | null) => {
+    if (!files) return
+    for (const f of Array.from(files)) {
+      const fd = new FormData(); fd.append("file", f)
+      try { await fetch(`/upload?thread_id=${cur}`, { method: "POST", body: fd }); setAttached(a => [...a, f.name]) } catch { /* ignore */ }
+    }
+  }
+  const startRec = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mr = new MediaRecorder(stream); const chunks: Blob[] = []
+      mr.ondataavailable = e => chunks.push(e.data)
+      mr.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const fd = new FormData(); fd.append("file", new Blob(chunks, { type: "audio/webm" }), "rec.webm")
+        setTranscribing(true)
+        try { const d = await (await fetch("/transcribe", { method: "POST", body: fd })).json(); if (d.text) setInput(v => (v ? v + " " : "") + d.text) }
+        finally { setTranscribing(false); setTimeout(() => ta.current && grow(ta.current), 0) }
+      }
+      mr.start(); recRef.current = mr; setRecording(true)
+    } catch { alert("Нет доступа к микрофону") }
+  }
+  const stopRec = () => { recRef.current?.stop(); setRecording(false) }
+
   const prompts = ["Сравни 3 ноутбука до 100к и посоветуй", "Объясни attention в трансформере со ссылками", "Посчитай сложный процент по вкладу"]
+  const iconBtn = "grid place-items-center w-8 h-8 rounded-lg transition-colors shrink-0"
 
   return (
     <div className="flex h-full" style={{ background: "var(--bg)" }}>
-      {/* Sidebar — поверхность светлее фона + мягкая тень: разделение цветом, не линией */}
+      {/* Sidebar */}
       <motion.aside initial={false} animate={{ width: sideOpen ? 256 : 0 }} transition={{ duration: 0.28, ease: [0.22, 0.7, 0.2, 1] }}
         className="relative z-10 shrink-0 overflow-hidden" style={{ background: "var(--surface)", boxShadow: "var(--sh2)" }}>
         <div className="w-64 h-full flex flex-col">
@@ -112,22 +147,26 @@ export default function App() {
               )
             })}
           </div>
-          <div className="flex items-center gap-2 px-5 py-3.5 text-[11px] font-mono" style={{ color: "var(--faint)" }}>
-            <motion.span className="w-[7px] h-[7px] rounded-full" style={{ background: online ? "#7e8a4e" : "var(--faint)" }}
-              animate={online ? { opacity: [1, 0.5, 1] } : {}} transition={{ duration: 2.5, repeat: Infinity }} />
-            {online ? uid : "offline"}
+          <div className="flex items-center gap-2 px-4 py-3" style={{ color: "var(--faint)" }}>
+            <button onClick={() => setShowSettings(true)} className={iconBtn}
+              onMouseEnter={e => (e.currentTarget.style.background = "var(--bg)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+              title="Настройки"><Settings size={16} /></button>
+            <span className="flex items-center gap-1.5 text-[11px] font-mono truncate">
+              <span className="w-[7px] h-[7px] rounded-full" style={{ background: online ? "#7e8a4e" : "var(--faint)" }} />
+              {online ? uid : "offline"}
+            </span>
           </div>
         </div>
       </motion.aside>
 
       {/* Main */}
       <main className="flex flex-col flex-1 min-w-0 min-h-0">
-        <div className="flex items-center gap-3 px-7 pt-5 pb-3">
-          <button onClick={() => setSideOpen(s => !s)} className="grid place-items-center -ml-1.5 w-8 h-8 rounded-lg transition-colors"
-            style={{ color: "var(--muted)" }} onMouseEnter={e => (e.currentTarget.style.background = "var(--surface)")}
-            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}><PanelLeft size={18} /></button>
+        <div className="flex items-center gap-2 px-6 pt-4 pb-2">
+          <button onClick={() => setSideOpen(s => !s)} className={iconBtn} style={{ color: "var(--muted)" }}
+            onMouseEnter={e => (e.currentTarget.style.background = "var(--surface)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+            title="Свернуть панель"><PanelLeft size={17} /></button>
           <span className="text-[14px] font-semibold truncate" style={{ color: "var(--ink)" }}>{title}</span>
-          {mode && <span className="ml-auto text-[11px] font-medium px-2.5 py-1 rounded-full" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>{mode}</span>}
+          {mode && <span className="ml-auto text-[11px] font-medium px-2 py-0.5 rounded-md" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>{mode}</span>}
         </div>
 
         <div ref={scroller} className="flex-1 overflow-y-auto min-h-0">
@@ -140,9 +179,8 @@ export default function App() {
                 <p className="mt-3 text-[15px]" style={{ color: "var(--muted)" }}>Поиск, анализ, вычисления, браузер — спокойно и по делу. И я запомню тебя.</p>
                 <div className="mt-7 grid gap-2.5 max-w-[480px]">
                   {prompts.map((p, i) => (
-                    <motion.button key={i} whileHover={{ y: -2 }} whileTap={{ scale: 0.99 }}
-                      onClick={() => { setInput(p); setTimeout(() => ta.current && grow(ta.current), 0); ta.current?.focus() }}
-                      className="text-left px-4 py-3.5 text-[13.5px] rounded-2xl transition-shadow"
+                    <motion.button key={i} whileHover={{ y: -2 }} whileTap={{ scale: 0.99 }} onClick={() => sendText(p)}
+                      className="text-left px-4 py-3.5 text-[13.5px] rounded-lg transition-shadow"
                       style={{ background: "var(--surface2)", color: "var(--ink)", boxShadow: "var(--sh1)" }}
                       onMouseEnter={e => (e.currentTarget.style.boxShadow = "var(--sh2)")}
                       onMouseLeave={e => (e.currentTarget.style.boxShadow = "var(--sh1)")}>{p}</motion.button>
@@ -154,18 +192,14 @@ export default function App() {
             <div className="max-w-3xl mx-auto px-7 py-8">
               <AnimatePresence initial={false}>
                 {msgs.map((m, i) => (
-                  <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: [0.22, 0.7, 0.2, 1] }} className="pb-7">
-                    {m.role === "user" ? (
-                      <div className="flex justify-end">
-                        <div className="max-w-[85%] px-4 py-3 rounded-3xl rounded-br-lg text-[14.5px] leading-relaxed whitespace-pre-wrap"
-                          style={{ background: "var(--accent)", color: "var(--accent-fg)", boxShadow: "var(--sh1)" }}>{m.content}</div>
-                      </div>
-                    ) : (
-                      <div>
-                        <div className="text-[11px] font-bold tracking-wide mb-2.5" style={{ color: "var(--faint)" }}>АГЕНТ</div>
-                        {m.content === "…" ? <Dots /> : <div className="md" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: md(m.content) }} />}
-                      </div>
-                    )}
+                  <motion.div key={i} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22, ease: [0.22, 0.7, 0.2, 1] }} className="pb-9">
+                    <div className="text-[11px] font-bold tracking-[0.09em] mb-2.5"
+                      style={{ color: m.role === "user" ? "var(--muted)" : "var(--accent)" }}>
+                      {m.role === "user" ? "ВЫ" : "АГЕНТ"}
+                    </div>
+                    {m.role === "user"
+                      ? <div className="text-[15px] leading-relaxed whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{m.content}</div>
+                      : m.content === "…" ? <Dots /> : <div className="md" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: md(m.content) }} />}
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -174,18 +208,96 @@ export default function App() {
         </div>
 
         <div className="px-7 pb-7 pt-2">
-          <div className="max-w-3xl mx-auto flex items-end gap-2.5 rounded-[20px] px-4 py-3 transition-shadow"
-            style={{ background: "var(--surface2)", boxShadow: "var(--sh3)" }}>
-            <textarea ref={ta} rows={1} value={input} placeholder="Сообщение агенту…"
-              onChange={e => { setInput(e.target.value); grow(e.target) }} onKeyDown={onKey}
-              className="flex-1 resize-none bg-transparent outline-none text-[14.5px] leading-relaxed py-1.5 max-h-[200px]" style={{ color: "var(--ink)" }} />
-            <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={busy || !input.trim()}
-              className="grid place-items-center w-9 h-9 rounded-2xl shrink-0 transition-all disabled:opacity-35"
-              style={{ background: "var(--accent)", color: "var(--accent-fg)", boxShadow: input.trim() ? "var(--sh1)" : "none" }}><ArrowUp size={17} strokeWidth={2.5} /></motion.button>
+          <div className="max-w-3xl mx-auto">
+            {attached.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2 px-1">
+                {attached.map((n, i) => (
+                  <span key={i} className="flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg" style={{ background: "var(--accent-soft)", color: "var(--ink)" }}>
+                    <FileText size={12} /> {n}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex items-end gap-2 rounded-xl px-3 py-2.5" style={{ background: "var(--surface2)", boxShadow: "var(--sh3)" }}>
+              <input ref={fileInput} type="file" multiple className="hidden" onChange={e => { onFiles(e.target.files); e.target.value = "" }} />
+              <button onClick={() => fileInput.current?.click()} className={iconBtn} style={{ color: "var(--muted)" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "var(--surface)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                title="Прикрепить файл"><Paperclip size={18} /></button>
+              <textarea ref={ta} rows={1} value={input} placeholder={transcribing ? "распознаю речь…" : "Сообщение агенту…"}
+                onChange={e => { setInput(e.target.value); grow(e.target) }} onKeyDown={onKey}
+                className="flex-1 resize-none bg-transparent outline-none text-[14.5px] leading-relaxed py-1.5 max-h-[200px]" style={{ color: "var(--ink)" }} />
+              <button onClick={recording ? stopRec : startRec} className={iconBtn}
+                style={{ color: recording ? "#fff" : "var(--muted)", background: recording ? "var(--accent)" : "transparent" }}
+                onMouseEnter={e => { if (!recording) e.currentTarget.style.background = "var(--surface)" }}
+                onMouseLeave={e => { if (!recording) e.currentTarget.style.background = "transparent" }}
+                title={recording ? "Остановить запись" : "Записать голос"}>{recording ? <Square size={15} fill="#fff" /> : <Mic size={18} />}</button>
+              <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={busy || !input.trim()}
+                className="grid place-items-center w-9 h-9 rounded-lg shrink-0 transition-all disabled:opacity-35"
+                style={{ background: "var(--accent)", color: "var(--accent-fg)", boxShadow: input.trim() ? "var(--sh1)" : "none" }}><ArrowUp size={17} strokeWidth={2.5} /></motion.button>
+            </div>
           </div>
         </div>
       </main>
+
+      <AnimatePresence>{showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}</AnimatePresence>
     </div>
+  )
+}
+
+function SettingsModal({ onClose }: { onClose: () => void }) {
+  const [cfg, setCfg] = useState<Cfg>({})
+  const [baseUrl, setBaseUrl] = useState("")
+  const [apiKey, setApiKey] = useState("")
+  const [provider, setProvider] = useState("openrouter")
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState("")
+  useEffect(() => { (async () => { try { const c = await (await fetch("/settings")).json(); setCfg(c); setBaseUrl(c.base_url || ""); setProvider(c.provider || "openrouter") } catch { /* */ } })() }, [])
+  const save = async () => {
+    setSaving(true); setMsg("")
+    try {
+      const body: any = { provider, base_url: baseUrl }
+      if (apiKey) body.api_key = apiKey
+      const d = await (await fetch("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json()
+      setMsg(d.message || ""); setCfg(c => ({ ...c, active: d.active, api_key_source: d.api_key_source })); setApiKey("")
+    } catch (e: any) { setMsg("ошибка: " + e.message) } finally { setSaving(false) }
+  }
+  const field = "w-full px-3 py-2.5 rounded-xl text-[13.5px] outline-none"
+  const fst = { background: "var(--surface)", color: "var(--ink)" } as React.CSSProperties
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
+      className="fixed inset-0 z-50 grid place-items-center p-5" style={{ background: "rgba(20,22,14,.5)" }}>
+      <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, opacity: 0 }} transition={{ duration: 0.2 }}
+        onClick={e => e.stopPropagation()} className="w-full max-w-[440px] rounded-3xl p-6" style={{ background: "var(--surface2)", boxShadow: "var(--sh3)" }}>
+        <div className="flex items-center mb-5">
+          <h2 className="text-[20px] font-extrabold tracking-tight" style={{ color: "var(--ink)" }}>Настройки</h2>
+          <button onClick={onClose} className="ml-auto grid place-items-center w-8 h-8 rounded-lg" style={{ color: "var(--muted)" }}><X size={18} /></button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>Провайдер</label>
+            <select value={provider} onChange={e => setProvider(e.target.value)} className={field} style={fst}>
+              <option value="openrouter">OpenRouter</option>
+              <option value="ollama">Ollama (локально)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>Endpoint (base_url)</label>
+            <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" className={field} style={fst} />
+          </div>
+          <div>
+            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>
+              API-ключ <span style={{ color: "var(--faint)", fontWeight: 400 }}>· сейчас: {cfg.api_key_source || "—"}</span>
+            </label>
+            <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="вставь ключ (необязательно)" className={field} style={fst} />
+          </div>
+          {cfg.active && <div className="text-[12px]" style={{ color: "var(--faint)" }}>Активно: {cfg.active}</div>}
+          {msg && <div className="text-[12.5px] font-medium" style={{ color: "var(--accent)" }}>{msg}</div>}
+          <motion.button whileTap={{ scale: 0.98 }} onClick={save} disabled={saving}
+            className="w-full py-2.5 rounded-xl text-[13.5px] font-semibold disabled:opacity-50"
+            style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>{saving ? "проверяю…" : "Сохранить и проверить"}</motion.button>
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
