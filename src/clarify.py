@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextvars
 import inspect
+import re
 from typing import Awaitable, Callable, Optional, Union
 
 # Ledger одного прогона. contextvar → разные запросы (в т.ч. на сервере) изолированы.
@@ -55,34 +56,51 @@ def _assume_value(item: dict) -> str:
     return opts[0] if opts else "(выбрано разумное допущение)"
 
 
+def _norm_q(q: str) -> str:
+    """Нормализация вопроса для дедупа (регистр/пунктуация/пробелы не важны)."""
+    return re.sub(r"\W+", " ", (q or "").lower()).strip()
+
+
 async def ask(items: list[dict]) -> list[dict]:
     """
     Задаёт батч вопросов через зарегистрированный канал, иначе берёт допущения.
     Возвращает (и складывает в ledger) resolved-пункты со status answered|assumed.
+    ДЕДУП: вопросы, уже отвеченные в этом прогоне (clarify_gate → потом ask_user в шаге),
+    НЕ переспрашиваются — берём ответ из ledger (status=reused). Иначе агент дублировал
+    уточнения: сначала полный батч, потом по каждому пункту отдельно.
     """
     if not items:
         return []
-    answers: Optional[list] = None
-    if _clarifier is not None:
+    prior = {_norm_q(e["question"]): e for e in ledger()
+             if e.get("status") in ("answered", "reused") and e.get("answer")}
+    ask_now = [it for it in items if _norm_q(it.get("question", "")) not in prior]
+
+    fresh: dict[str, str] = {}
+    if ask_now and _clarifier is not None:
         try:
-            res = _clarifier(items)
+            res = _clarifier(ask_now)
             answers = await res if inspect.isawaitable(res) else res
         except Exception:  # noqa: BLE001
             answers = None
+        for j, it in enumerate(ask_now):
+            a = answers[j] if answers and j < len(answers) else None
+            fresh[_norm_q(it.get("question", ""))] = str(a).strip() if a else ""
 
     resolved = []
-    for i, it in enumerate(items):
-        ans = ""
-        if answers and i < len(answers) and answers[i]:
-            ans = str(answers[i]).strip()
-        status = "answered" if ans else "assumed"
+    for it in items:
+        nq = _norm_q(it.get("question", ""))
+        if nq in prior:  # уже спрашивали в этом прогоне → переиспользуем, НЕ дублируем
+            resolved.append({"question": it.get("question", ""), "options": it.get("options", []),
+                             "answer": prior[nq]["answer"], "status": "reused"})
+            continue
+        ans = fresh.get(nq, "")
         resolved.append({
             "question": it.get("question", ""),
             "options": it.get("options", []),
             "answer": ans or _assume_value(it),
-            "status": status,
+            "status": "answered" if ans else "assumed",
         })
-    ledger().extend(resolved)
+    ledger().extend([r for r in resolved if r["status"] != "reused"])
     return resolved
 
 
