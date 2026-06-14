@@ -306,12 +306,12 @@ def cmd_usage(tracker: TokenTracker) -> None:
     at = load_alltime()
     t = Table(title="🧮 Расход токенов", border_style="magenta")
     t.add_column(""); t.add_column("вход", justify="right"); t.add_column("выход", justify="right")
-    t.add_column("вызовов", justify="right"); t.add_column("~$", justify="right")
-    t.add_row("сессия", _k(tracker.input), _k(tracker.output), str(tracker.calls), f"${tracker.cost():.4f}")
-    t.add_row("всего", _k(at['input']), _k(at['output']), str(at['calls']),
-              f"${cost_of(at['input'], at['output']):.4f}")
+    t.add_column("всего", justify="right"); t.add_column("вызовов", justify="right")
+    t.add_row("сессия", _k(tracker.input), _k(tracker.output),
+              _k(tracker.input + tracker.output), str(tracker.calls))
+    t.add_row("всего", _k(at['input']), _k(at['output']),
+              _k(at['input'] + at['output']), str(at['calls']))
     console.print(t)
-    console.print("[dim]Оценка $ по ставкам gpt-4o-mini; модели разные — это грубо.[/]")
 
 
 async def cmd_improve() -> None:
