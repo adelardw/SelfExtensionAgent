@@ -1,9 +1,11 @@
 [project]
 name = "self-extension-agent"
 version = "0.1.0"
-description = "Add your description here"
+description = "Self-extending, self-improving personal LangGraph agent"
 readme = "README.md"
 requires-python = ">=3.13"
+license = { file = "LICENSE" }   # PolyForm Noncommercial 1.0.0 — некоммерческое использование
+classifiers = ["License :: Other/Proprietary License"]
 dependencies = [
     "bm25s>=0.3.9",
     "cloakbrowser>=0.3.31",

@@ -346,6 +346,12 @@ act→deliberate ladder is the first step); inheriting strong MCPs via before/af
 anonymizing saved task playbooks (recipes) before sharing them with similar users; cross-platform
 UI automation outside macOS.
 
+## License
+
+**PolyForm Noncommercial License 1.0.0** — see [`LICENSE`](LICENSE). Free for any
+**noncommercial** purpose (personal, research, education, hobby, nonprofit/government). Commercial
+use requires a separate license from the author. Copyright © 2026 Yaroslav Sergaev (adelardw).
+
 ---
 ---
 
@@ -701,3 +707,10 @@ HITL + **анти-injection в выводах тулов и AutoRAG** + запр
 композиция модулей (лестница act→deliberate — первый шаг); наследование сильных MCP через
 сравнение «до/после»; обезличивание сохранённых сценариев (рецептов) перед тем как делиться ими
 с похожими пользователями; кроссплатформенный UI-automation вне macOS.
+
+## Лицензия
+
+**PolyForm Noncommercial License 1.0.0** — см. [`LICENSE`](LICENSE). Бесплатно для любого
+**некоммерческого** использования (личное, исследования, образование, хобби, НКО/госструктуры).
+Коммерческое использование — только по отдельной лицензии от автора.
+Copyright © 2026 Yaroslav Sergaev (adelardw).
