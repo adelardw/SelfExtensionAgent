@@ -90,7 +90,12 @@ export default function App() {
       })
       loadThreads()
     } catch (e: any) {
-      setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: "⚠ ошибка: " + e.message }; return c })
+      const net = /load failed|failed to fetch|networkerror/i.test(String(e?.message || e))
+      const note = net
+        ? "связь с агентом прервалась (сервер занят долгой задачей или перезапустился). Текст сохранён — нажми ↑, чтобы повторить."
+        : String(e?.message || e)
+      setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: "⚠ " + note }; return c })
+      setInput(text)  // вернуть текст для повтора
     } finally { setBusy(false); ta.current?.focus() }
   }
   const send = () => sendText(input)
@@ -380,14 +385,14 @@ function Dropdown({ value, onChange, options }: { value: string; onChange: (v: s
 const THINK_WORDS = ["Думаю", "Вникаю", "Ищу", "Считаю", "Соображаю", "Кручу шестерёнки", "Готовлю", "Собираю"]
 function Thinking() {
   const [i, setI] = useState(0)
-  useEffect(() => { const t = setInterval(() => setI(v => (v + 1) % THINK_WORDS.length), 1500); return () => clearInterval(t) }, [])
+  useEffect(() => { const t = setInterval(() => setI(v => (v + 1) % THINK_WORDS.length), 2800); return () => clearInterval(t) }, [])
   return (
     <div className="flex items-center gap-2.5 py-1" style={{ color: "var(--muted)" }}>
-      <span className="relative inline-block h-[22px] overflow-hidden" style={{ minWidth: 130 }}>
+      <span className="relative inline-block h-[22px] overflow-hidden" style={{ minWidth: 150 }}>
         <AnimatePresence mode="wait">
           <motion.span key={i} className="absolute left-0 text-[15px] font-medium whitespace-nowrap"
-            initial={{ opacity: 0, y: 8, filter: "blur(5px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -8, filter: "blur(5px)" }} transition={{ duration: 0.32, ease: [0.22, 0.7, 0.2, 1] }}>
+            initial={{ opacity: 0, y: 6, filter: "blur(4px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -6, filter: "blur(4px)" }} transition={{ duration: 0.55, ease: [0.4, 0, 0.2, 1] }}>
             {THINK_WORDS[i]}…
           </motion.span>
         </AnimatePresence>
