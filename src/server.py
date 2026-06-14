@@ -18,7 +18,9 @@ import sqlite3
 import time
 from pathlib import Path
 
+import contextvars
 import tempfile
+import uuid
 
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
@@ -26,7 +28,7 @@ from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 
-from . import browser_bridge, chat_store, cli_config, hitl, knowledge_base, llm, media
+from . import browser_bridge, chat_store, clarify, cli_config, hitl, knowledge_base, llm, media
 from .agent import build_graph, memory_store, rebuild_llms
 from .improve import graph_backward
 from .tracing import diagnose, trace_store
@@ -66,6 +68,9 @@ async def _build_graph_async() -> None:
     # подтверждения», которое не появляется. auto-accept → браузер/плеер реально работают.
     # (Коммерцию/покупки агент всё равно отказывается делать на уровне логики.)
     hitl.set_work_mode(cli_config.get_cli("work_mode") or "auto-accept")
+    # Интерактивные каналы: уточнения (Q/A мультиселект) и подтверждения surface в GUI.
+    clarify.set_clarifier(_server_clarifier)
+    hitl.set_confirmer(_server_confirmer)
     Path("data").mkdir(parents=True, exist_ok=True)
     try:
         import aiosqlite
@@ -112,6 +117,44 @@ async def _build_graph_async() -> None:
 _HISTORY_LIMIT = 20
 _THREAD_FILES: dict[str, list[str]] = {}  # thread_id → приложенные файлы (сессионные вложения)
 
+# ── Интерактивные прогоны: уточнения (Q/A с мультиселектом) и подтверждения по HTTP ──
+# Прогон идёт фоновой задачей; когда граф зовёт clarify/confirm — кладём «pending» в реестр
+# и ЖДЁМ Future. Клиент поллит /run/{id}, рендерит Q/A, шлёт ответ в /run/{id}/respond.
+_RUNS: dict[str, dict] = {}
+_cur_run: contextvars.ContextVar[str] = contextvars.ContextVar("server_run", default="")
+
+
+async def _await_user(kind: str, payload: dict, timeout: float = 900.0):
+    """Выставить pending текущему прогону и ждать ответ клиента (или None по таймауту)."""
+    run = _RUNS.get(_cur_run.get())
+    if not run:
+        return None
+    fut: asyncio.Future = asyncio.get_running_loop().create_future()
+    run["pending"] = {"type": kind, **payload}
+    run["future"] = fut
+    run["status"] = "waiting"
+    try:
+        ans = await asyncio.wait_for(fut, timeout=timeout)
+    except Exception:  # noqa: BLE001 — таймаут/отмена → допущение
+        ans = None
+    run["pending"] = None
+    run["future"] = None
+    run["status"] = "running"
+    return ans
+
+
+async def _server_clarifier(items: list[dict]):
+    """Канал уточнений: показать вопросы (с вариантами) в GUI, вернуть ответы."""
+    qs = [{"question": it.get("question", ""), "options": list(it.get("options", []) or []),
+           "why": it.get("why", "")} for it in items]
+    return await _await_user("clarify", {"questions": qs})  # list[str] | None
+
+
+async def _server_confirmer(description: str):
+    """Канал подтверждений (активен в режиме manual; в auto-accept не зовётся)."""
+    ans = await _await_user("confirm", {"text": description})
+    return ans if ans is not None else False
+
 
 class ChatIn(BaseModel):
     user_id: str
@@ -151,45 +194,110 @@ async def _start_idle_loop() -> None:
     asyncio.create_task(loop())
 
 
+class RespondIn(BaseModel):
+    answers: list[str] | None = None   # ответы на clarify-вопросы (по порядку)
+    value: str | None = None           # ответ на confirm
+
+
+# Узлы графа → понятные шаги для GUI (видимый ход исполнения).
+_PROGRESS = {
+    "recall": "Вспоминаю контекст", "goal": "Ставлю цель", "reflexion": "Выбираю подход",
+    "act": "Действую", "reason": "Рассуждаю", "fast_answer": "Отвечаю", "clarify_gate": "Уточняю",
+    "router": "Маршрутизирую", "create_skills": "Создаю навык", "sgr_create": "Проверяю навык",
+    "skill_selector": "Подбираю навыки", "capability_research": "Ищу способ / MCP",
+    "decompose": "Разбиваю на шаги", "skill_injection": "Готовлю инструменты",
+    "step_executor": "Выполняю шаг", "synthesize": "Собираю ответ", "review": "Глубокий ревью",
+    "validation": "Проверяю", "reflect": "Запоминаю",
+}
+
+
+async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
+    """Фоновый прогон через astream: прогресс по узлам → run['progress'], а clarify/confirm
+    всплывают в _RUNS[run_id] и ждут клиента."""
+    _cur_run.set(run_id)
+    run = _RUNS[run_id]
+    try:
+        query = inp.query
+        files = _THREAD_FILES.get(tid)
+        if files:
+            try:
+                ctx = await asyncio.to_thread(media.attachment_context, files, inp.query)
+                if ctx:
+                    query = f"{inp.query}\n\n=== ПРИЛОЖЕННЫЕ ФАЙЛЫ ===\n{ctx}"
+            except Exception as e:  # noqa: BLE001
+                print(f"[chat] attachment_context failed: {e}")
+        history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
+        state: dict = {}
+        async for chunk in _graph.astream(
+            {"query": query, "user_id": inp.user_id, "session_id": tid,
+             "force_mode": cli_config.get_cli("force_mode") or "",
+             "chat_history": history + [{"role": "user", "content": inp.query}]},
+            config={"configurable": {"thread_id": tid}, "recursion_limit": 50},
+            stream_mode="updates",
+        ):
+            for node, delta in (chunk or {}).items():
+                lbl = _PROGRESS.get(node, node)
+                run["progress"] = lbl
+                if lbl not in run["steps"]:
+                    run["steps"].append(lbl)
+                if isinstance(delta, dict):
+                    state.update(delta)
+        answer = state.get("final_answer", "")
+        chat_store.record_turn(tid, inp.user_id, inp.query, answer)
+        t = chat_store.get_thread(tid)
+        run["result"] = {"answer": answer, "thread_id": tid, "title": (t or {}).get("title", ""),
+                         "mode": state.get("mode", ""), "active_tools": state.get("active_tools", [])}
+        run["status"] = "done"
+    except Exception as e:  # noqa: BLE001
+        run["error"] = f"{type(e).__name__}: {e}"
+        run["status"] = "error"
+
+
 @app.post("/chat")
 async def chat(inp: ChatIn) -> dict:
+    """Старт прогона. Возвращает run_id; клиент поллит /run/{run_id}."""
     global _last_request, _idle_done
     _last_request = time.time()
     _idle_done = False
     tid = inp.thread_id or inp.user_id
-    cfg = {"configurable": {"thread_id": tid}, "recursion_limit": 50}
-    # История треда — из ПЕРСИСТЕНТНОГО chat_store (переживает перезапуск сервера),
-    # последние N реплик как рабочий буфер связности.
-    history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
-    # Приложенные к треду файлы → подмешиваем их содержимое/описание в запрос.
-    query = inp.query
-    files = _THREAD_FILES.get(tid)
-    if files:
-        try:
-            ctx = await asyncio.to_thread(media.attachment_context, files, inp.query)
-            if ctx:
-                query = f"{inp.query}\n\n=== ПРИЛОЖЕННЫЕ ФАЙЛЫ ===\n{ctx}"
-        except Exception as e:  # noqa: BLE001
-            print(f"[chat] attachment_context failed: {e}")
-    r = await _graph.ainvoke(
-        {"query": query, "user_id": inp.user_id, "session_id": tid,
-         "force_mode": cli_config.get_cli("force_mode") or "",
-         "chat_history": history + [{"role": "user", "content": inp.query}]},
-        config=cfg,
-    )
-    answer = r.get("final_answer", "")
-    # Постоянный лог разговора (история тредов в боковой панели GUI / CLI /chats).
-    chat_store.record_turn(tid, inp.user_id, inp.query, answer)
-    t = chat_store.get_thread(tid)
-    return {
-        "answer": answer,
-        "thread_id": tid,
-        "title": (t or {}).get("title", ""),
-        "mode": r.get("mode", ""),
-        "aim": r.get("aim", ""),
-        "confidence": r.get("confidence", 0.0),
-        "active_tools": r.get("active_tools", []),
-    }
+    run_id = uuid.uuid4().hex
+    _RUNS[run_id] = {"status": "running", "pending": None, "future": None, "result": None,
+                     "error": None, "progress": "Начинаю", "steps": []}
+    if len(_RUNS) > 60:  # анти-утечка: чистим старые завершённые
+        for k in [k for k, v in list(_RUNS.items()) if v["status"] in ("done", "error")][:40]:
+            _RUNS.pop(k, None)
+    asyncio.create_task(_run_graph(run_id, inp, tid))
+    return {"run_id": run_id}
+
+
+@app.get("/run/{run_id}")
+def run_status(run_id: str) -> dict:
+    """Статус прогона: running | waiting(+pending Q/A) | done(+answer) | error."""
+    run = _RUNS.get(run_id)
+    if not run:
+        return {"status": "unknown"}
+    st = run["status"]
+    if st == "waiting":
+        return {"status": "waiting", "pending": run["pending"], "progress": run["progress"], "steps": run["steps"]}
+    if st == "done":
+        return {"status": "done", **(run["result"] or {}), "steps": run["steps"]}
+    if st == "error":
+        return {"status": "error", "error": run["error"], "steps": run["steps"]}
+    return {"status": "running", "progress": run["progress"], "steps": run["steps"]}
+
+
+@app.post("/run/{run_id}/respond")
+async def run_respond(run_id: str, r: RespondIn) -> dict:
+    """Ответ пользователя на pending уточнение/подтверждение → продолжить прогон."""
+    run = _RUNS.get(run_id)
+    fut = run and run.get("future")
+    if not fut or fut.done():
+        return {"ok": False}
+    if (run["pending"] or {}).get("type") == "clarify":
+        fut.set_result(r.answers or [])
+    else:
+        fut.set_result(r.value if r.value is not None else "да")
+    return {"ok": True}
 
 
 @app.get("/chats")

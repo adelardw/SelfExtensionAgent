@@ -43,6 +43,9 @@ export default function App() {
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [pending, setPending] = useState<{ run_id: string; questions?: { question: string; options: string[]; why?: string }[]; confirm?: string } | null>(null)
+  const [progress, setProgress] = useState("")
+  const [steps, setSteps] = useState<string[]>([])
   const scroller = useRef<HTMLDivElement>(null)
   const ta = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -55,9 +58,9 @@ export default function App() {
   useEffect(() => { loadThreads(); const t = setInterval(loadThreads, 15000); return () => clearInterval(t) }, [loadThreads])
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" }) }, [msgs])
 
-  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("Новый чат"); setMode(""); setAttached([]); ta.current?.focus() }
+  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("Новый чат"); setMode(""); setAttached([]); setPending(null); setSteps([]); setProgress(""); ta.current?.focus() }
   const openThread = async (id: string) => {
-    setCur(id); setAttached([])
+    setCur(id); setAttached([]); setPending(null); setSteps([]); setProgress("")
     try { const d = await (await fetch(`/chats/${id}`)).json(); setTitle(d.thread?.title || "Чат"); setMsgs(d.messages || []) }
     catch { setMsgs([]) }
   }
@@ -66,37 +69,63 @@ export default function App() {
     if (id === cur) newChat(); else loadThreads()
   }
 
+  const setLastAssistant = (content: string) =>
+    setMsgs(m => { const c = [...m]; if (c.length) c[c.length - 1] = { role: "assistant", content }; return c })
+  const streamAnswer = (full: string) => new Promise<void>(res => {
+    const total = full.length, per = Math.max(1, Math.ceil(total / Math.min(total || 1, 90)))
+    let n = 0
+    const tick = () => { n = Math.min(total, n + per); setLastAssistant(full.slice(0, n)); n < total ? window.setTimeout(tick, 16) : res() }
+    tick()
+  })
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+  const poll = async (run_id: string): Promise<void> => {
+    for (; ;) {
+      await sleep(650)
+      let d: any
+      try { d = await (await fetch(`/run/${run_id}`)).json() } catch { continue }  // транзиент → ещё раз
+      if (d.steps) setSteps(d.steps)
+      if (d.status === "running") { setProgress(d.progress || ""); continue }
+      if (d.status === "waiting") {
+        if (d.pending?.type === "clarify") { setPending({ run_id, questions: d.pending.questions || [] }); return }
+        if (d.pending?.type === "confirm") { setPending({ run_id, confirm: d.pending.text }); return }
+        setProgress(d.progress || ""); continue
+      }
+      if (d.status === "done") { setProgress(""); await streamAnswer(d.answer || "(пусто)"); if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads(); setBusy(false); return }
+      if (d.status === "error") { setProgress(""); setLastAssistant("⚠ ошибка: " + (d.error || "")); setBusy(false); return }
+      setProgress(""); setLastAssistant("⚠ прогон не найден (сервер перезапустился?)"); setBusy(false); return
+    }
+  }
+
   const sendText = async (text: string) => {
     text = text.trim(); if (!text || busy) return
-    setBusy(true); setInput(""); if (ta.current) ta.current.style.height = "auto"
+    setBusy(true); setInput(""); setSteps([]); setProgress(""); if (ta.current) ta.current.style.height = "auto"
     setMsgs(m => [...m, { role: "user", content: text }, { role: "assistant", content: "…" }])
     setAttached([])
     try {
       const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, thread_id: cur, query: text }) })
       if (!r.ok) throw new Error("HTTP " + r.status)
-      const d = await r.json()
-      if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title)
-      // мягкий «стрим»: ответ набегает, markdown формируется на лету (из мутного в яркое)
-      const full = d.answer || "(пусто)"
-      const total = full.length, per = Math.max(1, Math.ceil(total / Math.min(total, 90)))
-      await new Promise<void>(res => {
-        let n = 0
-        const tick = () => {
-          n = Math.min(total, n + per)
-          setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: full.slice(0, n) }; return c })
-          if (n < total) window.setTimeout(tick, 16); else res()
-        }
-        tick()
-      })
-      loadThreads()
+      const { run_id } = await r.json()
+      await poll(run_id)
     } catch (e: any) {
       const net = /load failed|failed to fetch|networkerror/i.test(String(e?.message || e))
-      const note = net
-        ? "связь с агентом прервалась (сервер занят долгой задачей или перезапустился). Текст сохранён — нажми ↑, чтобы повторить."
-        : String(e?.message || e)
-      setMsgs(m => { const c = [...m]; c[c.length - 1] = { role: "assistant", content: "⚠ " + note }; return c })
-      setInput(text)  // вернуть текст для повтора
-    } finally { setBusy(false); ta.current?.focus() }
+      setLastAssistant("⚠ " + (net ? "связь прервалась — текст сохранён, нажми ↑ для повтора" : String(e?.message || e)))
+      setInput(text); setBusy(false)
+    }
+    ta.current?.focus()
+  }
+
+  const submitClarify = async (answers: string[]) => {
+    if (!pending) return
+    const run_id = pending.run_id; setPending(null); setLastAssistant("…")
+    try { await fetch(`/run/${run_id}/respond`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answers }) }) } catch { /* */ }
+    poll(run_id)
+  }
+  const submitConfirm = async (value: string) => {
+    if (!pending) return
+    const run_id = pending.run_id; setPending(null); setLastAssistant("…")
+    try { await fetch(`/run/${run_id}/respond`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value }) }) } catch { /* */ }
+    poll(run_id)
   }
   const send = () => sendText(input)
   const onKey = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }
@@ -223,12 +252,14 @@ export default function App() {
                         <span className="text-[11px] font-bold tracking-[0.1em]" style={{ color: "var(--accent)" }}>АГЕНТ</span>
                       </div>
                       {m.content === "…" || m.content === ""
-                        ? <Thinking />
+                        ? <Working steps={steps} current={progress} />
                         : <div className="md" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: md(m.content) }} />}
                     </motion.div>
                   )
                 ))}
               </AnimatePresence>
+              {pending?.questions && <ClarifyCard questions={pending.questions} onSubmit={submitClarify} />}
+              {pending?.confirm && <ConfirmCard text={pending.confirm} onConfirm={submitConfirm} />}
             </div>
           )}
         </div>
@@ -390,19 +421,81 @@ function Dropdown({ value, onChange, options }: { value: string; onChange: (v: s
   )
 }
 
-const THINK_WORDS = ["Думаю", "Вникаю", "Ищу", "Считаю", "Соображаю", "Кручу шестерёнки", "Готовлю", "Собираю"]
-function Thinking() {
-  const [i, setI] = useState(0)
-  useEffect(() => { const t = setInterval(() => setI(v => (v + 1) % THINK_WORDS.length), 2800); return () => clearInterval(t) }, [])
+// Реальный ход исполнения (прогресс по узлам графа) — траектория, текущий шаг ярче.
+function Working({ steps, current }: { steps: string[]; current: string }) {
+  const shown = (steps.length ? steps : current ? [current] : ["Думаю"]).slice(-6)
   return (
-    <div className="relative h-[24px] py-1" style={{ color: "var(--muted)" }}>
-      <AnimatePresence>
-        <motion.span key={i} className="absolute left-0 top-1 text-[15px] font-medium whitespace-nowrap"
-          initial={{ opacity: 0, filter: "blur(7px)" }} animate={{ opacity: 1, filter: "blur(0px)" }}
-          exit={{ opacity: 0, filter: "blur(7px)" }} transition={{ duration: 0.75, ease: "easeInOut" }}>
-          {THINK_WORDS[i]}…
-        </motion.span>
+    <div className="py-1 space-y-1.5">
+      <AnimatePresence initial={false}>
+        {shown.map((s, i) => {
+          const last = i === shown.length - 1
+          return (
+            <motion.div key={s} layout initial={{ opacity: 0, filter: "blur(5px)", x: -4 }}
+              animate={{ opacity: last ? 1 : 0.4, filter: "blur(0px)", x: 0 }} transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
+              className="flex items-center gap-2 text-[13.5px]" style={{ color: last ? "var(--ink)" : "var(--faint)" }}>
+              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: last ? "var(--accent)" : "var(--faint)" }} />
+              <span>{s}{last ? "…" : ""}</span>
+            </motion.div>
+          )
+        })}
       </AnimatePresence>
     </div>
+  )
+}
+
+function ClarifyCard({ questions, onSubmit }: { questions: { question: string; options: string[]; why?: string }[]; onSubmit: (a: string[]) => void }) {
+  const [sel, setSel] = useState<Record<number, string[]>>({})
+  const [txt, setTxt] = useState<Record<number, string>>({})
+  const toggle = (qi: number, opt: string) => setSel(s => {
+    const cur = new Set(s[qi] || []); cur.has(opt) ? cur.delete(opt) : cur.add(opt); return { ...s, [qi]: [...cur] }
+  })
+  const submit = () => onSubmit(questions.map((_q, i) => [...(sel[i] || []), (txt[i] || "").trim()].filter(Boolean).join(", ")))
+  const ok = questions.every((_q, i) => (sel[i]?.length || (txt[i] || "").trim()))
+  return (
+    <motion.div initial={{ opacity: 0, y: 10, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.4 }}
+      className="rounded-xl p-5 mb-4" style={{ background: "var(--surface)", boxShadow: "var(--sh2)" }}>
+      <div className="text-[11px] font-bold tracking-[0.1em] mb-4" style={{ color: "var(--accent)" }}>УТОЧНЕНИЕ</div>
+      <div className="space-y-5">
+        {questions.map((q, i) => (
+          <div key={i}>
+            <div className="text-[14.5px] font-semibold mb-2.5" style={{ color: "var(--ink)" }}>{q.question}</div>
+            {q.options?.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2.5">
+                {q.options.map(opt => {
+                  const on = (sel[i] || []).includes(opt)
+                  return (
+                    <button key={opt} onClick={() => toggle(i, opt)}
+                      className="px-3 py-1.5 rounded-lg text-[13px] font-medium border transition-colors flex items-center gap-1.5"
+                      style={{ background: on ? "var(--accent)" : "transparent", color: on ? "var(--accent-fg)" : "var(--ink)", borderColor: on ? "var(--accent)" : "var(--bd2)" }}>
+                      {on && <Check size={13} />}{opt}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+            <input value={txt[i] || ""} onChange={e => setTxt(s => ({ ...s, [i]: e.target.value }))}
+              placeholder={q.options?.length ? "свой вариант…" : "ответ…"}
+              className="w-full px-3 py-2 rounded-lg text-[13.5px] outline-none" style={{ background: "var(--sunken)", color: "var(--ink)" }} />
+          </div>
+        ))}
+      </div>
+      <motion.button whileTap={{ scale: 0.98 }} onClick={submit} disabled={!ok}
+        className="mt-5 px-5 py-2.5 rounded-lg text-[13.5px] font-semibold disabled:opacity-40"
+        style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>Ответить</motion.button>
+    </motion.div>
+  )
+}
+
+function ConfirmCard({ text, onConfirm }: { text: string; onConfirm: (v: string) => void }) {
+  return (
+    <motion.div initial={{ opacity: 0, y: 10, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.4 }}
+      className="rounded-xl p-5 mb-4" style={{ background: "var(--surface)", boxShadow: "var(--sh2)" }}>
+      <div className="text-[11px] font-bold tracking-[0.1em] mb-2.5" style={{ color: "var(--accent)" }}>ПОДТВЕРЖДЕНИЕ</div>
+      <div className="text-[14px] mb-4 leading-relaxed" style={{ color: "var(--ink)" }}>{text}</div>
+      <div className="flex gap-2">
+        <motion.button whileTap={{ scale: 0.97 }} onClick={() => onConfirm("да")} className="px-5 py-2 rounded-lg text-[13.5px] font-semibold" style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>Да</motion.button>
+        <motion.button whileTap={{ scale: 0.97 }} onClick={() => onConfirm("нет")} className="px-5 py-2 rounded-lg text-[13.5px] font-semibold" style={{ background: "var(--sunken)", color: "var(--ink)" }}>Нет</motion.button>
+      </div>
+    </motion.div>
   )
 }
