@@ -161,7 +161,11 @@ Reproduce: `python -m src.eval.route_eval`.
 - **Live progress** — on long tasks you see what the agent is doing right now (mode → plan →
   step i/N → review → validation) and how many tokens/$$ are already spent (REPL — in the status
   line, Telegram — a status message edited along the way).
-- **Interfaces** — REPL, Telegram bot, FastAPI server (shared graph and shared memory).
+- **Interfaces** — REPL, Telegram bot, FastAPI server, and a **desktop GUI** (React + Vite +
+  Tailwind front-end over the Python brain; `desktop.py` = native window via pywebview). The GUI
+  adds live per-node progress, an **interactive clarification card** (multiselect Q/A), file
+  attach + microphone (Whisper), thread history, and an in-window settings panel
+  (provider / models / key, work & thinking mode, browser-extension token). Shared graph + memory.
 
 ## Security (guard rails)
 
@@ -460,8 +464,9 @@ media_control, но мисроут play не ломает воспроизвед
 - **Память** — эпизодическая/семантическая (факты+тэги)/выводы/цели/саммари, граф-рёбра
   (**GraphRAG-lite**: densify `fact↔fact` по cosine + spreading-activation от релевантных
   эпизодов — ассоциативный recall, per-user, PII-контейнмент), TurboVec-ANN, **условный
-  recall** (персона-факты всегда, ассоциативная память — по гейту релевантности `recall_gate`,
-  «recall не всегда должен быть»), запрос эмбеддится ОДИН раз и переиспользуется, защита от
+  recall** (ГИБКО: И факты, И ассоциативная память отбираются по релевантности к запросу
+  `recall_gate` — «recall не всегда», task-факты одной задачи не текут в несвязанный запрос),
+  запрос эмбеддится ОДИН раз и переиспользуется, защита от
   переполнения (prune).
 - **Память-как-TOOL (3 яруса)** — агент САМ решает, что подтянуть: `search_memory`
   (глобальная долгая), `recall_history` (drill-back — восстановить ПОЛНЫЙ прошлый эпизод
@@ -507,7 +512,11 @@ media_control, но мисроут play не ломает воспроизвед
 - **Живой прогресс** — при долгих задачах видно, что агент делает прямо сейчас
   (режим → план → шаг i/N → ревью → валидация) и сколько токенов/$$ уже потрачено
   (REPL — в статус-строке, Telegram — статус-сообщение редактируется по ходу).
-- **Интерфейсы** — REPL, Telegram-бот, FastAPI-сервер (общий граф и общая память).
+- **Интерфейсы** — REPL, Telegram-бот, FastAPI-сервер и **десктоп-GUI** (фронт на React + Vite +
+  Tailwind поверх Python-мозга; `desktop.py` = нативное окно через pywebview). GUI добавляет живой
+  прогресс по узлам, **интерактивную карточку уточнений** (Q/A-мультиселект), прикрепление файлов +
+  микрофон (Whisper), историю тредов и панель настроек в окне (провайдер / модели / ключ, режимы
+  работы и мышления, токен расширения). Общий граф и память.
 
 ## Безопасность (guard rails)
 
