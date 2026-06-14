@@ -217,7 +217,7 @@ export default function App() {
                         <span className="text-[11px] font-bold tracking-[0.1em]" style={{ color: "var(--accent)" }}>АГЕНТ</span>
                       </div>
                       {m.content === "…" || m.content === ""
-                        ? <Dots />
+                        ? <Thinking />
                         : <div className="md" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: md(m.content) }} />}
                     </motion.div>
                   )
@@ -354,9 +354,25 @@ function Dropdown({ value, onChange, options }: { value: string; onChange: (v: s
   )
 }
 
-function Dots() {
-  return <div className="flex gap-1.5 py-1.5">
-    {[0, 1, 2].map(i => <motion.span key={i} className="w-2 h-2 rounded-full" style={{ background: "var(--accent)" }}
-      animate={{ opacity: [0.25, 1, 0.25], y: [0, -3, 0] }} transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.16 }} />)}
-  </div>
+const THINK_WORDS = ["Думаю", "Вникаю", "Ищу", "Считаю", "Соображаю", "Кручу шестерёнки", "Готовлю", "Собираю"]
+function Thinking() {
+  const [i, setI] = useState(0)
+  useEffect(() => { const t = setInterval(() => setI(v => (v + 1) % THINK_WORDS.length), 1500); return () => clearInterval(t) }, [])
+  return (
+    <div className="flex items-center gap-2.5 py-1" style={{ color: "var(--muted)" }}>
+      <span className="relative inline-block h-[22px] overflow-hidden" style={{ minWidth: 130 }}>
+        <AnimatePresence mode="wait">
+          <motion.span key={i} className="absolute left-0 text-[15px] font-medium whitespace-nowrap"
+            initial={{ opacity: 0, y: 8, filter: "blur(5px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -8, filter: "blur(5px)" }} transition={{ duration: 0.32, ease: [0.22, 0.7, 0.2, 1] }}>
+            {THINK_WORDS[i]}…
+          </motion.span>
+        </AnimatePresence>
+      </span>
+      <span className="flex gap-1">
+        {[0, 1, 2].map(d => <motion.span key={d} className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }}
+          animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity, delay: d * 0.16 }} />)}
+      </span>
+    </div>
+  )
 }

@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 
-from . import chat_store, cli_config, knowledge_base, llm, media
+from . import chat_store, cli_config, hitl, knowledge_base, llm, media
 from .agent import build_graph, memory_store, rebuild_llms
 from .improve import graph_backward
 from .tracing import diagnose, trace_store
@@ -61,6 +61,11 @@ async def _build_graph_async() -> None:
     SqliteSaver async-методы не поддерживает (был источник 500). Фолбэк — MemorySaver
     (состояние графа не персистится, но история тредов всё равно живёт в chat_store)."""
     global _graph
+    # GUI: пользователь — локальный оператор, рядом. Без auto-accept side-effect тулы
+    # уходят в deny-by-default (нет канала подтверждения в окне) → агент «ждёт
+    # подтверждения», которое не появляется. auto-accept → браузер/плеер реально работают.
+    # (Коммерцию/покупки агент всё равно отказывается делать на уровне логики.)
+    hitl.set_work_mode("auto-accept")
     Path("data").mkdir(parents=True, exist_ok=True)
     try:
         import aiosqlite
