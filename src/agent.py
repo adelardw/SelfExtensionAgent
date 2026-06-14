@@ -325,17 +325,6 @@ async def recall_node(state: GeneralGraphState) -> dict:
     if kb_bits:
         memory_context = "\n\n".join(kb_bits) + "\n\n" + memory_context
 
-    # Онбординг: первый контакт с пользователем (нет ни эпизодов, ни фактов) —
-    # агент представляется И узнаёт рабочий профиль, чтобы сразу подстроиться.
-    if memory_store.episode_count(user_id) == 0 and not memory_store.get_facts(user_id):
-        memory_context = (
-            "[ОНБОРДИНГ — первый контакт с этим пользователем]\n"
-            "ГЛАВНОЕ: сначала ПОЛНОСТЬЮ и по существу выполни запрос — онбординг НИКОГДА "
-            "не заменяет ответ. И только В КОНЦЕ добавь 1 короткую дружелюбную фразу: "
-            "представься (персональный агент с памятью, навыками, доступом к устройству и "
-            "веб-поиском) и спроси, как обращаться. НЕ допрашивай о профессии/роли — ты "
-            "сам поймёшь её из дальнейшего общения и подстроишься незаметно.\n\n"
-        ) + memory_context
     # Сигнал несёт служебный маркер [neg] (его читает harvest); снимаем при инъекции в промпт.
     implicit_fb = detect_implicit_feedback(memory_store, user_id, query, LOW_CONF)
     ext = get_external_context(user_id).model_dump()
