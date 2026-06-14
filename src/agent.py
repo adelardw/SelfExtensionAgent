@@ -435,11 +435,15 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     if has_own and decision.mode == "clarify" and decision.ambiguity < 0.85:
         decision.mode = "fast"
 
-    # Ambiguity-гейт (идея Ouroboros): слишком неоднозначно → переспросить, а не гадать.
-    if decision.ambiguity >= AMBIGUITY_GATE and decision.mode != "clarify" and not (has_own and decision.ambiguity < 0.85):
+    # Неоднозначно (модель сама выбрала clarify ИЛИ ambiguity выше гейта) → СТРУКТУРНЫЙ батч
+    # уточнений (нода clarify_gate: вопросы с вариантами/мультиселект, ответ ПРИВЯЗАН к ходу
+    # прогона и переиспускается дальше — нет потери контекста), а НЕ переспрос прозой. Затем —
+    # нормальное исполнение (deliberate+инструменты). Свои документы глушат мнимый clarify.
+    if (decision.mode == "clarify" or decision.ambiguity >= AMBIGUITY_GATE) and not (has_own and decision.ambiguity < 0.85):
         need = decision.missing_info or "уточни, что именно нужно"
-        return {"mode": "clarify", "memory_context": f"⚠ Неясно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}",
-                "mode_confidence": decision.mode_confidence, "mode_rationale": f"неоднозначно: {need}"}
+        return {"mode": "deliberate", "needs_clarify_gate": True,
+                "memory_context": f"⚠ Неоднозначно (ambiguity {decision.ambiguity:.0%}): {need}\n\n{mem}",
+                "mode_confidence": decision.mode_confidence, "mode_rationale": f"уточняю: {need}"}
     # Гейт ОБОСНОВАННОСТИ (ход юзера: reflexion проверяет, может ли ДОСТОВЕРНО ответить сам).
     # reason/fast без надёжной базы знаний легко выдумывает → заземляем через инструменты.
     mode = decision.mode

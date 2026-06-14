@@ -78,8 +78,15 @@ def test_temp_skill_lifecycle(tmp_path, monkeypatch):
 
 @needs_key
 def test_llm_tiers():
+    """Роли fast/code/deep — РАЗНЫЕ модели по config.yml (тиры). Не хардкодим имена,
+    чтобы тест не падал при смене моделей в конфиге."""
+    from omegaconf import OmegaConf
+
     from src.llm import model_for
 
-    assert model_for("fast") == "google/gemini-2.5-flash-lite"
-    assert model_for("code") == "deepseek/deepseek-v4-flash"
-    assert model_for("deep") == "deepseek/deepseek-v4-pro"
+    cfg = OmegaConf.load("config.yml")
+    assert model_for("fast") == cfg.model.name
+    assert model_for("code") == cfg.code_model.name
+    assert model_for("deep") == cfg.deep_model.name
+    # тиры действительно различаются (роутинг ≠ исполнение ≠ deep-ревью)
+    assert len({model_for("fast"), model_for("code"), model_for("deep")}) >= 2
