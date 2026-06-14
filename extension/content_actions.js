@@ -298,13 +298,29 @@ globalThis.agentExec = function agentExec(req) {
         const labelOf = (el) => (el.getAttribute('aria-label')||el.getAttribute('title')||
                          el.textContent||el.getAttribute('data-test-id')||'').trim();
         const vis = (el) => { const r = el.getBoundingClientRect(); return r.width >= 1 && r.height >= 1; };
-        // 1) КОНТЕКСТ-запуск: «Слушать»/«Listen»/«Play all/Слушать всё/Воспроизвести всё»
+        // 1) КОНТЕКСТ-запуск: «Слушать»/«Listen»/«Play all/Слушать всё/Воспроизвести всё».
         const reCtx = /^(слушать|слушать всё|listen|play|play all|воспроизвести всё|играть)$/i;
         let clicked = false;
-        for (const el of cands) {
-          if (!vis(el)) continue;
-          if (reCtx.test(labelOf(el))) { el.click(); n++; clicked = true; break; }
+        const ctxBtns = cands.filter(el => vis(el) && reCtx.test(labelOf(el)));
+        // Если кнопок НЕСКОЛЬКО (страница трека: альбом + сам трек) — выбираем ту, чей
+        // ближайший заголовок совпадает с document.title (= открытая сущность), а не первую
+        // в DOM (живой баг: «включи трек X» → играл альбом, чья кнопка шла раньше).
+        const titleN = (document.title || '').toLowerCase().split(/[—\-|]/)[0].trim();
+        const headNear = (el) => {
+          let p = el;
+          for (let i = 0; i < 6 && p; i++) {
+            const h = p.querySelector && p.querySelector('h1,h2,h3');
+            if (h && h.textContent && h.textContent.trim()) return h.textContent.trim().toLowerCase();
+            p = p.parentElement;
+          }
+          return '';
+        };
+        let pick = ctxBtns[0];
+        if (ctxBtns.length > 1 && titleN) {
+          const m = ctxBtns.find(el => { const h = headNear(el); return h && (titleN.includes(h) || h.includes(titleN)); });
+          if (m) pick = m;
         }
+        if (pick) { pick.click(); n++; clicked = true; }
         // 2) Фолбэк: общая эвристика (одиночный трек/видео — нет контекст-кнопки)
         if (!clicked) {
           const re = /\bplay\b|слуша|воспроизв|▶/i;
