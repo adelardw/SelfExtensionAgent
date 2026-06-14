@@ -116,6 +116,7 @@ async def _build_graph_async() -> None:
 # персистентного chat_store, поверх долгой памяти). Долгая память остаётся опорой.
 _HISTORY_LIMIT = 20
 _THREAD_FILES: dict[str, list[str]] = {}  # thread_id → приложенные файлы (сессионные вложения)
+_THREAD_CLARIFY: dict[str, dict] = {}     # thread_id → {norm_q: {question, answer}} (на весь диалог)
 
 # ── Интерактивные прогоны: уточнения (Q/A с мультиселектом) и подтверждения по HTTP ──
 # Прогон идёт фоновой задачей; когда граф зовёт clarify/confirm — кладём «pending» в реестр
@@ -226,6 +227,13 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                     query = f"{inp.query}\n\n=== ПРИЛОЖЕННЫЕ ФАЙЛЫ ===\n{ctx}"
             except Exception as e:  # noqa: BLE001
                 print(f"[chat] attachment_context failed: {e}")
+        # Уточнения, уже данные В ЭТОМ ДИАЛОГЕ (прошлые прогоны) → в контекст, чтобы агент
+        # НЕ переспрашивал заново (ledger сбрасывается каждый прогон — держим на уровне треда).
+        known = _THREAD_CLARIFY.get(tid)
+        if known:
+            block = "\n".join(f"- {v['question']} → {v['answer']}" for v in known.values())
+            query = (f"{query}\n\n[УЖЕ УТОЧНЕНО РАНЕЕ В ЭТОМ ДИАЛОГЕ — НЕ переспрашивай это, "
+                     f"используй как данность:\n{block}]")
         history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
         state: dict = {}
         async for chunk in _graph.astream(
@@ -243,6 +251,15 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                 if isinstance(delta, dict):
                     state.update(delta)
         answer = state.get("final_answer", "")
+        # Сохраняем уточнения этого прогона на уровень треда (переживут до конца диалога) —
+        # чтобы следующее сообщение их не переспрашивало.
+        try:
+            for it in clarify.ledger():
+                if it.get("status") in ("answered", "reused") and it.get("answer"):
+                    _THREAD_CLARIFY.setdefault(tid, {})[clarify._norm_q(it["question"])] = \
+                        {"question": it["question"], "answer": it["answer"]}
+        except Exception:  # noqa: BLE001
+            pass
         chat_store.record_turn(tid, inp.user_id, inp.query, answer)
         t = chat_store.get_thread(tid)
         run["result"] = {"answer": answer, "thread_id": tid, "title": (t or {}).get("title", ""),
