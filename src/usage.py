@@ -13,10 +13,12 @@ from langchain_core.callbacks import BaseCallbackHandler
 
 USAGE_FILE = Path("data/usage.json")
 
-# Грубые цены $/1M токенов (≈ текущий рабочий тир: gemini-2.5-flash-lite /
-# deepseek-v4-flash, $0.098–0.10 in / $0.197–0.40 out) — только для оценки.
-PRICE_IN = 0.10
-PRICE_OUT = 0.30
+# Грубые цены $/1M токенов — ТОЛЬКО для оценки (единая ставка на все роли).
+# Текущий тир: fast=gemini-3.1-flash-lite $0.25/$1.50, code=glm-5.1 $0.98/$3.08,
+# deep=deepseek-v4-pro $0.435/$0.87. Базис ниже — по fast (самые частые вызовы);
+# реальная стоимость ВЫШЕ оценки, т.к. шаги на glm-5.1 (code) дороже.
+PRICE_IN = 0.25
+PRICE_OUT = 1.50
 
 
 class TokenTracker(BaseCallbackHandler):
