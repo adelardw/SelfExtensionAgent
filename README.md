@@ -29,20 +29,23 @@ Full write-up — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Benchmarks & results
 
-Honest numbers on a **cheap tier** (`google/gemini-2.5-flash-lite` for routing/validation,
-`deepseek/deepseek-v4-flash` for execution). Not benchmark-tuned — these come from live runs.
+Honest numbers from live runs — not benchmark-tuned. Two model tiers measured on GAIA (n=100 each).
 
 **GAIA (held-out validation, all levels, `EVAL_MODE`, default budget, resilient runner):**
 
-| | Overall | L1 | L2 | L3 | Cost |
+| run | Overall (95% Wilson) | L1 | L2 | L3 | Cost (est.) |
 |---|---|---|---|---|---|
-| baseline (n=20, before fixes) | 15% | 29% | 14% | 0% | $0.16 |
-| **after fixes (n=100)** | **23%** | **49%** | 8% | 8% | $0.58 |
+| baseline (n=20, before fixes) | 15% [5–36%] | 29% | 14% | 0% | $0.16 |
+| cheap tier (`gemini-2.5-flash-lite` + `deepseek-v4-flash`), n=100 | 20% [13–29%] | 41% | 5% | 12% | $0.81 |
+| **strong tier (`gemini-3.1-flash-lite` + `glm-5.1` + `deepseek-v4-pro`), n=100** | **33% [24.6–42.7%]** | **49%** | **38%** | 4% | $0.45\* |
 
-Overall 95% Wilson CI: baseline **15% [5–36%]** (n=20 — wide), after fixes **23% [16–32%]** (n=100).
-The L1 jump (29%→49%) came from fixing "give-up" behavior (research now reads real findings
-instead of answering "couldn't determine"). L2/L3 (8%/8%) are the ceiling of this model tier
-(multi-hop + files). Context: GPT-4+plugins score ~15% on GAIA; top agents ~40–50% on L1 only.
+The **strong tier is +13pp overall (20%→33%)**, driven mostly by **L2 5%→38%** (multi-hop —
+glm-5.1 / deepseek-v4-pro are much stronger on agentic chains); L3 dropped within noise (1–3 tasks,
+huge CI). It costs MORE per token, not less (glm-5.1 $0.98/$3.08 vs deepseek-v4-flash $0.09/$0.18);
+the `$` figures are `usage.py` estimates on a flat rate and **undercount the strong tier** (\*real
+cost is several× higher). Aggregate Wilson intervals overlap → the gain is real but not yet
+significant at n=100; the L2 gap is solid. An earlier cheap-tier run scored 23% (run-to-run variance).
+Context: GPT-4+plugins score ~15% on GAIA; top agents ~40–50% on L1 only.
 Reproduce: `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
 
 **Universal intent router** (`src/eval/route_eval.py`, 570 labeled multilingual cases, ~100/class,
@@ -54,7 +57,7 @@ plays — only the deterministic nudge is lost; pauses now route correctly inste
 Reproduce: `python -m src.eval.route_eval`.
 
 **Amortization** (`scripts/amortize_bench.py`): warm pass **−13% tokens with quality 78%→98%**
-(n=4 — illustrative, not statistically strong). **Tests:** 272, mostly offline (no LLM).
+(n=4 — illustrative, not statistically strong). **Tests:** 281, mostly offline (no LLM).
 
 > Caveats: GAIA n=100 → per-level CIs are wide; route_eval threshold is calibrated on its own
 > set (single hyperparameter, low overfit risk); confidence numbers are validator self-assessment.
@@ -249,9 +252,12 @@ TELEGRAM_BOT_TOKEN=...               # opt. — for the Telegram bot
 
 | Tier | Model | $/M in/out | Used for |
 |---|---|---|---|
-| fast | `google/gemini-2.5-flash-lite` | 0.10 / 0.40 | routing, validation, extraction, fast/reason |
-| code | `deepseek/deepseek-v4-flash` | 0.098 / 0.197 | agentic step execution, code, ctx 1M |
+| fast | `google/gemini-3.1-flash-lite` | 0.25 / 1.50 | routing, validation, extraction, fast/reason |
+| code | `z-ai/glm-5.1` | 0.98 / 3.08 | agentic step execution, code, ctx 1M |
 | deep | `deepseek/deepseek-v4-pro` | 0.435 / 0.87 | ONLY heavy-review (1–2 calls per large task) |
+
+> Earlier cheap tier (lower GAIA, far cheaper): fast `gemini-2.5-flash-lite` 0.10/0.40,
+> code `deepseek-v4-flash` 0.09/0.18 — swap in `config.yml` to trade accuracy for cost.
 
 A typical fast query ≈ $0.001; deliberate ≈ $0.005–0.02; heavy adds 1–2 deep calls.
 
@@ -390,20 +396,23 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 
 ## Бенчмарки и результаты
 
-Честные числа на **дешёвом тире** (`google/gemini-2.5-flash-lite` для роутинга/валидации,
-`deepseek/deepseek-v4-flash` для исполнения). Не подгонялись под бенч — это живые прогоны.
+Честные числа из живых прогонов — не подгонялись под бенч. Два тира моделей замерены на GAIA (n=100 каждый).
 
 **GAIA (held-out валидация, все уровни, `EVAL_MODE`, дефолтный бюджет, отказоустойчивый раннер):**
 
-| | Overall | L1 | L2 | L3 | Cost |
+| прогон | Overall (95% Wilson) | L1 | L2 | L3 | Cost (оценка) |
 |---|---|---|---|---|---|
-| baseline (n=20, до фиксов) | 15% | 29% | 14% | 0% | $0.16 |
-| **после фиксов (n=100)** | **23%** | **49%** | 8% | 8% | $0.58 |
+| baseline (n=20, до фиксов) | 15% [5–36%] | 29% | 14% | 0% | $0.16 |
+| дешёвый тир (`gemini-2.5-flash-lite` + `deepseek-v4-flash`), n=100 | 20% [13–29%] | 41% | 5% | 12% | $0.81 |
+| **сильный тир (`gemini-3.1-flash-lite` + `glm-5.1` + `deepseek-v4-pro`), n=100** | **33% [24.6–42.7%]** | **49%** | **38%** | 4% | $0.45\* |
 
-Overall 95% Wilson CI: baseline **15% [5–36%]** (n=20 — широкий), после фиксов **23% [16–32%]** (n=100).
-Скачок L1 (29%→49%) дал фикс «give-up» поведения (ресёрч теперь читает реальные находки вместо
-ответа «не удалось определить»). L2/L3 (8%/8%) — потолок этого тира моделей (мультихоп + файлы).
-Контекст: GPT-4+плагины дают ~15% на GAIA; топ-агенты ~40–50% только на L1. Воспроизведение:
+**Сильный тир — +13pp overall (20%→33%)**, в основном за счёт **L2 5%→38%** (мультихоп —
+glm-5.1 / deepseek-v4-pro заметно сильнее на агентских цепочках); L3 просел в шуме (1–3 задачи,
+огромный CI). Он ДОРОЖЕ за токен, а не дешевле (glm-5.1 $0.98/$3.08 vs deepseek-v4-flash $0.09/$0.18);
+числа `$` — оценка `usage.py` по единой ставке и **занижают сильный тир** (\*реальная цена в разы выше).
+Агрегатные Wilson-интервалы пересекаются → прирост реален, но на n=100 ещё не статзначим; по L2 разрыв
+уверенный. Более ранний прогон дешёвого тира дал 23% (run-to-run разброс). Контекст: GPT-4+плагины дают
+~15% на GAIA; топ-агенты ~40–50% только на L1. Воспроизведение:
 `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
 
 **Универсальный роутер интентов** (`src/eval/route_eval.py`, 570 размеченных мультиязычных кейсов,
@@ -415,7 +424,7 @@ media_control, но мисроут play не ломает воспроизвед
 Воспроизведение: `python -m src.eval.route_eval`.
 
 **Амортизация** (`scripts/amortize_bench.py`): тёплый проход **−13% токенов при качестве 78%→98%**
-(n=4 — иллюстративно, статистически не сильно). **Тесты:** 272, в основном оффлайн (без LLM).
+(n=4 — иллюстративно, статистически не сильно). **Тесты:** 281, в основном оффлайн (без LLM).
 
 > Caveats: GAIA n=100 → доверительные интервалы по уровням широкие; порог route_eval откалиброван
 > на своём же наборе (один гиперпараметр, риск оверфита низкий); confidence — самооценка валидатора.
@@ -618,9 +627,12 @@ TELEGRAM_BOT_TOKEN=...               # опц. — для Telegram-бота
 
 | Тир | Модель | $/M in/out | Используется для |
 |---|---|---|---|
-| fast | `google/gemini-2.5-flash-lite` | 0.10 / 0.40 | роутинг, валидация, extraction, fast/reason |
-| code | `deepseek/deepseek-v4-flash` | 0.098 / 0.197 | агентское исполнение шагов, код, ctx 1M |
+| fast | `google/gemini-3.1-flash-lite` | 0.25 / 1.50 | роутинг, валидация, extraction, fast/reason |
+| code | `z-ai/glm-5.1` | 0.98 / 3.08 | агентское исполнение шагов, код, ctx 1M |
 | deep | `deepseek/deepseek-v4-pro` | 0.435 / 0.87 | ТОЛЬКО heavy-ревью (1–2 вызова на большую задачу) |
+
+> Прежний дешёвый тир (ниже GAIA, заметно дешевле): fast `gemini-2.5-flash-lite` 0.10/0.40,
+> code `deepseek-v4-flash` 0.09/0.18 — переключается в `config.yml` (точность ↔ цена).
 
 Типичный fast-запрос ≈ $0.001; deliberate ≈ $0.005–0.02; heavy добавляет 1–2 deep-вызова.
 
