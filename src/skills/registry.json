@@ -145,5 +145,29 @@
     "created_at": "2026-06-13T16:44:24.937872",
     "updated_at": "2026-06-13T16:44:24.937905",
     "version": 1
+  },
+  "pubchem_query": {
+    "description": "# PubChem Query Skill\n\nНавык для запросов к базе данных PubChem через PUG REST API (публичный, без ключа).\nПозволяет искать соединения, получать их свойства, классификации, ферментативные трансформаци",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-14T00:53:47.061650",
+    "updated_at": "2026-06-14T00:56:32.617720",
+    "version": 2
+  },
+  "zip_extractor": {
+    "description": "Извлекает ZIP-архивы и читает их содержимое. Используется для работы с прикреплёнными ZIP-файлами.",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-14T01:14:53.724846",
+    "updated_at": "2026-06-14T01:14:53.724858",
+    "version": 1
+  },
+  "wikipedia_twitter_citations": {
+    "description": "# Skill: Wikipedia Twitter/X Citation Counter\n\n## Purpose\nCounts how many times Twitter/X posts were cited as references on specific English Wikipedia pages, looking at historical revisions.\n\n## When ",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-14T02:04:14.870336",
+    "updated_at": "2026-06-14T02:04:14.870345",
+    "version": 1
   }
 }
