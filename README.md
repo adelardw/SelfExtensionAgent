@@ -99,18 +99,19 @@ Reproduce: `python -m src.eval.route_eval`.
   browser — `device_control.open_url`; headless search — only for background fact-gathering. The
   per-step validator sees the actually-called tools: "opening mail" as text without a tool call =
   step not done.
-- **Onboarding** — on first contact the agent briefly introduces itself and starts building the
-  user profile (name, style), without dumping a feature list.
+- **Silent profiling** — the agent builds the user profile (role, style, preferences) from the
+  conversation itself, without a canned self-introduction or "how should I address you?" greeting.
 - **Temporary skills** — a skill created for a task is tagged `temp`; after solving, a retention
   judge decides: accept into the library (reusable) or delete (one-off). Unaccepted skills are
   cleaned by TTL at startup — the library doesn't fill with junk.
 - **Goal-setting** — determines the goal and keeps a "standing" goal + rubric in context.
 - **Onboarding of an unclear task (a system property, not one node)** — ambiguity is caught at
-  three points: at the input (ambiguity gate → ask back), at planning (`clarify_gate` — a batch of
-  precise questions: markers where the set is finite, open-ended where not), and right in
+  three points: at the input (high ambiguity → routed to the **structured `clarify_gate`**, not a
+  prose re-ask), at planning (`clarify_gate` — a batch of precise questions: markers where the set
+  is finite, open-ended where not; in the GUI rendered as a **multiselect Q/A card**), and right in
   execution (the `ask_user` tool — a catch-up at a fork). All questions/answers accumulate into a
   single **clarification registry** per run and are reused by all nodes — the agent doesn't ask
-  twice. No answer/channel → a reasonable assumption with a "I assumed that…" note in the final
+  twice (deduped, and carried within the run). No answer/channel → a reasonable assumption with a "I assumed that…" note in the final
   (doesn't block autonomous work).
 - **Memory** — episodic/semantic (facts + tags)/conclusions/goals/summaries, graph edges
   (**GraphRAG-lite**: densify `fact↔fact` by cosine + spreading-activation from relevant episodes
@@ -448,18 +449,18 @@ media_control, но мисроут play не ломает воспроизвед
   под HITL. Показ ссылки в основном браузере юзера — `device_control.open_url`;
   headless-поиск — только фоновый сбор фактов. По-пунктовый валидатор видит реально
   вызванные инструменты: «открываю почту» текстом без вызова тула = шаг не выполнен.
-- **Онбординг** — при первом контакте агент кратко представляется и начинает строить
-  профиль пользователя (имя, стиль), не вываливая список возможностей.
+- **Тихое профилирование** — агент строит профиль пользователя (роль, стиль, предпочтения) из
+  самого диалога, без дежурного «Привет, я твой ассистент… как к тебе обращаться?».
 - **Временные навыки** — навык, созданный под задачу, помечается `temp`; после решения
   retention-судья решает: принять в библиотеку (переиспользуем) или удалить (одноразовый).
   Не принятые навыки чистятся по TTL при старте — библиотека не зарастает мусором.
 - **Целеполагание** — определяет цель и держит «стоящую» цель + rubric в контексте.
 - **Онбординг неясной задачи (свойство системы, не одна нода)** — неоднозначность
-  ловится в трёх точках: на входе (ambiguity-гейт → переспросить), при планировании
-  (`clarify_gate` — батч точных вопросов: маркеры где набор конечен, открытые где нет)
-  и прямо в исполнении (инструмент `ask_user` — догон на развилке). Все вопросы/ответы
-  копятся в один **реестр уточнений** на прогон и переиспользуются всеми нодами — агент
-  не переспрашивает дважды. Нет ответа/канала → разумное допущение с пометкой
+  ловится в трёх точках: на входе (высокая неоднозначность → в **структурный `clarify_gate`**,
+  а не переспрос прозой), при планировании (`clarify_gate` — батч точных вопросов: маркеры где
+  набор конечен, открытые где нет; в GUI — **карточка Q/A с мультиселектом**) и прямо в исполнении
+  (инструмент `ask_user` — догон на развилке). Все вопросы/ответы копятся в один **реестр
+  уточнений** на прогон и переиспользуются всеми нодами — агент не переспрашивает дважды (дедуп). Нет ответа/канала → разумное допущение с пометкой
   «исходил из того, что…» в финале (не блокирует автономную работу).
 - **Память** — эпизодическая/семантическая (факты+тэги)/выводы/цели/саммари, граф-рёбра
   (**GraphRAG-lite**: densify `fact↔fact` по cosine + spreading-activation от релевантных
