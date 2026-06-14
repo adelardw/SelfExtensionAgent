@@ -49,6 +49,8 @@ the exact figure is the OpenRouter bill). Aggregate Wilson intervals overlap →
 yet significant at n=100; the L2 gap is solid. An earlier cheap-tier run scored 23% (run-to-run variance).
 Context: GPT-4+plugins score ~15% on GAIA; top agents ~40–50% on L1 only.
 Reproduce: `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
+**Raw per-task logs (proofs) + a no-network verifier: [`eval_results/gaia/`](eval_results/gaia/)** —
+both tiers, 100 tasks each, every `gold` vs `final`; recompute with `python scripts/gaia_summary.py`.
 
 **Universal intent router** (`src/eval/route_eval.py`, 570 labeled multilingual cases, ~100/class,
 held out of the seed): **89.3%** overall — `media_control` 93%, `physical_browser` 96%,
@@ -421,6 +423,8 @@ glm-5.1 / deepseek-v4-pro заметно сильнее на агентских 
 (run-to-run разброс). Контекст: GPT-4+плагины дают
 ~15% на GAIA; топ-агенты ~40–50% только на L1. Воспроизведение:
 `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
+**Сырые логи по задачам (пруфы) + офлайн-верификатор: [`eval_results/gaia/`](eval_results/gaia/)** —
+оба тира, по 100 задач, каждый `gold` vs `final`; пересчёт — `python scripts/gaia_summary.py`.
 
 **Универсальный роутер интентов** (`src/eval/route_eval.py`, 570 размеченных мультиязычных кейсов,
 ~100/класс, вне seed): **89.3%** overall — `media_control` 93%, `physical_browser` 96%,
