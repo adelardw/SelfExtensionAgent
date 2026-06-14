@@ -765,6 +765,24 @@ class MemoryStore:
         top_eps = self._rank_episodes(user_id, query, k, qvec)
         boost = self._graph_boost(user_id, query, qvec, top_eps)
         facts = self._rank_facts(user_id, query, qvec, boost)
+        # ГИБКАЯ глобальная память: факты тоже отбираются ПО РЕЛЕВАНТНОСТИ к запросу, а не
+        # «персона всегда». Иначе task-специфичные факты (язык/стек/сервис одной задачи)
+        # текут в несвязанный запрос (лик: «Python, Streamlit» всплыли при «включи трек»).
+        # Графовый boost тянет связанное вверх — ассоциативный факт переживёт гейт.
+        if gate > 0.0 and facts:
+            fg = max(0.18, gate * 0.85)  # калибровка: task-факт «Python/Streamlit» к музыке ~0.13 (отсечь), к app ~0.64 (оставить)
+
+            def _frel(f) -> float:
+                tg = ""
+                if "tags" in f.keys():
+                    try:
+                        tg = " ".join(json.loads(f["tags"] or "[]"))
+                    except Exception:  # noqa: BLE001
+                        tg = ""
+                rel = self._relevance(query, f"{f['key']} {f['value']} {tg}", f["embedding"], qvec)
+                return rel + boost.get(("fact", f["id"]), 0.0)
+
+            facts = [f for f in facts if _frel(f) >= fg][:8]
 
         scored_refl = []
         for rf in self._conn.execute(
