@@ -123,7 +123,7 @@
         <mxCell id="sub_sec" value="БЕЗОПАСНОСТЬ&#10;AST-гейт + smoke в песочнице (rlimits / syscall-sandbox)&#10;HITL deny-by-default на действия · защита от инъекций в выводах инструментов&#10;гарантированная фильтрация PII в recall · запрет обучения на эксплойтах/взломе" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="762" width="430" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="sub_models" value="МОДЕЛИ · config.yml (OpenRouter | Ollama локально)&#10;роли: fast=роутинг/валидация · code=исполнение · deep=heavy-ревью&#10;тезис: дешёвый класс моделей + программная обвязка, НЕ размер модели&#10;провайдер / ключ / base_url в GUI или config.local.yml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="sub_models" value="МОДЕЛИ · config.yml (OpenRouter | Ollama локально)&#10;роли: fast=роутинг/валидация · code=исполнение · deep=heavy-ревью&#10;тезис: дешёвый класс моделей + harness, НЕ размер модели&#10;провайдер / ключ / base_url в GUI или config.local.yml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="868" width="430" height="90" as="geometry" />
         </mxCell>
 
