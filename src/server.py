@@ -65,7 +65,7 @@ async def _build_graph_async() -> None:
     # уходят в deny-by-default (нет канала подтверждения в окне) → агент «ждёт
     # подтверждения», которое не появляется. auto-accept → браузер/плеер реально работают.
     # (Коммерцию/покупки агент всё равно отказывается делать на уровне логики.)
-    hitl.set_work_mode("auto-accept")
+    hitl.set_work_mode(cli_config.get_cli("work_mode") or "auto-accept")
     Path("data").mkdir(parents=True, exist_ok=True)
     try:
         import aiosqlite
@@ -96,9 +96,13 @@ class ChatIn(BaseModel):
 
 class SettingsIn(BaseModel):
     provider: str | None = None      # "openrouter" | "ollama"
-    model: str | None = None
+    model: str | None = None         # основная (fast) модель
+    code_model: str | None = None    # модель для кода/исполнения
+    deep_model: str | None = None    # модель для тяжёлого ревью
     base_url: str | None = None
     api_key: str | None = None
+    work_mode: str | None = None     # "manual" | "auto-accept" | "auto"
+    force_mode: str | None = None    # "" (авто) | fast | reason | act | deliberate | heavy
 
 
 @app.on_event("startup")
@@ -144,6 +148,7 @@ async def chat(inp: ChatIn) -> dict:
             print(f"[chat] attachment_context failed: {e}")
     r = await _graph.ainvoke(
         {"query": query, "user_id": inp.user_id, "session_id": tid,
+         "force_mode": cli_config.get_cli("force_mode") or "",
          "chat_history": history + [{"role": "user", "content": inp.query}]},
         config=cfg,
     )
@@ -216,31 +221,39 @@ async def transcribe(file: UploadFile = File(...)) -> dict:
 
 @app.get("/settings")
 def get_settings() -> dict:
-    """Текущие настройки провайдера для панели настроек GUI (ключ не раскрываем)."""
+    """Текущие настройки для панели GUI (ключ не раскрываем — только источник)."""
     return {
         "provider": cli_config.get_cli("provider") or _cfg.get("provider", "openrouter"),
-        "model": cli_config.get_cli("model") or "",
+        "model": llm.model_for("fast"),
+        "code_model": llm.model_for("code"),
+        "deep_model": llm.model_for("deep"),
         "base_url": cli_config.get_cli("base_url") or "",
         "api_key_source": llm.api_key_source(),
+        "work_mode": hitl.work_mode(),
+        "force_mode": cli_config.get_cli("force_mode") or "",
         "active": llm.active_summary(),
     }
 
 
 @app.post("/settings")
 def post_settings(s: SettingsIn) -> dict:
-    """Сохранить провайдер/endpoint/ключ (persist в config.local.yml) + живая валидация."""
-    if s.provider is not None:
-        cli_config.set_cli("provider", s.provider)
-    if s.model is not None:
-        cli_config.set_cli("model", s.model)
+    """Сохранить настройки (persist в config.local.yml) + живая валидация ключа."""
+    for key, val in (("provider", s.provider), ("model", s.model), ("code_model", s.code_model),
+                     ("deep_model", s.deep_model), ("force_mode", s.force_mode)):
+        if val is not None:
+            cli_config.set_cli(key, val or None)
     if s.base_url is not None:
         cli_config.set_cli("base_url", s.base_url or None)
     if s.api_key is not None:
         cli_config.set_cli("api_key", s.api_key or None)
+    if s.work_mode is not None:
+        cli_config.set_cli("work_mode", s.work_mode)
+        hitl.set_work_mode(s.work_mode)
     llm.set_provider(cli_config.get_cli("provider"), cli_config.get_cli("model"))
     rebuild_llms()
     ok, msg = llm.validate_credentials()
-    return {"ok": ok, "message": msg, "active": llm.active_summary(), "api_key_source": llm.api_key_source()}
+    return {"ok": ok, "message": msg, "active": llm.active_summary(),
+            "api_key_source": llm.api_key_source(), "work_mode": hitl.work_mode()}
 
 
 @app.get("/diagnose")

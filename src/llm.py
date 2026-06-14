@@ -123,13 +123,16 @@ def model_for(role: str) -> str:
         return {"fast": fast, "code": oll.get("code_model") or fast,
                 "deep": oll.get("deep_model") or oll.get("code_model") or fast,
                 "embed": oll.get("embed_model", "nomic-embed-text")}.get(role, fast)
+    # openrouter/совместимый: имена моделей по ролям можно задать из настроек (cli.*),
+    # иначе берём из config.yml.
     if role == "code":
-        return _cfg.get("code_model", {}).get("name", "gpt-4o-mini")
+        return _cli_override("code_model") or _cfg.get("code_model", {}).get("name", "gpt-4o-mini")
     if role == "deep":
-        return (_cfg.get("deep_model", {}) or {}).get("name") or _cfg.get("code_model", {}).get("name", "gpt-4o-mini")
+        return (_cli_override("deep_model") or (_cfg.get("deep_model", {}) or {}).get("name")
+                or model_for("code"))
     if role == "embed":
-        return _cfg.get("memory", {}).get("embedding_model", "openai/text-embedding-3-small")
-    return _cfg.get("model", {}).get("name", "gpt-4o-mini")
+        return _cli_override("embed_model") or _cfg.get("memory", {}).get("embedding_model", "openai/text-embedding-3-small")
+    return _cli_override("model") or _cfg.get("model", {}).get("name", "gpt-4o-mini")
 
 
 def _base_and_key() -> tuple[str, str]:

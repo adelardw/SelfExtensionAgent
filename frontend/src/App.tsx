@@ -4,7 +4,8 @@ import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, Fi
 
 type Thread = { thread_id: string; title: string; favorite?: number }
 type Msg = { role: "user" | "assistant"; content: string }
-type Cfg = { provider?: string; base_url?: string; api_key_source?: string; active?: string }
+type Cfg = { provider?: string; base_url?: string; api_key_source?: string; active?: string;
+  model?: string; code_model?: string; deep_model?: string; work_mode?: string; force_mode?: string }
 
 const uid = (() => {
   let u = localStorage.getItem("agent_uid")
@@ -266,52 +267,74 @@ export default function App() {
 
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const [cfg, setCfg] = useState<Cfg>({})
+  const [provider, setProvider] = useState("openrouter")
   const [baseUrl, setBaseUrl] = useState("")
   const [apiKey, setApiKey] = useState("")
-  const [provider, setProvider] = useState("openrouter")
+  const [model, setModel] = useState("")
+  const [codeModel, setCodeModel] = useState("")
+  const [deepModel, setDeepModel] = useState("")
+  const [workMode, setWorkMode] = useState("auto-accept")
+  const [forceMode, setForceMode] = useState("")
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState("")
-  useEffect(() => { (async () => { try { const c = await (await fetch("/settings")).json(); setCfg(c); setBaseUrl(c.base_url || ""); setProvider(c.provider || "openrouter") } catch { /* */ } })() }, [])
+  useEffect(() => {
+    (async () => {
+      try {
+        const c = await (await fetch("/settings")).json()
+        setCfg(c); setProvider(c.provider || "openrouter"); setBaseUrl(c.base_url || "")
+        setModel(c.model || ""); setCodeModel(c.code_model || ""); setDeepModel(c.deep_model || "")
+        setWorkMode(c.work_mode || "auto-accept"); setForceMode(c.force_mode || "")
+      } catch { /* */ }
+    })()
+  }, [])
   const save = async () => {
     setSaving(true); setMsg("")
     try {
-      const body: any = { provider, base_url: baseUrl }
+      const body: any = { provider, base_url: baseUrl, model, code_model: codeModel, deep_model: deepModel, work_mode: workMode, force_mode: forceMode }
       if (apiKey) body.api_key = apiKey
       const d = await (await fetch("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json()
       setMsg(d.message || ""); setCfg(c => ({ ...c, active: d.active, api_key_source: d.api_key_source })); setApiKey("")
     } catch (e: any) { setMsg("ошибка: " + e.message) } finally { setSaving(false) }
   }
-  const field = "w-full px-3 py-2.5 rounded-xl text-[13.5px] outline-none"
+  const field = "w-full px-3 py-2.5 rounded-lg text-[13.5px] outline-none font-mono"
   const fst = { background: "var(--surface)", color: "var(--ink)" } as React.CSSProperties
+  const Lbl = ({ children }: { children: any }) => <label className="block text-[11.5px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>{children}</label>
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
-      className="fixed inset-0 z-50 grid place-items-center p-5" style={{ background: "rgba(20,22,14,.5)" }}>
-      <motion.div initial={{ scale: 0.96, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.96, opacity: 0 }} transition={{ duration: 0.2 }}
-        onClick={e => e.stopPropagation()} className="w-full max-w-[440px] rounded-3xl p-6" style={{ background: "var(--surface2)", boxShadow: "var(--sh3)" }}>
-        <div className="flex items-center mb-5">
-          <h2 className="text-[20px] font-extrabold tracking-tight" style={{ color: "var(--ink)" }}>Настройки</h2>
-          <button onClick={onClose} className="ml-auto grid place-items-center w-8 h-8 rounded-lg" style={{ color: "var(--muted)" }}><X size={18} /></button>
+      className="fixed inset-0 z-50 grid place-items-center p-5" style={{ background: "rgba(9,30,66,.54)" }}>
+      <motion.div initial={{ scale: 0.97, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0 }} transition={{ duration: 0.18 }}
+        onClick={e => e.stopPropagation()} className="w-full max-w-[460px] max-h-[88vh] flex flex-col rounded-2xl" style={{ background: "var(--surface)", boxShadow: "var(--sh3)" }}>
+        <div className="flex items-center px-6 pt-5 pb-4">
+          <h2 className="text-[18px] font-bold tracking-tight" style={{ color: "var(--ink)" }}>Настройки</h2>
+          <button onClick={onClose} className="ml-auto grid place-items-center w-8 h-8 rounded-lg transition-colors" style={{ color: "var(--muted)" }}
+            onMouseEnter={e => (e.currentTarget.style.background = "var(--hover)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}><X size={18} /></button>
         </div>
-        <div className="space-y-4">
-          <div>
-            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>Провайдер</label>
-            <Dropdown value={provider} onChange={setProvider}
-              options={[{ v: "openrouter", l: "OpenRouter" }, { v: "ollama", l: "Ollama (локально)" }]} />
+        <div className="px-6 pb-4 overflow-y-auto space-y-4">
+          <div><Lbl>Провайдер</Lbl>
+            <Dropdown value={provider} onChange={setProvider} options={[{ v: "openrouter", l: "OpenRouter" }, { v: "ollama", l: "Ollama (локально)" }]} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Lbl>Основная модель</Lbl><input value={model} onChange={e => setModel(e.target.value)} placeholder="google/gemini-2.5-flash-lite" className={field} style={fst} /></div>
+            <div><Lbl>Модель кода</Lbl><input value={codeModel} onChange={e => setCodeModel(e.target.value)} placeholder="deepseek/deepseek-v4-flash" className={field} style={fst} /></div>
           </div>
-          <div>
-            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>Endpoint (base_url)</label>
-            <input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" className={field} style={fst} />
+          <div><Lbl>Модель тяжёлого ревью (deep)</Lbl><input value={deepModel} onChange={e => setDeepModel(e.target.value)} placeholder="модель для heavy-режима" className={field} style={fst} /></div>
+          <div><Lbl>Endpoint (base_url)</Lbl><input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" className={field} style={fst} /></div>
+          <div><Lbl>API-ключ · сейчас: {cfg.api_key_source || "—"}</Lbl>
+            <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="вставь ключ (необязательно)" className={field} style={fst} /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><Lbl>Режим работы</Lbl>
+              <Dropdown value={workMode} onChange={setWorkMode} options={[
+                { v: "manual", l: "Спрашивать" }, { v: "auto-accept", l: "Без спроса" }, { v: "auto", l: "Автономия" }]} /></div>
+            <div><Lbl>Режим мышления</Lbl>
+              <Dropdown value={forceMode} onChange={setForceMode} options={[
+                { v: "", l: "Авто" }, { v: "fast", l: "Быстрый" }, { v: "reason", l: "Рассуждение" },
+                { v: "act", l: "Действие" }, { v: "deliberate", l: "Глубокий" }, { v: "heavy", l: "Тяжёлый" }]} /></div>
           </div>
-          <div>
-            <label className="block text-[12px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>
-              API-ключ <span style={{ color: "var(--faint)", fontWeight: 400 }}>· сейчас: {cfg.api_key_source || "—"}</span>
-            </label>
-            <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="вставь ключ (необязательно)" className={field} style={fst} />
-          </div>
-          {cfg.active && <div className="text-[12px]" style={{ color: "var(--faint)" }}>Активно: {cfg.active}</div>}
+          {cfg.active && <div className="text-[11.5px] leading-relaxed" style={{ color: "var(--faint)" }}>Активно: {cfg.active}</div>}
           {msg && <div className="text-[12.5px] font-medium" style={{ color: "var(--accent)" }}>{msg}</div>}
+        </div>
+        <div className="px-6 py-4">
           <motion.button whileTap={{ scale: 0.98 }} onClick={save} disabled={saving}
-            className="w-full py-2.5 rounded-xl text-[13.5px] font-semibold disabled:opacity-50"
+            className="w-full py-2.5 rounded-lg text-[13.5px] font-semibold disabled:opacity-50"
             style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>{saving ? "проверяю…" : "Сохранить и проверить"}</motion.button>
         </div>
       </motion.div>
