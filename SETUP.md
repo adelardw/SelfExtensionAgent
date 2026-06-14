@@ -41,7 +41,7 @@ markdown в ответах. По умолчанию сервер в режиме
 2. В попапе расширения вставь **токен** — он в GUI (настройки → «Расширение браузера») или
    печатается в терминале при старте.
 Без расширения воспроизведение/открытие ссылок работает через управляемый Chromium
-(cloakbrowser) — тихий фолбэк.
+(cloakbrowser) — тихий fallback.
 
 ## 0.1. Кроссплатформенность и упаковка
 
@@ -106,7 +106,7 @@ iOS — сложнее (нужен Mac + WebDriverAgent/Appium), пока не �
 docker run -d -p 8080:8080 --name searxng searxng/searxng
 export SEARXNG_URL=http://localhost:8080
 ```
-Без него поиск идёт через cloakbrowser (stealth) → urllib (фолбэк).
+Без него поиск идёт через cloakbrowser (stealth) → urllib (fallback).
 
 ## 3b. Импорт своего навыка (папка / zip) с проверкой
 

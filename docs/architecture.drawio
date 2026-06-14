@@ -40,21 +40,21 @@
         <mxCell id="n_start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="480" y="372" width="120" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="n_recall" value="recall — память + AutoRAG&#10;• ГИБКИЙ recall: факты И эпизоды по РЕЛЕВАНТНОСТИ (не «персона всегда»)&#10;• гейт fg = max(0.18, gate·0.85) + graph-boost — чинит лик контекста между задачами&#10;• GraphRAG-lite по рёбрам · запрос эмбеддится 1 раз · впрыск БЗ/own_docs · анти-PII санитизация" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="n_recall" value="recall — память + AutoRAG&#10;• ГИБКИЙ recall: факты И эпизоды по РЕЛЕВАНТНОСТИ (не «персона всегда»)&#10;• порог fg = max(0.18, gate·0.85) + graph-boost — устраняет утечку контекста между задачами&#10;• GraphRAG-lite по рёбрам · эмбеддинг запроса вычисляется один раз · добавление фрагментов БЗ/own_docs · очистка от PII" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="330" y="440" width="430" height="92" as="geometry" />
         </mxCell>
         <mxCell id="n_goal" value="goal — цель + rubric&#10;формализует критерий успеха и держит его в контексте до конца прогона" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="330" y="558" width="430" height="56" as="geometry" />
         </mxCell>
-        <mxCell id="n_refl" value="reflexion — ВЫБОР типа мышления (роутер)&#10;LLM-классификатор + бандит-прайор + few-shots (без keyword-костылей)&#10;высокая неоднозначность → clarify_gate · цена/риск задачи → тир модели" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="n_refl" value="reflexion — ВЫБОР типа мышления (роутер)&#10;LLM-классификатор + априорная оценка бандита + few-shots (без эвристик по ключевым словам)&#10;высокая неоднозначность → clarify_gate · цена/риск задачи → класс модели" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="330" y="640" width="430" height="78" as="geometry" />
         </mxCell>
 
         <!-- branches -->
-        <mxCell id="n_fast" value="fast / reason&#10;System 1 / System 2&#10;прямой ответ без тулов&#10;(короткий ответ vs рассуждение)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="n_fast" value="fast / reason&#10;System 1 / System 2&#10;прямой ответ без инструментов&#10;(короткий ответ либо рассуждение)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="60" y="770" width="250" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="n_act" value="act — System 1 «с руками»&#10;1 намерение, 1–2 тула&#10;(браузер / устройство / поиск)&#10;не вышло → эскалация в deliberate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="n_act" value="act — System 1 «с руками»&#10;1 намерение, 1–2 инструмента&#10;(браузер / устройство / поиск)&#10;не вышло → эскалация в deliberate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="360" y="770" width="270" height="86" as="geometry" />
         </mxCell>
         <mxCell id="n_delib" value="deliberate / heavy&#10;многошаговый план&#10;(heavy = + ревью-петля)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
@@ -65,13 +65,13 @@
         <mxCell id="n_clar" value="clarify_gate — батч уточнений&#10;Q/A с вариантами (мультиселект), дедуп по нормализации&#10;ответы уходят в контекст плана (не переспрашивает)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="700" y="890" width="320" height="80" as="geometry" />
         </mxCell>
-        <mxCell id="n_decomp" value="decompose → skill_injection&#10;разбивка на пункты + впрыск релевантных навыков&#10;амортизация: есть паттерн → шаги без LLM (дешевле и стабильнее)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="n_decomp" value="decompose → skill_injection&#10;разбивка на пункты + добавление релевантных навыков&#10;амортизация: есть паттерн → шаги без LLM (дешевле и стабильнее)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="700" y="1000" width="320" height="84" as="geometry" />
         </mxCell>
-        <mxCell id="n_step" value="step_executor ⟲ — цикл по пунктам&#10;исполнение + покритериальная валидация&#10;валидатор видит РЕАЛЬНО вызванные тулы (анти-галлюцинация)&#10;консенсус-судьи (опц.) · ретрай при провале пункта" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="n_step" value="step_executor ⟲ — цикл по пунктам&#10;исполнение + покритериальная валидация&#10;валидатор видит РЕАЛЬНО вызванные инструменты (защита от галлюцинаций)&#10;консенсус-судьи (опц.) · ретрай при провале пункта" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="700" y="1114" width="320" height="96" as="geometry" />
         </mxCell>
-        <mxCell id="n_synth" value="synthesize → validation&#10;сборка ответа со ссылками / грундингом&#10;heavy: review ⟲ (deep-модель крутит ревью до порога)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+        <mxCell id="n_synth" value="synthesize → validation&#10;сборка ответа с привязкой к источникам&#10;heavy: review ⟲ (deep-модель повторяет ревью до достижения порога)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
           <mxGeometry x="700" y="1240" width="320" height="80" as="geometry" />
         </mxCell>
 
@@ -102,16 +102,16 @@
         <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;strokeColor=#555555;" edge="1" parent="1" source="n_reflect" target="n_end"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- ===== CROSS-CUTTING SUBSYSTEMS (right column) ===== -->
-        <mxCell id="sub_mem" value="ПАМЯТЬ · memory/store.py&#10;типы: эпизоды / факты / выводы / цели + рёбра графа&#10;ГИБКИЙ recall по релевантности (фикс лика контекста между задачами)&#10;TurboVec-ANN (семантика) · importance не разделяет → решает релевантность&#10;journal → implicit feedback для backward" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="sub_mem" value="ПАМЯТЬ · memory/store.py&#10;типы: эпизоды / факты / выводы / цели + рёбра графа&#10;ГИБКИЙ recall по релевантности (устранение утечки контекста между задачами)&#10;TurboVec-ANN (семантика) · важность не разделяет → решает релевантность&#10;journal → implicit feedback для backward" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="70" width="430" height="104" as="geometry" />
         </mxCell>
         <mxCell id="sub_router" value="INTENT-РОУТЕР · intent.py&#10;embedding-kNN кодбук интентов: web_grounding / physical /&#10;play / media_control / self_contained · любой язык (мультиязычно)&#10;few-shots pos/neg · онлайн-рост из фидбека&#10;creation-seed → self_contained (анти-hijack веб-поиска)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="190" width="430" height="104" as="geometry" />
         </mxCell>
-        <mxCell id="sub_skills" value="НАВЫКИ · skills/* + registry.json&#10;ToolSearch (BM25S) поверх каталога тулов&#10;browser_control (DOM-снапшот, клик по №) · device/app/ax/phone&#10;web_search · skill_creation (агент пишет себе навык)&#10;ИМПОРТ внешних: карантин(анти-zip-slip)→AST-гейт→smoke-песочница→registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="sub_skills" value="НАВЫКИ · skills/* + registry.json&#10;ToolSearch (BM25S) поверх каталога инструментов&#10;browser_control (снимок DOM, клик по №) · device/app/ax/phone&#10;web_search · skill_creation (агент пишет себе навык)&#10;ИМПОРТ внешних: карантин(анти-zip-slip)→AST-гейт→smoke-песочница→registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="310" width="430" height="104" as="geometry" />
         </mxCell>
-        <mxCell id="sub_kb" value="БАЗА ЗНАНИЙ · knowledge_base.py&#10;LightRAG-граф: сущности + связи, multi-hop обход&#10;BM25-фолбэк (граф за тулом) · AutoRAG-впрыск в recall&#10;сессионные вложения файлов (tmp, own_docs-флаг)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="sub_kb" value="БАЗА ЗНАНИЙ · knowledge_base.py&#10;LightRAG-граф: сущности + связи, multi-hop обход&#10;BM25 fallback (граф за инструментом) · добавление AutoRAG в recall&#10;сессионные вложения файлов (tmp, флаг own_docs)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="430" width="430" height="90" as="geometry" />
         </mxCell>
         <mxCell id="sub_cap" value="СПОСОБНОСТИ-ТУЛЫ&#10;research: план → поиск (SearXNG / cloakbrowser) → верификация → синтез&#10;python_exec (песочница rlimits) · vision-разбор PDF&#10;MCP: discover в реестре → approve → connect (uvx / npx)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
@@ -120,10 +120,10 @@
         <mxCell id="sub_learn" value="САМООБУЧЕНИЕ / АМОРТИЗАЦИЯ&#10;forward: few-shots (глобальные + пер-юзер)&#10;backward: дифф-вина по трейсу → «градиенты» → оптимизация промптов&#10;измеримо ДО/ПОСЛЕ · ParamStore (НЕ трогает код графа)&#10;лестница паттерн→привычка→навык · коллективный ярус · бандит-выбор" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="642" width="430" height="104" as="geometry" />
         </mxCell>
-        <mxCell id="sub_sec" value="БЕЗОПАСНОСТЬ&#10;AST-гейт + smoke в песочнице (rlimits / syscall-sandbox)&#10;HITL deny-by-default на действия · анти-injection в выводах тулов&#10;анти-PII пол recall · запрет обучения на эксплойтах/взломе" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="sub_sec" value="БЕЗОПАСНОСТЬ&#10;AST-гейт + smoke в песочнице (rlimits / syscall-sandbox)&#10;HITL deny-by-default на действия · защита от инъекций в выводах инструментов&#10;гарантированная фильтрация PII в recall · запрет обучения на эксплойтах/взломе" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="762" width="430" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="sub_models" value="МОДЕЛИ · config.yml (OpenRouter | Ollama локально)&#10;роли: fast=роутинг/валидация · code=исполнение · deep=heavy-ревью&#10;тезис: дешёвый тир + харнесс, НЕ размер модели&#10;провайдер / ключ / base_url в GUI или config.local.yml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
+        <mxCell id="sub_models" value="МОДЕЛИ · config.yml (OpenRouter | Ollama локально)&#10;роли: fast=роутинг/валидация · code=исполнение · deep=heavy-ревью&#10;тезис: дешёвый класс моделей + программная обвязка, НЕ размер модели&#10;провайдер / ключ / base_url в GUI или config.local.yml" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=10;spacingTop=6;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="1100" y="868" width="430" height="90" as="geometry" />
         </mxCell>
 
