@@ -53,7 +53,9 @@ def open_url(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     if _OS == "Darwin":
-        ok, out = _run(["open", url])
+        # -g: открыть В ФОНЕ, не выдёргивая пользователя из текущего окна (физ-браузер —
+        # тихий бонус, без кражи фокуса). Воспроизведение идёт отдельным путём (browser_bridge).
+        ok, out = _run(["open", "-g", url])
     elif _OS == "Windows":
         ok, out = _run(["cmd", "/c", "start", "", url])
     else:  # Linux/BSD

@@ -421,6 +421,13 @@ function Dropdown({ value, onChange, options }: { value: string; onChange: (v: s
   )
 }
 
+function AnimatedDots() {
+  return <span className="inline-flex ml-0.5">
+    {[0, 1, 2].map(i => <motion.span key={i} animate={{ opacity: [0.15, 1, 0.15] }}
+      transition={{ duration: 1.3, repeat: Infinity, delay: i * 0.22, ease: "easeInOut" }}>.</motion.span>)}
+  </span>
+}
+
 // Реальный ход исполнения (прогресс по узлам графа) — траектория, текущий шаг ярче.
 function Working({ steps, current }: { steps: string[]; current: string }) {
   const shown = (steps.length ? steps : current ? [current] : ["Думаю"]).slice(-6)
@@ -433,8 +440,13 @@ function Working({ steps, current }: { steps: string[]; current: string }) {
             <motion.div key={s} layout initial={{ opacity: 0, filter: "blur(5px)", x: -4 }}
               animate={{ opacity: last ? 1 : 0.4, filter: "blur(0px)", x: 0 }} transition={{ duration: 0.5, ease: [0.4, 0, 0.2, 1] }}
               className="flex items-center gap-2 text-[13.5px]" style={{ color: last ? "var(--ink)" : "var(--faint)" }}>
-              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: last ? "var(--accent)" : "var(--faint)" }} />
-              <span>{s}{last ? "…" : ""}</span>
+              {last
+                ? <motion.span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--accent)" }}
+                    animate={{ opacity: [1, 0.25, 1], scale: [1, 0.6, 1] }} transition={{ duration: 1.3, repeat: Infinity, ease: "easeInOut" }} />
+                : <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--faint)" }} />}
+              {last
+                ? <span className="flex items-center">{s}<AnimatedDots /></span>
+                : <span>{s}</span>}
             </motion.div>
           )
         })}
