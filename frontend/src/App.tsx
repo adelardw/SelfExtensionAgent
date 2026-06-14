@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
+import { marked } from "marked"
+import DOMPurify from "dompurify"
 import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, FileText, ChevronDown, Check } from "lucide-react"
+
+marked.setOptions({ gfm: true, breaks: true })
 
 type Thread = { thread_id: string; title: string; favorite?: number }
 type Msg = { role: "user" | "assistant"; content: string }
@@ -16,17 +20,12 @@ const newId = () => (crypto.randomUUID ? crypto.randomUUID() : "t-" + Date.now()
 const esc = (s: string) => (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]!))
 
 function md(s: string): string {
-  s = esc(s)
-  s = s.replace(/```(\w*)\n?([\s\S]*?)```/g, (_m, _l, c) => "<pre><code>" + c.replace(/\n$/, "") + "</code></pre>")
-  s = s.replace(/`([^`\n]+)`/g, "<code>$1</code>")
-  s = s.replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>")
-  s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>").replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<i>$2</i>")
-  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>')
-  // авто-ссылки на «голые» URL (не трогаем те, что уже внутри href="…")
-  s = s.replace(/(?<!["(])(https?:\/\/[^\s<>")]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>')
-  s = s.replace(/(?:^|\n)((?:[-*] .*(?:\n|$))+)/g, (_m, b: string) => "\n<ul>" + b.trim().split("\n").map(l => "<li>" + l.replace(/^[-*] /, "") + "</li>").join("") + "</ul>")
-  s = s.replace(/(?:^|\n)((?:\d+\. .*(?:\n|$))+)/g, (_m, b: string) => "\n<ol>" + b.trim().split("\n").map(l => "<li>" + l.replace(/^\d+\. /, "") + "</li>").join("") + "</ol>")
-  return s.split(/\n{2,}/).map(p => /^\s*<(h\d|ul|ol|pre)/.test(p) ? p : "<p>" + p.replace(/\n/g, "<br>") + "</p>").join("")
+  try {
+    const html = marked.parse(s || "", { async: false }) as string
+    return DOMPurify.sanitize(html, { ADD_ATTR: ["target", "rel"] })
+  } catch {
+    return esc(s).replace(/\n/g, "<br>")
+  }
 }
 
 export default function App() {
