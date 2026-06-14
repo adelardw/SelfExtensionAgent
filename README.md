@@ -31,6 +31,7 @@ Honest numbers on a **cheap tier** (`google/gemini-2.5-flash-lite` for routing/v
 | baseline (n=20, before fixes) | 15% | 29% | 14% | 0% | $0.16 |
 | **after fixes (n=100)** | **23%** | **49%** | 8% | 8% | $0.58 |
 
+Overall 95% Wilson CI: baseline **15% [5–36%]** (n=20 — wide), after fixes **23% [16–32%]** (n=100).
 The L1 jump (29%→49%) came from fixing "give-up" behavior (research now reads real findings
 instead of answering "couldn't determine"). L2/L3 (8%/8%) are the ceiling of this model tier
 (multi-hop + files). Context: GPT-4+plugins score ~15% on GAIA; top agents ~40–50% on L1 only.
@@ -377,6 +378,7 @@ UI automation outside macOS.
 | baseline (n=20, до фиксов) | 15% | 29% | 14% | 0% | $0.16 |
 | **после фиксов (n=100)** | **23%** | **49%** | 8% | 8% | $0.58 |
 
+Overall 95% Wilson CI: baseline **15% [5–36%]** (n=20 — широкий), после фиксов **23% [16–32%]** (n=100).
 Скачок L1 (29%→49%) дал фикс «give-up» поведения (ресёрч теперь читает реальные находки вместо
 ответа «не удалось определить»). L2/L3 (8%/8%) — потолок этого тира моделей (мультихоп + файлы).
 Контекст: GPT-4+плагины дают ~15% на GAIA; топ-агенты ~40–50% только на L1. Воспроизведение:
