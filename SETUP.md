@@ -19,14 +19,29 @@ TELEGRAM_BOT_TOKEN=...               # опц. — Telegram-бот
 uvicorn src.server:app --port 8000   # HTTP API + веб-GUI на http://localhost:8000/
 .venv/bin/python desktop.py          # нативное окно с чат-GUI (uv sync --group gui)
 ```
-**GUI** — отдельный фронт на **React + Vite + Tailwind** (шрифт Geist), мозг остаётся на
-Python (FastAPI). Тонкий клиент + мозг.
+**GUI** — отдельный фронт на **React + Vite + Tailwind** (шрифт Inter, токены Atlassian
+Design System), мозг остаётся на Python (FastAPI). Тонкий клиент + мозг.
 ```bash
-cd frontend && npm install && npm run build   # собрать GUI (один раз)
-# затем сервер отдаёт его на http://localhost:8000/
+cd frontend && npm install && npm run build   # собрать GUI (один раз) → сервер отдаёт на :8000/
 cd frontend && npm run dev                     # ИЛИ dev-режим (HMR), проксирует API на :8000
 ```
-`desktop.py` — нативное окно ОС (системный webview, без Electron) поверх того же сервера.
+`desktop.py` — нативное окно ОС (системный webview, без Electron) поверх того же сервера
+(`uv sync --group gui` для pywebview).
+
+Что умеет окно: история тредов, **настройки** (шестерёнка слева внизу: провайдер, модели
+по ролям fast/code/deep, endpoint, API-ключ с валидацией, режим работы/мышления,
+**токен расширения**), 📎 прикрепить файл, 🎙 голосовой ввод (нужно разрешение на микрофон),
+markdown в ответах. По умолчанию сервер в режиме **auto-accept** (действия без спроса —
+ты локальный оператор).
+
+### Расширение браузера (агент в ТВОЁМ Chrome)
+Мост поднимается сам при старте `desktop.py`/сервера (WS `127.0.0.1:8777`). Чтобы агент
+действовал в твоём браузере (твои логины/вкладки), а не в управляемом окне:
+1. `chrome://extensions` → включи **Developer mode** → **Load unpacked** → папка `extension/`.
+2. В попапе расширения вставь **токен** — он в GUI (настройки → «Расширение браузера») или
+   печатается в терминале при старте.
+Без расширения воспроизведение/открытие ссылок работает через управляемый Chromium
+(cloakbrowser) — тихий фолбэк.
 
 ## 0.1. Кроссплатформенность и упаковка
 
@@ -49,9 +64,10 @@ PyInstaller не кросс-компилирует: для всех трёх О�
 бинарь кладёт дефолтный `config.yml` рядом с собой; данные (`data/`, `config.local.yml`)
 персистятся в рабочей папке.
 
-**Провайдер и ключ без `.env`** — в REPL `/config` → пункт «Провайдер/ключ»: ввод API-ключа и
-`base_url` (любой OpenAI-совместимый endpoint) с живой валидацией; сохраняется в
-`config.local.yml`. env-ключ (`OPEN_ROUTER_API_KEY`) имеет приоритет.
+**Провайдер, модели и ключ без `.env`** — в GUI (шестерёнка) или в REPL `/config`: провайдер,
+модели по ролям (fast/code/deep), `base_url` (любой OpenAI-совместимый endpoint), API-ключ —
+с живой валидацией; сохраняется в `config.local.yml`. env-ключ (`OPEN_ROUTER_API_KEY`) имеет
+приоритет над введённым в настройках.
 
 ## 1. Работа с приложениями ПК «без костылей»
 
@@ -141,4 +157,5 @@ provider: ollama   # было: openrouter
 | ax_control / device_control | Privacy → **Accessibility** (+ Terminal/python) |
 | app_control (AppleScript) | Privacy → **Automation** (Terminal → приложения) |
 | screencapture | Privacy → **Screen Recording** (если нужен скрин) |
+| 🎙 голосовой ввод в GUI | Privacy → **Microphone** (для приложения окна/браузера) |
 | phone_control | `adb` + USB-отладка на телефоне |
