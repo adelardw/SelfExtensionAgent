@@ -9,7 +9,8 @@ marked.setOptions({ gfm: true, breaks: true })
 type Thread = { thread_id: string; title: string; favorite?: number }
 type Msg = { role: "user" | "assistant"; content: string }
 type Cfg = { provider?: string; base_url?: string; api_key_source?: string; active?: string;
-  model?: string; code_model?: string; deep_model?: string; work_mode?: string; force_mode?: string }
+  model?: string; code_model?: string; deep_model?: string; work_mode?: string; force_mode?: string;
+  bridge_connected?: boolean; bridge_token?: string; bridge_port?: number }
 
 const uid = (() => {
   let u = localStorage.getItem("agent_uid")
@@ -332,6 +333,14 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
               <Dropdown value={forceMode} onChange={setForceMode} options={[
                 { v: "", l: "Авто" }, { v: "fast", l: "Быстрый" }, { v: "reason", l: "Рассуждение" },
                 { v: "act", l: "Действие" }, { v: "deliberate", l: "Глубокий" }, { v: "heavy", l: "Тяжёлый" }]} /></div>
+          </div>
+          <div className="pt-1">
+            <Lbl>Расширение браузера <span style={{ color: cfg.bridge_connected ? "#3ecf8e" : "var(--faint)", fontWeight: 600 }}>
+              · {cfg.bridge_connected ? "подключено" : "не подключено"}</span></Lbl>
+            <div className="rounded-lg p-3 text-[12px] leading-relaxed" style={{ background: "var(--surface)", color: "var(--muted)" }}>
+              Чтобы агент действовал в ТВОЁМ Chrome (логины, вкладки): <code className="px-1 rounded" style={{ background: "var(--hover)", fontFamily: "var(--font-mono)" }}>chrome://extensions</code> → Developer mode → Load unpacked → папка <b>extension/</b>, вставь токен в попап:
+              <div className="mt-2 px-2.5 py-1.5 rounded select-all break-all" style={{ background: "var(--hover)", color: "var(--ink)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{cfg.bridge_token || "—"}</div>
+            </div>
           </div>
           {cfg.active && <div className="text-[11.5px] leading-relaxed" style={{ color: "var(--faint)" }}>Активно: {cfg.active}</div>}
           {msg && <div className="text-[12.5px] font-medium" style={{ color: "var(--accent)" }}>{msg}</div>}

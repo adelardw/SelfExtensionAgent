@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 
-from . import chat_store, cli_config, hitl, knowledge_base, llm, media
+from . import browser_bridge, chat_store, cli_config, hitl, knowledge_base, llm, media
 from .agent import build_graph, memory_store, rebuild_llms
 from .improve import graph_backward
 from .tracing import diagnose, trace_store
@@ -80,6 +80,31 @@ async def _build_graph_async() -> None:
 
         print(f"[server] AsyncSqliteSaver недоступен ({type(e).__name__}: {e}) → MemorySaver")
         _graph = build_graph(MemorySaver())
+
+    # Мост браузерного расширения — поднимаем СРАЗУ при старте, чтобы расширение могло
+    # подключиться (агент в ТВОЁМ Chrome). Идемпотентно. Печатаем токен для попапа.
+    try:
+        browser_bridge.ensure_server()
+
+        async def _ext_chat(text: str) -> str:
+            """Чат ИЗ попапа расширения → тот же граф, тред 'extension'."""
+            try:
+                hist = chat_store.get_messages("extension", last=_HISTORY_LIMIT)
+                r = await _graph.ainvoke(
+                    {"query": text, "user_id": "local", "session_id": "extension",
+                     "chat_history": hist + [{"role": "user", "content": text}]},
+                    config={"configurable": {"thread_id": "extension"}, "recursion_limit": 50})
+                ans = r.get("final_answer", "") or "(пустой ответ)"
+                chat_store.record_turn("extension", "local", text, ans)
+                return ans
+            except Exception as ex:  # noqa: BLE001
+                return f"ошибка: {type(ex).__name__}: {ex}"
+
+        browser_bridge.set_chat_handler(_ext_chat)
+        print(f"[server] 🧩 мост браузера слушает 127.0.0.1:{browser_bridge.PORT} · "
+              f"токен для расширения: {browser_bridge.token()}")
+    except Exception as e:  # noqa: BLE001
+        print(f"[server] мост браузера не поднялся: {type(e).__name__}: {e}")
 
 
 # Рабочий буфер связности реплик: последние N сообщений треда (берём из
@@ -232,6 +257,9 @@ def get_settings() -> dict:
         "work_mode": hitl.work_mode(),
         "force_mode": cli_config.get_cli("force_mode") or "",
         "active": llm.active_summary(),
+        "bridge_connected": browser_bridge.connected(),
+        "bridge_token": browser_bridge.token(),
+        "bridge_port": browser_bridge.PORT,
     }
 
 
