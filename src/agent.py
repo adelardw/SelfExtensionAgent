@@ -534,44 +534,10 @@ _PHYSICAL_SKILLS = frozenset({
 })
 
 
-_FALSE_REFUSAL_RE = re.compile(
-    r"не имею доступа|нет доступа к|не могу получить доступ|cannot access|"
-    r"don'?t have access|ограничен[ао].{0,30}(доступ|данны)|"
-    r"не имею возможности.{0,20}доступ", re.I)
-
-
-_META_ACK_RE = re.compile(
-    r"список\s+выше|выше\s+привед\?н|как\s+(сказано|указано|перечислено)\s+(выше|ранее)|"
-    r"я\s+(перечислил|нашёл и перечислил|вывел|привёл)|задача\s+выполнена|всё\s+готово|"
-    r"я\s+это\s+сделал|см\.\s+выше", re.I)
-
-
-def _is_meta_ack(text: str) -> bool:
-    """Мета-ответ-заглушка вместо результата: «я перечислил / список выше / задача выполнена»
-    — данные остались в ToolMessage, юзеру не видны. Короткий ответ с такими маркерами и без
-    самого содержимого → нужен ресинтез результата целиком."""
-    t = (text or "").strip()
-    return bool(_META_ACK_RE.search(t)) and len(t) < 400
-
-
-def _is_false_access_refusal(text: str) -> bool:
-    """Ложный отказ «нет доступа к аккаунтам/данным/вебу» — жёстко запрещён: доступ ЕСТЬ
-    через расширение. Модель срывается в него под давлением бюджета/неудачи (живой баг
-    на Spotify Liked Songs). Ловим, чтобы заменить честным статусом."""
-    return bool(_FALSE_REFUSAL_RE.search(text or ""))
-
-
-def _is_degenerate(text: str) -> bool:
-    """Вырожденный повтор в ответе (модель залипла: «I'm Sorry» ×58) — это галлюцинация,
-    не данные. Признак: большой объём при крошечной доле уникальных слов. Дешёвый детектор
-    без LLM, общий для любого финала (анти-галлюцинация — жёсткое требование проекта)."""
-    # Чистим нумерацию списка и пунктуацию: «57.», «(I'm», «Sorry)» не должны маскировать
-    # повтор уникальными номерами строк (иначе 1..58 раздували долю уникальных слов).
-    words = [w for w in re.sub(r"[\d().,\[\]]+", " ", text or "").split() if w]
-    if len(words) < 60:
-        return False
-    uniq = len({w.lower() for w in words})
-    return uniq / len(words) < 0.15
+# Анти-галлюцинация БЕЗ регэкспов (общий модуль): paywall — embedding-классификатор (любой
+# язык), degenerate — структурный счётчик уникальных слов. Ложный отказ «нет доступа» и
+# мета-заглушка теперь флагает финальный LLM-валидатор (validation_node), не список слов.
+from .semantic_signals import is_degenerate as _is_degenerate, is_paywall as _is_paywall
 
 
 def _is_play_intent(query: str, qvec: list | None = None) -> bool:
@@ -804,20 +770,14 @@ async def act_node(state: GeneralGraphState) -> dict:
         dom = _service_domain(tool_texts)
         via = f" (через {dom})" if dom else ""
         return {"final_answer": f"Запустил, играет{what}{via}. 🎧 Вкладка в твоём браузере."}
-    low = (output or "").lower()
-    claims_playing = any(w in low for w in ("играет", "включил", "запустил", "воспроизвод"))
 
     # ДЕТЕРМИНИРОВАННЫЙ ДОЖИМ ПЛЕЯ: дешёвая модель открывает страницу и бросает, не нажав
     # «Воспроизведение» (живой лог: кнопки [39..] в снапшоте, но клика нет). На play-intent
     # СТЕНА ПОДПИСКИ/ВХОДА: контент платный/закрыт (нет смысла жать плей — заиграет мусор;
     # живой баг на Кинопоиске: автоплей кликнул «Загрузить в Google Play»). Честный отказ.
-    # ОБОБЩЁННЫЙ детект подписочной/входной стены (любой сервис): premium-гейт (jut.su+, Plus),
-    # «для просмотра необходимо», «только для подписчиков», апгрейд тира, вход в аккаунт.
-    _PAYWALL_RE = (r"расширить подписку|оформить подписк|смотреть по подписке|подключить подписк|"
-                   r"оформить подписку|войти в аккаунт|необходимо наличие|для просмотра[^.]{0,40}"
-                   r"(необходим|нужн|подписк|оформи)|только для подписчиков|нужна подписк|"
-                   r"требуется подписк|купить|арендовать|оформить|premium|премиум|"
-                   r"[\wа-я.]{2,12}\+\b.{0,20}(подписк|смотр|доступ)|подписк.{0,20}[\wа-я.]{2,12}\+")
+    # ОБОБЩЁННЫЙ детект подписочной/входной стены (любой сервис/ЯЗЫК): premium-гейт (jut.su+,
+    # Plus), «для просмотра необходимо», «только для подписчиков», апгрейд тира, вход в аккаунт.
+    # Мультиязычные паттерны — в semantic_signals.is_paywall (RU/EN+CJK/AR/…), не местный регэксп.
     def _paywall_answer() -> dict:
         dom = _service_domain(tool_texts)
         where = f" на {dom}" if dom else ""
@@ -828,7 +788,7 @@ async def act_node(state: GeneralGraphState) -> dict:
 
     # Стена подписки/входа ВИДНА УЖЕ В СНАПШОТЕ → ранний честный отказ (не жмём плей по мусору;
     # живой баг на Кинопоиске: автоплей кликнул «Загрузить в Google Play»).
-    if play_intent and not confirmed and re.search(_PAYWALL_RE, tool_texts, re.I):
+    if play_intent and not confirmed and _is_paywall(tool_texts):
         return _paywall_answer()
 
     # нода САМА жмёт плей через browser_media('play') (он кликает первую кнопку play) —
@@ -846,13 +806,13 @@ async def act_node(state: GeneralGraphState) -> dict:
         except Exception as e:  # noqa: BLE001
             print(f"[Act] авто-плей не вышел: {type(e).__name__}")
 
-    if (play_intent or claims_playing) and not _is_playing(tool_texts):
+    if play_intent and not _is_playing(tool_texts):
         # Не пошло даже после дожима → проверим СТЕНУ ПОДПИСКИ в ТЕКСТЕ страницы (сигнал часто
         # в оверлее плеера, не в снапшоте: jut.su «Для просмотра серии необходимо наличие Jut.su+»).
         if play_intent and browser_bridge.connected():
             try:
                 page = await browser_bridge.read()
-                if isinstance(page, str) and re.search(_PAYWALL_RE, page, re.I):
+                if isinstance(page, str) and _is_paywall(page):
                     tool_texts = (tool_texts + " " + page)[-2000:]
                     return _paywall_answer()
             except Exception:  # noqa: BLE001
@@ -1521,11 +1481,11 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
         resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
 
     text = strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp))
-    # МЕТА-ОТВЕТ вместо результата: модель пишет «я перечислил / список выше / задача
-    # выполнена», а сам результат (список) остался в ToolMessage и юзеру НЕ виден (живой баг
-    # browse: «перечислил 5 названий» — без названий). Пустота ИЛИ мета-ответ → ресинтез
-    # с требованием выдать РЕЗУЛЬТАТ ЦЕЛИКОМ из данных инструментов.
-    if not text.strip() or _is_meta_ack(text):
+    # ПУСТОЙ финал direct-шага → ресинтез РЕЗУЛЬТАТА ЦЕЛИКОМ из данных инструментов (они в
+    # ToolMessage, юзеру не видны). Промпт ниже сам запрещает мета-ответы («список выше/я
+    # перечислил»). Мета-заглушку в НЕпустом финале ловит финальный LLM-валидатор (семантически,
+    # любой язык), а не лексиконный регэксп здесь — см. validation_node.
+    if not text.strip():
         final = await asyncio.wait_for(code_llm.ainvoke(
             msgs + [resp, HumanMessage(content=(
                 "Выдай пользователю РЕЗУЛЬТАТ ЦЕЛИКОМ прямо здесь, опираясь на данные из "
@@ -1824,29 +1784,14 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
                   "или подгружается прокруткой). Открой нужный список и скажи точнее, что "
                   "показать — перечислю только реально видимое, без выдумок.")
 
-    # АНТИ-ЛОЖНЫЙ-ОТКАЗ (жёсткое правило проекта: НИКОГДА не «нет доступа»): под давлением
-    # бюджета/неудачи модель срывается в безопасный отказ «не имею доступа к личным аккаунтам»
-    # — но доступ ЕСТЬ через расширение (живой баг на Spotify Liked Songs). Заменяем на
-    # честный статус: задача физического веба → инструменты есть, просто не довели.
-    if _is_false_access_refusal(answer):
-        answer = ("Не довёл до конца в этом прогоне (физический веб через расширение доступен — "
-                  "вопрос не в доступе). Скажи «продолжи» — доведу с места остановки, либо уточни "
-                  "сервис/раздел.")
+    # АНТИ-ЛОЖНЫЙ-ОТКАЗ (жёсткое правило проекта: НИКОГДА не «нет доступа») вынесен в финальный
+    # LLM-валидатор: он флагает ложный отказ семантически на любом языке (ValidationResult.
+    # false_refusal → validation_node подменяет честным статусом), без лексиконного регэкспа тут.
 
-    # АНТИ-ЛОЖЬ О ЗАВЕРШЕНИИ: если прогон ОБРЕЗАН бюджетом или есть НЕвыполненные подшаги,
-    # запрещаем заявлять «добавил/заказал/готово/включил» (живой баг: «я добавил в корзину»
-    # при 0% уверенности и исчерпанном бюджете). Честно говорим, что НЕ доведено.
-    subs = state.get("subtasks", []) or []
-    cut = runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS)
-    incomplete = cut or any(s.get("status") not in ("done", "blocked") for s in subs)
-    if incomplete and re.search(r"добавил|заказал|оформил|готово|включил|отправил|сделал|"
-                                r"в корзин|добавлен|включаю|добавляю|заказываю|оформляю|отправляю",
-                                answer.lower()):
-        done = [s["goal"] for s in subs if s.get("status") == "done"]
-        progress = ("Успел: " + "; ".join(done[:4])) if done else "Подтверждённого результата нет."
-        why = "бюджет прогона исчерпан" if cut else "не все шаги завершены"
-        answer = (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным. {progress}. "
-                  "Проверь и скажи, продолжить ли с места остановки.")
+    # АНТИ-ЛОЖЬ О ЗАВЕРШЕНИИ («добавил/заказал/готово/включил» при оборванном прогоне) вынесена в
+    # финальный LLM-валидатор: он получает run_status=incomplete и флагает false_completion
+    # семантически на любом языке (validation_node подменяет честным статусом с прогрессом).
+
     # Анти-PII пол (Thread 2c): выдуманный email (нет в запросе/находках/памяти) → убрать.
     grounded = state["query"] + "\n" + state.get("memory_context", "") + "\n" + results_text
     answer = strip_ungrounded_pii(answer, grounded)
@@ -1910,17 +1855,28 @@ async def validation_node(state: GeneralGraphState) -> dict:
     rubric = state.get("goal_rubric", []) or []
     rubric_text = "\n".join(f"- {c}" for c in rubric) if rubric else "Rubric не задан — оцени по общим критериям."
 
+    # Структурный сигнал «прогон оборван/незавершён» — судье для флага false_completion (ловит
+    # ложь о завершении семантически, любой язык, вместо русско-центричного регэкспа в synthesize).
+    _subs = state.get("subtasks", []) or []
+    _cut = runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS)
+    incomplete = _cut or any(s.get("status") not in ("done", "blocked") for s in _subs)
+
     payload = {
         "query": state["query"],
         "final_answer": state.get("final_answer", "Ответ не сгенерирован."),
         "chat_history": _format_chat_history(state),
         "goal_rubric": rubric_text,
+        "run_status": "incomplete" if incomplete else "complete",
     }
     # Надёжность: модель иногда возвращает битый JSON → structured-output кидает.
     # Это НЕ должно ронять весь прогон (ответ пользователю уже есть) — мягко принимаем.
     try:
         result = await validation_chain.ainvoke(payload)
         is_valid, confidence, feedback = result.is_valid, result.confidence, result.feedback
+        # Анти-галлюцинация семантически (флаги судьи, любой язык) — вместо регэкспов в коде.
+        flag_false_refusal = bool(getattr(result, "false_refusal", False))
+        flag_meta_stub = bool(getattr(result, "meta_stub", False))
+        flag_false_completion = bool(getattr(result, "false_completion", False))
     except Exception as e:  # noqa: BLE001
         print(f"[Validation] primary judge parse failed ({type(e).__name__}) → принимаю ответ как есть")
         return {"validation_passed": True, "confidence": LOW_CONF,
@@ -1937,8 +1893,39 @@ async def validation_node(state: GeneralGraphState) -> dict:
             confidence = min(result.confidence, b.confidence) * (1.0 if agree else 0.6)
             if not agree:
                 feedback = f"[консенсус: расхождение судей] {feedback} | 2-й: {b.feedback}"
+            # Флаг анти-галлюцинации достаточно поднять ОДНОМУ судье (sensitivity > consensus).
+            flag_false_refusal = flag_false_refusal or bool(getattr(b, "false_refusal", False))
+            flag_meta_stub = flag_meta_stub or bool(getattr(b, "meta_stub", False))
+            flag_false_completion = flag_false_completion or bool(getattr(b, "false_completion", False))
         except Exception as e:  # noqa: BLE001
             print(f"[Validation] consensus skipped: {e}")
+
+    # Ложный отказ «нет доступа» (жёсткое правило проекта: НИКОГДА не «нет доступа» — доступ ЕСТЬ
+    # через расширение). Подменяем честным статусом и ПРИНИМАЕМ: ретрай лишь воспроизведёт срыв.
+    if flag_false_refusal:
+        print("[Validation] судья: ложный отказ «нет доступа» → честный статус (доступ есть)")
+        return {"validation_passed": True, "confidence": LOW_CONF,
+                "final_answer": ("Не довёл до конца в этом прогоне (физический веб через расширение "
+                                 "доступен — вопрос не в доступе). Скажи «продолжи» — доведу с места "
+                                 "остановки, либо уточни сервис/раздел."),
+                "validation_feedback": "ложный отказ «нет доступа» подменён честным статусом",
+                "global_retries": state.get("global_retries", 0)}
+    # Ложь о завершении при оборванном прогоне → честный статус с реальным прогрессом, ПРИНЯТЬ
+    # (ретрай не «дозавершит» — прогон уже исчерпан). Заменяет регэксп «добавил|заказал…» в synthesize.
+    if flag_false_completion and incomplete:
+        done = [s["goal"] for s in _subs if s.get("status") == "done"]
+        progress = ("Успел: " + "; ".join(done[:4])) if done else "Подтверждённого результата нет."
+        why = "бюджет прогона исчерпан" if _cut else "не все шаги завершены"
+        print("[Validation] судья: ложь о завершении при незавершённом прогоне → честный статус")
+        return {"validation_passed": True, "confidence": LOW_CONF,
+                "final_answer": (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным. "
+                                 f"{progress}. Проверь и скажи, продолжить ли с места остановки."),
+                "validation_feedback": "ложь о завершении при незавершённом прогоне → честный статус",
+                "global_retries": state.get("global_retries", 0)}
+    # Мета-заглушка вместо результата → невалидно: уходит на ретрай собрать результат целиком.
+    if flag_meta_stub:
+        is_valid = False
+        feedback = "ответ — мета-заглушка без самого результата (выдай результат целиком). " + feedback
 
     retries = state.get("global_retries", 0)
     # Инкремент только когда реально уходим на полный ретрай (см. route_after_validation).

@@ -62,28 +62,49 @@ def test_reflexion_prompt_routes_browse_to_act():
     assert "grounding" in text.lower()
 
 
-def test_meta_ack_detected():
-    """Мета-ответ-заглушка («я перечислил/список выше») ловится → нужен ресинтез результата."""
-    from src.agent import _is_meta_ack
-    assert _is_meta_ack("Понял, задача выполнена. Я перечислил 7 названий видео.")
-    assert _is_meta_ack("Вот итог — список выше. Больше действий не требуется.")
-    assert _is_meta_ack("Всё готово.")
-    # настоящий результат со списком — НЕ мета-заглушка (длинный, есть содержимое)
-    real = ("Вот обзоры:\n1. ПОЛ ГОДА С Sony WH-1000XM5\n2. Big Review These Are GOOD\n"
-            "3. Топовые наушники Sony\n4. Флагманские с нюансами\n5. Самое подробное видео 2025")
-    assert not _is_meta_ack(real)
-    assert not _is_meta_ack("Включил Believer — Imagine Dragons, играет фоном.")
+def test_validator_flags_hallucination_semantically():
+    """Ложный отказ «нет доступа», мета-заглушку и ложь о завершении ловит финальный LLM-валидатор
+    СЕМАНТИЧЕСКИ (флаги схемы + инструкция в промпте, любой язык) — вместо русско-центричных регэкспов."""
+    from src.structured_outputs import ValidationResult
+    f = ValidationResult.model_fields
+    for flag in ("false_refusal", "meta_stub", "false_completion"):
+        assert flag in f and f[flag].default is False
+    from src.prompts import validation_prompt
+    text = "".join(str(m.prompt.template) for m in validation_prompt.messages)
+    assert "false_refusal" in text and "meta_stub" in text
+    # false_completion опирается на структурный сигнал run_status (incomplete/complete)
+    assert "false_completion" in text and "{run_status}" in text
 
 
-def test_false_access_refusal_detected():
-    """Ложный отказ «нет доступа к аккаунтам» ловится (доступ есть через расширение)."""
-    from src.agent import _is_false_access_refusal
-    assert _is_false_access_refusal("Я не имею доступа к вашим личным аккаунтам и данным.")
-    assert _is_false_access_refusal("Sorry, I cannot access your personal Spotify account.")
-    assert _is_false_access_refusal("Моя функциональность ограничена доступом к данным.")
-    # нормальный честный ответ — НЕ ловится
-    assert not _is_false_access_refusal("Открыл твоё избранное в Spotify, вот треки: …")
-    assert not _is_false_access_refusal("Не нашёл такого исполнителя на этом сервисе.")
+def test_paywall_embedding_contrastive_mechanism():
+    """paywall — embedding-классификатор (любой язык), не регэксп: контраст pos/neg seed'ов.
+    Подставной эмбеддер (без сети): текст ближе к pos-seed'ам → True, к neg → False; нет
+    эмбеддера → False (не блокируем play по догадке)."""
+    from src.semantic_signals import _PaywallEmbed
+
+    # paywall-маркеры из pos-seed'ов (любой язык) → вектор [1,0]; иначе → [0,1]. cosine разводит.
+    _PAY = ("subscri", "suscrip", "подписк", "member", "멤버", "войдите", "登录", "订阅",
+            "会員", "اشترك", "abonn", "premium", "rent", "necesitas")
+
+    class _FakeEmb:
+        enabled = True
+        def embed(self, t):
+            tl = (t or "").lower()
+            return [1.0, 0.0] if any(w in tl for w in _PAY) else [0.0, 1.0]
+
+    det = _PaywallEmbed(embedder=_FakeEmb())
+    # НОВЫЕ фразы (не дословные seed'ы) — проверяем обобщение, а не точное совпадение:
+    assert det.fires("you need an active subscription to view this episode", 0.58, 0.05)
+    assert det.fires("会員登録が必要です", 0.58, 0.05)            # JA: нужна регистрация (会員/登录)
+    assert not det.fires("the video is now playing in your browser", 0.58, 0.05)
+    assert not det.fires("вот результаты поиска по запросу", 0.58, 0.05)
+
+    class _Disabled:
+        enabled = False
+        def embed(self, t):
+            return [1.0, 0.0]
+
+    assert not _PaywallEmbed(embedder=_Disabled()).fires("subscription required", 0.58, 0.05)
 
 
 def test_degenerate_repetition_detected():
