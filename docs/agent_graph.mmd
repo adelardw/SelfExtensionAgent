@@ -1,0 +1,62 @@
+---
+config:
+  flowchart:
+    curve: linear
+---
+graph TD;
+	__start__([<p>__start__</p>]):::first
+	recall(recall)
+	goal(goal)
+	reflexion(reflexion)
+	act(act)
+	fast_answer(fast_answer)
+	reason(reason)
+	clarify_gate(clarify_gate)
+	router(router)
+	create_skills(create_skills)
+	sgr_create(sgr_create)
+	skill_selector(skill_selector)
+	capability_research(capability_research)
+	decompose(decompose)
+	skill_injection(skill_injection)
+	step_executor(step_executor)
+	synthesize(synthesize)
+	review(review)
+	validation(validation)
+	reflect(reflect)
+	__end__([<p>__end__</p>]):::last
+	__start__ --> recall;
+	act -.-> goal;
+	act -.-> reflect;
+	capability_research --> decompose;
+	clarify_gate --> router;
+	create_skills --> sgr_create;
+	decompose --> skill_injection;
+	fast_answer --> reflect;
+	goal -.-> clarify_gate;
+	goal -.-> reason;
+	goal -.-> router;
+	reason --> validation;
+	recall --> reflexion;
+	reflexion -.-> act;
+	reflexion -.-> fast_answer;
+	reflexion -.-> goal;
+	review -.-> step_executor;
+	review -.-> validation;
+	router -.-> create_skills;
+	router -.-> skill_selector;
+	sgr_create -.-> create_skills;
+	sgr_create -.-> router;
+	sgr_create -.-> skill_selector;
+	skill_injection --> step_executor;
+	skill_selector --> capability_research;
+	step_executor -.-> synthesize;
+	synthesize -.-> review;
+	synthesize -.-> validation;
+	validation -.-> reflect;
+	validation -.-> router;
+	reflect --> __end__;
+	step_executor -.-> step_executor;
+	classDef default fill:#f2f0ff,line-height:1.2
+	classDef first fill-opacity:0
+	classDef last fill:#bfb6fc

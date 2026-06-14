@@ -13,7 +13,15 @@ Architectural principle — the **amortized agent**: with ReAct / plan-execute t
 similar tasks cheaper and more reliable. Proven on a live bench: a warm pass is **−13% tokens
 with quality rising 78%→98%** (`scripts/amortize_bench.py`).
 
-Full architecture — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
+## Architecture
+
+The real compiled LangGraph — `build_graph().get_graph().draw_mermaid_png()`, every node and
+conditional route (dashed = conditional routing, solid = unconditional):
+
+![Agent graph](docs/agent_graph.png)
+
+Conceptual, annotated view (editable in diagrams.net): [`docs/architecture.en.drawio`](docs/architecture.en.drawio).
+Full write-up — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 > 🇷🇺 **Русская версия — [ниже](#self-extension-agent-русская-версия).**
 
@@ -370,7 +378,15 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 делающий похожие задачи дешевле и надёжнее. Проверено живым бенчем: тёплый проход
 **−13% токенов при росте качества 78%→98%** (`scripts/amortize_bench.py`).
 
-Полная архитектура — в [`ARCHITECTURE.md`](ARCHITECTURE.md).
+## Архитектура
+
+Реальный скомпилированный LangGraph — `build_graph().get_graph().draw_mermaid_png()`, все узлы
+и условные маршруты (пунктир = условный роутинг, сплошная = безусловный переход):
+
+![Граф агента](docs/agent_graph.png)
+
+Концептуальная аннотированная схема (редактируется в diagrams.net): [`docs/architecture.drawio`](docs/architecture.drawio).
+Полное описание — в [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Бенчмарки и результаты
 

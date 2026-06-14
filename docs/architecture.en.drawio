@@ -1,0 +1,144 @@
+<mxfile host="app.diagrams.net" agent="self-extension-agent">
+  <diagram name="self-extension-agent" id="selfext-arch-en">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- TITLE -->
+        <mxCell id="title" value="self-extension-agent — architecture (LangGraph graph = trainable program; thin client + Python brain)" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1100" height="30" as="geometry" />
+        </mxCell>
+
+        <!-- ===== CLIENTS / INTERFACES ===== -->
+        <mxCell id="clients" value="Interfaces (thin clients)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="760" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="c_gui" value="Web GUI&#10;React+Vite+Tailwind&#10;· desktop.py (pywebview)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="105" width="170" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c_repl" value="REPL (main.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="250" y="105" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c_tg" value="Telegram (bot.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="420" y="105" width="150" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="c_ext" value="Chrome extension&#10;(agent in your browser)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="590" y="105" width="190" height="60" as="geometry" />
+        </mxCell>
+
+        <!-- SERVER / BRAIN -->
+        <mxCell id="server" value="FastAPI server (server.py) — background run (astream) · /chat · /run/{id} (poll) · /run/{id}/respond&#10;interactive clarify (Q/A multi-select) + confirm · live per-node progress · /settings · /upload · /transcribe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="210" width="760" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- ===== LANGGRAPH FORWARD GRAPH ===== -->
+        <mxCell id="graphbox" value="LangGraph forward graph (one request). Backward = credit-assignment over the trace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="310" width="760" height="640" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="360" y="345" width="120" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n_recall" value="recall — memory + AutoRAG&#10;FLEXIBLE recall (facts AND episodes by relevance),&#10;GraphRAG-lite; query embedded once" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="290" y="405" width="260" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n_goal" value="goal — objective + rubric (kept in context)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="290" y="485" width="260" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="n_refl" value="reflexion — CHOICE of thinking type&#10;(LLM + bandit prior + few-shots)&#10;high ambiguity → clarify_gate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="290" y="545" width="260" height="64" as="geometry" />
+        </mxCell>
+
+        <!-- modes -->
+        <mxCell id="n_fast" value="fast / reason&#10;(System 1/2, no tools)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="70" y="650" width="170" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n_act" value="act — System 1 with hands&#10;(1 action, 1–2 tools;&#10;failed → escalation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="270" y="650" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n_delib" value="deliberate / heavy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="650" width="170" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- deliberate sub-flow -->
+        <mxCell id="n_clar" value="clarify_gate — batched clarifications&#10;(Q/A with options; dedup)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="470" y="715" width="210" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="n_decomp" value="decompose → skill_injection&#10;(amortization: recipe → no LLM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="470" y="771" width="210" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="n_step" value="step_executor ⟲ (per-item execute+validate;&#10;validator sees ACTUALLY called tools)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="450" y="827" width="250" height="46" as="geometry" />
+        </mxCell>
+        <mxCell id="n_synth" value="synthesize → (heavy: review⟲) → validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="450" y="883" width="250" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="n_reflect" value="reflect — write episode, harvest signal,&#10;compile RECIPE, facts(+edges), self-learning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="80" y="780" width="300" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="n_end" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="180" y="880" width="100" height="40" as="geometry" />
+        </mxCell>
+
+        <!-- graph edges -->
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_start" target="n_recall"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_recall" target="n_goal"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_goal" target="n_refl"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_refl" target="n_fast"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_refl" target="n_act"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_refl" target="n_delib"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_delib" target="n_clar"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_clar" target="n_decomp"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_decomp" target="n_step"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_step" target="n_synth"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" value="act: escalation" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;fontSize=9;" edge="1" parent="1" source="n_act" target="n_delib"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_fast" target="n_reflect"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_act" target="n_reflect"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_synth" target="n_reflect"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_reflect" target="n_end"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="server" target="n_start"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- ===== CROSS-CUTTING SUBSYSTEMS (right column) ===== -->
+        <mxCell id="sub_mem" value="MEMORY (memory/store.py)&#10;episodes/facts/insights/goals + graph edges&#10;FLEXIBLE recall by relevance · GraphRAG-lite&#10;TurboVec-ANN · journal → implicit feedback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="70" width="320" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_router" value="INTENT ROUTER (intent.py)&#10;embedding-kNN codebook {web_grounding / physical /&#10;play / media_control / self_contained}; any language&#10;online growth from feedback; pos/neg corpus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="160" width="320" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_skills" value="SKILLS (skills/* + registry.json)&#10;ToolSearch (BM25S) · browser_control (DOM by #)&#10;device/app/ax/phone · web_search&#10;IMPORT external: quarantine→AST→smoke-sandbox→registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="250" width="320" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_kb" value="KNOWLEDGE BASE (knowledge_base.py)&#10;LightRAG graph (entities+relations, multi-hop) · BM25 fallback&#10;AutoRAG in recall · session attachments (tmp)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="344" width="320" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_cap" value="CAPABILITY TOOLS&#10;research (plan→search→verify→synthesize)&#10;python_exec (sandbox) · vision-PDF · MCP (discover/connect)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="424" width="320" height="74" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_learn" value="SELF-LEARNING / AMORTIZATION&#10;forward: few-shots (global+per-user) · backward: diff-blame→&#10;gradients→prompt optimization (measured BEFORE/AFTER)&#10;recipes→habits→skills · collective tier · bandit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="508" width="320" height="84" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_sec" value="SECURITY&#10;AST gate + smoke in sandbox (rlimits/syscall) · HITL (deny-by-default)&#10;anti-injection in tool outputs · anti-PII floor · no learning from exploits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="602" width="320" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_models" value="MODELS (config.yml, OpenRouter | Ollama)&#10;fast=routing/validation · code=execution · deep=heavy review&#10;cheap tier + harness, not model size" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+          <mxGeometry x="840" y="692" width="320" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- dashed links graph <-> subsystems -->
+        <mxCell id="l_mem" style="endArrow=none;dashed=1;html=1;strokeColor=#9673a6;" edge="1" parent="1" source="n_recall" target="sub_mem"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_router" style="endArrow=none;dashed=1;html=1;strokeColor=#d79b00;" edge="1" parent="1" source="n_refl" target="sub_router"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_skills" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="n_step" target="sub_skills"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_cap" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="n_step" target="sub_cap"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="l_learn" style="endArrow=none;dashed=1;html=1;strokeColor=#d6b656;" edge="1" parent="1" source="n_reflect" target="sub_learn"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <!-- legend -->
+        <mxCell id="legend" value="Legend: blue=interfaces/models · green=graph nodes · orange=routing/clarification · purple=memory · yellow=self-learning · red=security · gray=skills/capabilities/KB&#10;solid arrow=graph flow · dashed=uses subsystem" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fillColor=#ffffff;strokeColor=#cccccc;" vertex="1" parent="1">
+          <mxGeometry x="40" y="965" width="1120" height="40" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
