@@ -387,20 +387,14 @@ function Thinking() {
   const [i, setI] = useState(0)
   useEffect(() => { const t = setInterval(() => setI(v => (v + 1) % THINK_WORDS.length), 2800); return () => clearInterval(t) }, [])
   return (
-    <div className="flex items-center gap-2.5 py-1" style={{ color: "var(--muted)" }}>
-      <span className="relative inline-block h-[22px] overflow-hidden" style={{ minWidth: 150 }}>
-        <AnimatePresence mode="wait">
-          <motion.span key={i} className="absolute left-0 text-[15px] font-medium whitespace-nowrap"
-            initial={{ opacity: 0, y: 6, filter: "blur(4px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, y: -6, filter: "blur(4px)" }} transition={{ duration: 0.55, ease: [0.4, 0, 0.2, 1] }}>
-            {THINK_WORDS[i]}…
-          </motion.span>
-        </AnimatePresence>
-      </span>
-      <span className="flex gap-1">
-        {[0, 1, 2].map(d => <motion.span key={d} className="w-1.5 h-1.5 rounded-full" style={{ background: "var(--accent)" }}
-          animate={{ opacity: [0.3, 1, 0.3] }} transition={{ duration: 1, repeat: Infinity, delay: d * 0.16 }} />)}
-      </span>
+    <div className="relative h-[24px] py-1" style={{ color: "var(--muted)" }}>
+      <AnimatePresence>
+        <motion.span key={i} className="absolute left-0 top-1 text-[15px] font-medium whitespace-nowrap"
+          initial={{ opacity: 0, filter: "blur(7px)" }} animate={{ opacity: 1, filter: "blur(0px)" }}
+          exit={{ opacity: 0, filter: "blur(7px)" }} transition={{ duration: 0.75, ease: "easeInOut" }}>
+          {THINK_WORDS[i]}…
+        </motion.span>
+      </AnimatePresence>
     </div>
   )
 }
