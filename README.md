@@ -15,12 +15,12 @@ with quality rising 78%→98%** (`scripts/amortize_bench.py`).
 
 ## Architecture
 
-The real compiled LangGraph — `build_graph().get_graph().draw_mermaid_png()`, every node and
-conditional route (dashed = conditional routing, solid = unconditional):
+Annotated architecture — interfaces, the FastAPI server, the LangGraph forward graph and the
+cross-cutting subsystems (rendered from the editable diagram
+[`docs/architecture.en.drawio`](docs/architecture.en.drawio)):
 
-![Agent graph](docs/agent_graph.png)
+![Architecture](docs/architecture.en.svg)
 
-Conceptual, annotated view (editable in diagrams.net): [`docs/architecture.en.drawio`](docs/architecture.en.drawio).
 Full write-up — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 > 🇷🇺 **Русская версия — [ниже](#self-extension-agent-русская-версия).**
@@ -37,14 +37,16 @@ Honest numbers from live runs — not benchmark-tuned. Two model tiers measured 
 |---|---|---|---|---|---|
 | baseline (n=20, before fixes) | 15% [5–36%] | 29% | 14% | 0% | $0.16 |
 | cheap tier (`gemini-2.5-flash-lite` + `deepseek-v4-flash`), n=100 | 20% [13–29%] | 41% | 5% | 12% | $0.81 |
-| **strong tier (`gemini-3.1-flash-lite` + `glm-5.1` + `deepseek-v4-pro`), n=100** | **33% [24.6–42.7%]** | **49%** | **38%** | 4% | $0.45\* |
+| **strong tier (`gemini-3.1-flash-lite` + `glm-5.1` + `deepseek-v4-pro`), n=100** | **33% [24.6–42.7%]** | **49%** | **38%** | 4% | ≈$2.8\* |
 
 The **strong tier is +13pp overall (20%→33%)**, driven mostly by **L2 5%→38%** (multi-hop —
 glm-5.1 / deepseek-v4-pro are much stronger on agentic chains); L3 dropped within noise (1–3 tasks,
-huge CI). It costs MORE per token, not less (glm-5.1 $0.98/$3.08 vs deepseek-v4-flash $0.09/$0.18);
-the `$` figures are `usage.py` estimates on a flat rate and **undercount the strong tier** (\*real
-cost is several× higher). Aggregate Wilson intervals overlap → the gain is real but not yet
-significant at n=100; the L2 gap is solid. An earlier cheap-tier run scored 23% (run-to-run variance).
+huge CI). It costs MORE per token, not less. The cheap-tier **$0.81 is realistic** — its real prices
+(~$0.10/$0.40 + $0.09/$0.18) match the flat estimator. The strong tier's flat log read $0.45, but at
+**real prices** (gemini-3.1-flash-lite $0.25/$1.50, glm-5.1 $0.98/$3.08) the run's ~4.1M input /
+0.12M output tokens cost **≈ $1.2–4.4, ~$2.8\*** (\*per-call tokens aren't logged per role → a range;
+the exact figure is the OpenRouter bill). Aggregate Wilson intervals overlap → the gain is real but not
+yet significant at n=100; the L2 gap is solid. An earlier cheap-tier run scored 23% (run-to-run variance).
 Context: GPT-4+plugins score ~15% on GAIA; top agents ~40–50% on L1 only.
 Reproduce: `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
 
@@ -389,12 +391,11 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 
 ## Архитектура
 
-Реальный скомпилированный LangGraph — `build_graph().get_graph().draw_mermaid_png()`, все узлы
-и условные маршруты (пунктир = условный роутинг, сплошная = безусловный переход):
+Аннотированная архитектура — интерфейсы, FastAPI-сервер, forward-граф LangGraph и сквозные
+подсистемы (отрисовано из редактируемой схемы [`docs/architecture.drawio`](docs/architecture.drawio)):
 
-![Граф агента](docs/agent_graph.png)
+![Архитектура](docs/architecture.svg)
 
-Концептуальная аннотированная схема (редактируется в diagrams.net): [`docs/architecture.drawio`](docs/architecture.drawio).
 Полное описание — в [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Бенчмарки и результаты
@@ -407,14 +408,17 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 |---|---|---|---|---|---|
 | baseline (n=20, до фиксов) | 15% [5–36%] | 29% | 14% | 0% | $0.16 |
 | дешёвый тир (`gemini-2.5-flash-lite` + `deepseek-v4-flash`), n=100 | 20% [13–29%] | 41% | 5% | 12% | $0.81 |
-| **сильный тир (`gemini-3.1-flash-lite` + `glm-5.1` + `deepseek-v4-pro`), n=100** | **33% [24.6–42.7%]** | **49%** | **38%** | 4% | $0.45\* |
+| **сильный тир (`gemini-3.1-flash-lite` + `glm-5.1` + `deepseek-v4-pro`), n=100** | **33% [24.6–42.7%]** | **49%** | **38%** | 4% | ≈$2.8\* |
 
 **Сильный тир — +13pp overall (20%→33%)**, в основном за счёт **L2 5%→38%** (мультихоп —
 glm-5.1 / deepseek-v4-pro заметно сильнее на агентских цепочках); L3 просел в шуме (1–3 задачи,
-огромный CI). Он ДОРОЖЕ за токен, а не дешевле (glm-5.1 $0.98/$3.08 vs deepseek-v4-flash $0.09/$0.18);
-числа `$` — оценка `usage.py` по единой ставке и **занижают сильный тир** (\*реальная цена в разы выше).
-Агрегатные Wilson-интервалы пересекаются → прирост реален, но на n=100 ещё не статзначим; по L2 разрыв
-уверенный. Более ранний прогон дешёвого тира дал 23% (run-to-run разброс). Контекст: GPT-4+плагины дают
+огромный CI). Он ДОРОЖЕ за токен, а не дешевле. У дешёвого тира **$0.81 реалистичны** — его реальные
+цены (~$0.10/$0.40 + $0.09/$0.18) совпадают с единой ставкой оценщика. У сильного тира flat-лог дал $0.45,
+но по **реальным ценам** (gemini-3.1-flash-lite $0.25/$1.50, glm-5.1 $0.98/$3.08) на ~4.1M входных /
+0.12M выходных токенов прогона выходит **≈ $1.2–4.4, ~$2.8\*** (\*per-call токены по ролям не логируются →
+диапазон; точная сумма — в биллинге OpenRouter). Агрегатные Wilson-интервалы пересекаются → прирост реален,
+но на n=100 ещё не статзначим; по L2 разрыв уверенный. Более ранний прогон дешёвого тира дал 23%
+(run-to-run разброс). Контекст: GPT-4+плагины дают
 ~15% на GAIA; топ-агенты ~40–50% только на L1. Воспроизведение:
 `AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --jsonl data/eval/gaia100.jsonl`.
 
