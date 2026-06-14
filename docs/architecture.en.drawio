@@ -65,7 +65,7 @@
         <mxCell id="n_clar" value="clarify_gate — batched clarifications&#10;(Q/A with options; dedup)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
           <mxGeometry x="470" y="715" width="210" height="46" as="geometry" />
         </mxCell>
-        <mxCell id="n_decomp" value="decompose → skill_injection&#10;(amortization: recipe → no LLM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+        <mxCell id="n_decomp" value="decompose → skill_injection&#10;(amortization: pattern → no LLM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
           <mxGeometry x="470" y="771" width="210" height="46" as="geometry" />
         </mxCell>
         <mxCell id="n_step" value="step_executor ⟲ (per-item execute+validate;&#10;validator sees ACTUALLY called tools)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
@@ -75,7 +75,7 @@
           <mxGeometry x="450" y="883" width="250" height="40" as="geometry" />
         </mxCell>
 
-        <mxCell id="n_reflect" value="reflect — write episode, harvest signal,&#10;compile RECIPE, facts(+edges), self-learning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+        <mxCell id="n_reflect" value="reflect — write episode, harvest signal,&#10;compile PATTERN, facts(+edges), self-learning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
           <mxGeometry x="80" y="780" width="300" height="60" as="geometry" />
         </mxCell>
         <mxCell id="n_end" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
@@ -116,7 +116,7 @@
         <mxCell id="sub_cap" value="CAPABILITY TOOLS&#10;research (plan→search→verify→synthesize)&#10;python_exec (sandbox) · vision-PDF · MCP (discover/connect)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
           <mxGeometry x="840" y="424" width="320" height="74" as="geometry" />
         </mxCell>
-        <mxCell id="sub_learn" value="SELF-LEARNING / AMORTIZATION&#10;forward: few-shots (global+per-user) · backward: diff-blame→&#10;gradients→prompt optimization (measured BEFORE/AFTER)&#10;recipes→habits→skills · collective tier · bandit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
+        <mxCell id="sub_learn" value="SELF-LEARNING / AMORTIZATION&#10;forward: few-shots (global+per-user) · backward: diff-blame→&#10;gradients→prompt optimization (measured BEFORE/AFTER)&#10;patterns→habits→skills · collective tier · bandit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
           <mxGeometry x="840" y="508" width="320" height="84" as="geometry" />
         </mxCell>
         <mxCell id="sub_sec" value="SECURITY&#10;AST gate + smoke in sandbox (rlimits/syscall) · HITL (deny-by-default)&#10;anti-injection in tool outputs · anti-PII floor · no learning from exploits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">

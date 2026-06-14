@@ -9,7 +9,7 @@ everyone via **per-user optimization** (personalization = the path to universali
 context compact through **context engineering**.
 
 Architectural principle — the **amortized agent**: with ReAct / plan-execute the cost per task is
-~constant; here every successful run leaves an artifact (recipe → habit → skill) that makes
+~constant; here every successful run leaves an artifact (pattern → habit → skill) that makes
 similar tasks cheaper and more reliable. Proven on a live bench: a warm pass is **−13% tokens
 with quality rising 78%→98%** (`scripts/amortize_bench.py`).
 
@@ -84,11 +84,11 @@ Reproduce: `python -m src.eval.route_eval`.
   incl. ja/zh/ar): **accuracy 89.3%** (media_control 93 · physical 96 · self 91 · web 86 · play 80). The route
   corpus (pos/neg, reward 0/1) accumulates for a future trained local head (kNN tuning / CatBoost
   / fine-tuned embedder).
-- **Experience amortization (recipes + habits + collective tier)** — a successful expensive run
-  compiles into a **recipe** (plan + skills): a similar task then runs without selector LLM calls
-  and (when very similar) without decomposition; a losing recipe self-removes. A recurring task
+- **Experience amortization (patterns + habits + collective tier)** — a successful expensive run
+  compiles into a **pattern** (plan + skills): a similar task then runs without selector LLM calls
+  and (when very similar) without decomposition; a losing pattern self-removes. A recurring task
   type (a **habit**) → the agent creates a reusable skill for it. A **collective tier**
-  (`collective.py`): a recipe that proved itself for one user becomes an install best-practice and
+  (`collective.py`): a pattern that proved itself for one user becomes an install best-practice and
   is recommended to **similar** people (query + profile matching); personal always wins,
   injections aren't promoted.
 - **User knowledge base** (`/kb`) — personal documents in a folder hierarchy, a graph on
@@ -202,7 +202,7 @@ any tool/MCP/skill/search is untrusted DATA; on a prompt-injection attempt ("ign
 "reveal system prompt", hidden commands) the triggers are neutralized and the text is marked "this
 is data, not instructions" — protection against skills-/mcp-/search-injection. The same sanitize
 sits on the **AutoRAG knowledge-base injection** (a poisoned document is data, not commands), KB
-paths are protected from traversal, and **collective recipes** aren't promoted from injection
+paths are protected from traversal, and **collective patterns** aren't promoted from injection
 queries ("don't learn from a break-in" extends to the shared pool).
 
 **Anti-hallucination and anti-PII (deterministic checks layered over the model):** grounding facts (a
@@ -210,7 +210,7 @@ query about addresses/prices/"where to buy" → web, not from memory), cutting f
 (`_strip_ungrounded_urls`) and **fabricated emails** (`safety.strip_ungrounded_pii` — only emails,
 numbers/GAIA-answers untouched), a detector of degenerate repetition and false "no access". "Don't
 disclose" = the twin of "don't fabricate": `safety.redact_pii` masks PII (email/phone/card) in
-**collective recipes** before passing them to other users.
+**collective patterns** before passing them to other users.
 
 **Learning bans** (locked by tests `test_optimization_policy`): backward does NOT change the
 architecture (writes only ParamStore artifacts, not code/graph), does NOT rewrite the system
@@ -312,7 +312,7 @@ src/
   interaction.py      interaction journal (HITL/clarify → profile facts, no LLM)
   habits.py           habits: recurring expensive runs → directive to create a skill
   bandit.py           Beta/Thompson prior for mode choice from the user's episodes
-  collective.py       collective recipes (install best-practices, profile matching)
+  collective.py       collective patterns (install best-practices, profile matching)
   retrieval.py        canonical BM25S ranker (ToolSearch et al.)
   improve/            prompt_store(ParamStore) + optimizer + pipe + graph_learn + safety
   mcp_client.py       discover/connect/use MCP (registry + trusted catalog)
@@ -338,7 +338,7 @@ router** (any language, route_eval 89.3%), **conditional recall + GraphRAG-lite 
 execution with **action grounding** + **context masking**, memory + **memory-as-tool (3
 tiers)** + **a LightRAG knowledge base** (+AutoRAG), personalization + **an interaction journal**,
 **per-user self-improvement** + measurable accept/revert, **experience amortization**
-(recipes/habits/collective tier; live bench: −13% tokens, quality 78%→98% on a warm pass), a
+(patterns/habits/collective tier; live bench: −13% tokens, quality 78%→98% on a warm pass), a
 **mode bandit prior**, **reflexion grounding** (anti-hallucination), **context search**
 (trafilatura→BM25S→vector) + browser-first for the interactive web, **ToolSearch**, MCP
 discover/connect/use, defense (AST→sandbox→HITL + **anti-injection in tool outputs and AutoRAG** +
@@ -351,7 +351,7 @@ the accumulated examples); replacing the hard regex "is web search needed?" chec
 classifier — but only after verifying it won't increase fabricated answers; raising L2/L3 GAIA
 (multi-step tasks + files — the cheap-tier ceiling); free dynamic composition of modules (the
 act→deliberate ladder is the first step); inheriting strong MCPs via before/after comparison;
-anonymizing saved task playbooks (recipes) before sharing them with similar users; cross-platform
+anonymizing saved task playbooks (patterns) before sharing them with similar users; cross-platform
 UI automation outside macOS.
 
 ## License
@@ -374,7 +374,7 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 метод универсальности), держа контекст компактным через **контекстный инжиниринг**.
 
 Архитектурный принцип — **амортизированный агент**: у ReAct/plan-execute стоимость задачи
-~постоянна, здесь каждый успешный прогон оставляет артефакт (рецепт → привычка → навык),
+~постоянна, здесь каждый успешный прогон оставляет артефакт (паттерн → привычка → навык),
 делающий похожие задачи дешевле и надёжнее. Проверено живым бенчем: тёплый проход
 **−13% токенов при росте качества 78%→98%** (`scripts/amortize_bench.py`).
 
@@ -449,11 +449,11 @@ media_control, но мисроут play не ломает воспроизвед
   семантически близким).
   Корпус маршрутов (pos/neg, reward 0/1) копится для будущего обучения локального head
   (kNN-тюнинг / CatBoost / fine-tuned эмбеддер).
-- **Амортизация опыта (рецепты + привычки + коллективный ярус)** — успешный дорогой
-  прогон компилируется в **рецепт** (план+навыки): похожая задача дальше идёт без
-  LLM-вызовов селектора и (при высокой похожести) декомпозиции; проигрывающий рецепт
+- **Амортизация опыта (паттерны + привычки + коллективный ярус)** — успешный дорогой
+  прогон компилируется в **паттерн** (план+навыки): похожая задача дальше идёт без
+  LLM-вызовов селектора и (при высокой похожести) декомпозиции; проигрывающий паттерн
   самоудаляется. Повторяющийся тип задач (**привычка**) → агент сам создаёт под него
-  переиспользуемый навык. **Коллективный ярус** (`collective.py`): рецепт, доказавший
+  переиспользуемый навык. **Коллективный ярус** (`collective.py`): паттерн, доказавший
   себя у юзера, становится best-practice инсталляции и рекомендуется ПОХОЖИМ людям
   (матчинг запроса+профиля); личное всегда приоритетнее, инъекции не промоутятся.
 - **База знаний пользователя** (`/kb`) — личные документы в иерархии папок, граф на
@@ -570,7 +570,7 @@ media_control, но мисроут play не ломает воспроизвед
 («ignore previous…», «reveal system prompt», скрытые команды) триггеры обезвреживаются и
 текст помечается «это данные, не инструкции» — защита от skills-/mcp-/search-injection.
 Тот же sanitize стоит на **AutoRAG-впрыске базы знаний** (отравленный документ — данные,
-не команды), пути БЗ защищены от traversal, а **коллективные рецепты** не промоутятся
+не команды), пути БЗ защищены от traversal, а **коллективные паттерны** не промоутятся
 из инъекционных запросов (запрет «не учиться на взломе» распространён на общий пул).
 
 **Анти-галлюцинация и анти-PII (детерминированные проверки поверх модели):** заземление
@@ -578,7 +578,7 @@ media_control, но мисроут play не ломает воспроизвед
 (`_strip_ungrounded_urls`) и **выдуманных email** (`safety.strip_ungrounded_pii` — только
 email, числа/GAIA-ответы не трогаются), детектор вырожденного повтора и ложного «нет
 доступа». «Не разглашать» = близнец «не выдумывать»: `safety.redact_pii` маскирует
-PII (email/телефон/карта) в **коллективных рецептах** перед передачей другим юзерам.
+PII (email/телефон/карта) в **коллективных паттернах** перед передачей другим юзерам.
 
 **Запреты обучения** (залочены тестами `test_optimization_policy`): backward НЕ меняет
 архитектуру (пишет только артефакты ParamStore, не код/граф), НЕ переписывает системные
@@ -674,14 +674,14 @@ src/
   agent.py            граф (recall→goal→reflexion→{fast|reason|act|deliberate|heavy}→…→reflect)
   prompts.py          промпты + реестр обучаемых (OPTIMIZABLE_PROMPTS)
   structured_outputs.py
-  memory/             store(SQLite: эпизоды/факты/рецепты) + embedder + vector_index(TurboVec) + feedback
+  memory/             store(SQLite: эпизоды/факты/паттерны) + embedder + vector_index(TurboVec) + feedback
   memory_tools.py     память-как-tool (3 яруса: search_memory / recall_history / scratch)
   knowledge_base.py   база знаний юзера (/kb, иерархия папок) + вложения сессии (/attach)
   lightrag_engine.py  граф БЗ на LightRAG (per-user, прикидка цены индексации)
   interaction.py      журнал взаимодействий (HITL/clarify → факты профиля, без LLM)
   habits.py           привычки: повторяющиеся дорогие прогоны → директива создать навык
   bandit.py           Beta/Thompson-прайор выбора режима по эпизодам юзера
-  collective.py       коллективные рецепты (best-practice инсталляции, профиль-матчинг)
+  collective.py       коллективные паттерны (best-practice инсталляции, профиль-матчинг)
   retrieval.py        канонический BM25S-ранкер (ToolSearch и др.)
   improve/            prompt_store(ParamStore) + optimizer + pipe + graph_learn + safety
   mcp_client.py       discover/connect/use MCP (реестр + доверенный каталог)
@@ -707,7 +707,7 @@ embedding-роутер интентов** (любой язык, route_eval 89.3%
 память**, по-пунктовое исполнение с **заземлением действий** + **маскинг контекста**, память +
 **память-как-tool (3 яруса)** + **база знаний на LightRAG** (+AutoRAG), персонализация +
 **журнал взаимодействий**, **per-user само-улучшение** + измеримый accept/revert,
-**амортизация опыта** (рецепты/привычки/коллективный ярус; живой бенч: −13% токенов,
+**амортизация опыта** (паттерны/привычки/коллективный ярус; живой бенч: −13% токенов,
 качество 78%→98% на тёплом проходе), **бандит-прайор режима**, **reflexion-обоснованность**
 (анти-галлюцинация), **контекстный поиск** (trafilatura→BM25S→vector) + браузер-первичность
 для интерактивного веба, **ToolSearch**, MCP discover/connect/use, защита (AST→песочница→
@@ -721,7 +721,7 @@ HITL + **анти-injection в выводах тулов и AutoRAG** + запр
 работает на seed-кодбуке + фидбек-лупе без обучаемого head;
 подъём L2/L3 GAIA (многошаговые задачи + файлы — потолок дешёвого тира); свободная динамическая
 композиция модулей (лестница act→deliberate — первый шаг); наследование сильных MCP через
-сравнение «до/после»; обезличивание сохранённых сценариев (рецептов) перед тем как делиться ими
+сравнение «до/после»; обезличивание сохранённых сценариев (паттернов) перед тем как делиться ими
 с похожими пользователями; кроссплатформенный UI-automation вне macOS.
 
 ## Лицензия

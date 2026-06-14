@@ -33,8 +33,8 @@ START
                        clarification registry, reused by decompose/step/synthesize; no answer
                        → reasonable assumption. Catch-up mid-step: the ask_user tool.
                        skill_selector → decompose → skill_injection
-                          (amortization: with a RECIPE for a similar successful task the selector runs
-                           with NO LLM call; at sim≥0.7 decompose runs with NO LLM — plan from recipe)
+                          (amortization: with a PATTERN for a similar successful task the selector runs
+                           with NO LLM call; at sim≥0.7 decompose runs with NO LLM — plan from pattern)
                           → step_executor⟲ (execution+validation PER ITEM,
                              the validator sees the ACTUALLY-called tools: text ≠ action)
                           → synthesize ─→ validation → reflect → END               (deliberate)
@@ -42,7 +42,7 @@ START
                                             ├─ problems → fix sub-steps → step_executor⟲ → synthesize → validation
                                             └─ clean → validation
  reflect              write the episode (trajectory + interaction journal), harvest signal
-                      (HITL refusal / clarify answer → profile facts), compile the RECIPE and
+                      (HITL refusal / clarify answer → profile facts), compile the PATTERN and
                       its win/lose, promote to the collective pool, detect a habit,
                       extract facts (+tags, edges), reflexion, summary, prune,
                       degradation tracking, auto self-learning
@@ -88,7 +88,7 @@ There are TWO routings, at different levels. The intent router does NOT pick the
 | Capability tools | **`research.py`** · **`compute.py`** · **`media.py`** · **`mcp_client.py`** | disciplined **research** (sub-question plan→search+snippets+read→fact VERIFICATION→synthesis, a dependent chain); a **compute layer** `python_exec` (exact counting in a sandbox — rlimits/kill); **vision PDF-figure reading** `read_pdf_figures` (render→vision, gated on a PDF being present); **data-MCP self-extension** `try_connect_discovered` (domain→discover→relevance filter→first LIVE remote MCP; movie/finance/weather connect live) |
 | Self-learning / amortization | `improve/`, **`habits.py`**, **`bandit.py`**, **`collective.py`**, `memory/store.py: recipes` | forward harvest of few-shots (global + **per-user**, two-tier with baseline); backward: diff credit-assignment → per-node gradients → prompt optimization; **per-user backward** (`graph_backward_user`: lessons from the user's failures → their few-shots); **measurable accept/revert** (before/after run on cases) → ParamStore; **habits** (`habits.py`: k similar successful expensive runs → fact-directive → router builds a skill → the habit closes ✅); **mode bandit prior** (`bandit.py`: Beta/Thompson over the user's similar episodes, sees FAILURES too — absent from few-shots; the prior goes into reflexion's memory_context, not a dictate) |
 | Tracing / diagnostics | `tracing/` | spans per node (data/traces.db), self-diagnosis, rotation |
-| Security | `utils_validation.py` (AST gate), `utils.py` (sandbox subprocess), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | generated code: AST bans + smoke in an isolated process (rlimits/kill); side-effect tools — confirmation, deny by default; **anti-injection in tool/MCP/search outputs** (`sanitize_tool_output`); **anti-PII floor** (`strip_ungrounded_pii` cuts fabricated emails, leaves numbers; `redact_pii` in collective recipes) — "do not disclose" is the twin of "do not fabricate"; training bans (don't change architecture/prompts, don't learn from a jailbreak) |
+| Security | `utils_validation.py` (AST gate), `utils.py` (sandbox subprocess), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | generated code: AST bans + smoke in an isolated process (rlimits/kill); side-effect tools — confirmation, deny by default; **anti-injection in tool/MCP/search outputs** (`sanitize_tool_output`); **anti-PII floor** (`strip_ungrounded_pii` cuts fabricated emails, leaves numbers; `redact_pii` in collective patterns) — "do not disclose" is the twin of "do not fabricate"; training bans (don't change architecture/prompts, don't learn from a jailbreak) |
 | External | `external/context.py` | A2A/MCP context in state (slot + plumbing) |
 | Maintenance | `maintenance/dep_update.py` | safe auto-update of dependencies with health-check and rollback |
 | Interfaces | `main.py` (REPL), `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (native window via pywebview) | shared graph + shared memory. The GUI runs each turn as a background run with **live progress** (per-node steps via `astream`), **interactive clarify** (Q/A multiselect card over `/run/{id}/respond`) and confirm, file attach + mic (Whisper), thread history, and a settings panel (provider/models/key, work/thinking mode, extension token). Brain stays Python; thin client + brain. |
@@ -97,10 +97,10 @@ There are TWO routings, at different levels. The intent router does NOT pick the
 
 For known patterns (ReAct, plan-execute, multi-agent) the marginal cost per task is
 ~constant. Here every successful run leaves an artifact that makes similar tasks
-CHEAPER — an experience-compilation ladder: episode → few-shot → **recipe** (plan+skills;
+CHEAPER — an experience-compilation ladder: episode → few-shot → **pattern** (plan+skills;
 `memory/store.py: recipes`) → habit (`habits.py`) → skill (code). For a similar task:
-the selector takes skills from the recipe with NO LLM call; at sim≥0.7 decompose is also
-LLM-free (plan from the recipe); win/lose tracking, a losing recipe self-deletes. Execution
+the selector takes skills from the pattern with NO LLM call; at sim≥0.7 decompose is also
+LLM-free (plan from the pattern); win/lose tracking, a losing pattern self-deletes. Execution
 is a ladder with checkable escalation (act → deliberate → heavy; up only on a
 grounded failure).
 
@@ -111,10 +111,10 @@ from negative runs #1/#3: the experience artifact must **REPLACE LLM work**
 (zero-LLM selector/decomposition), not annotate it — hints/few-shots/priors inflate the
 context of every call and buy only reliability. Caveats: n=4, time is noisy with API
 latency, confidence is the validator's self-assessment.
-**Collective tier** (`collective.py`): a vetted personal recipe (winrate gate) →
+**Collective tier** (`collective.py`): a vetted personal pattern (winrate gate) →
 best-practice installation with the source profile's fingerprint; to similar users — a recommendation
 (query similarity + profile gate), the personal one always wins, poison/drift are filtered
-(injections are not promoted, a losing global recipe self-deletes).
+(injections are not promoted, a losing global pattern self-deletes).
 
 ## Self-learning as "training the graph"
 
@@ -179,10 +179,10 @@ best-practice installation with the source profile's fingerprint; to similar use
 - **play_media ↔ media_control overlap** — the two are semantically close, so ~20% of play lands in control (route_eval play_media 80%); kept on purpose because a pause misfiring into auto-play is worse than play losing only its deterministic nudge.
 - The syscall sandbox is optional and depends on bwrap/firejail; a full gVisor/container per smoke is the next level.
 - Working with ALREADY-OPEN windows (keystroke/scroll/AX, phone/adb) — macOS only so far; a cross-platform UI-automation layer is next.
-- Orchestration = picking 1 of 6 fixed mode-templates (fast/reason/act/deliberate/heavy/clarify), each a baked-in node pipeline; the escalation ladder (act→deliberate→earned-heavy) is the only runtime deviation. NEXT (not "chain several whole modes" — that's still templates): dissolve modes into atomic cognitive PRIMITIVES (recall/reason/tool-act/verify/decompose/reflect) and let a meta-controller COMPOSE them per task from intermediate results (router-picks-1-of-N → planner-assembles-a-compute-graph). Modes would then be just frequent baked recipes, not the only options. **Being prototyped behind a flag in `src/agent_experimental.py` (experimental, isolated from the working graph).**
+- Orchestration = picking 1 of 6 fixed mode-templates (fast/reason/act/deliberate/heavy/clarify), each a baked-in node pipeline; the escalation ladder (act→deliberate→earned-heavy) is the only runtime deviation. NEXT (not "chain several whole modes" — that's still templates): dissolve modes into atomic cognitive PRIMITIVES (recall/reason/tool-act/verify/decompose/reflect) and let a meta-controller COMPOSE them per task from intermediate results (router-picks-1-of-N → planner-assembles-a-compute-graph). Modes would then be just frequent baked patterns, not the only options. **Being prototyped behind a flag in `src/agent_experimental.py` (experimental, isolated from the working graph).**
 - **Cross-turn history rewrite** — within-step masking is done (above), but rewriting the message history ACROSS turns stays out: it's owned by LangGraph `create_agent` and a rewrite there is a fragile hack.
 - **LightRAG** works for the user's KB documents (`knowledge_base.py`); for GLOBAL memory (episodes/facts) it's GraphRAG-lite — **typed edges already exist** (`memory_edges.relation`: `similar` fact↔fact by cosine, `derived` episode→fact) and **multi-hop traversal exists** (`_graph_boost` spreading-activation over `graph_hops`, config-gated to 1), on top of recency+relevance+importance + TurboVec-ANN. Still the next level vs full LightRAG: **LLM-extracted semantic relation types** (entities+relations, not just structural similar/derived) and a dedicated **graph-query retrieval mode** (today the graph only re-weights recall, it isn't a standalone retriever).
-- Amortization: n=4 statistics (a series with medians is needed); LLM-abstraction of a recipe (strip a specific user's particulars) before collective promotion (privacy in a multi-user deploy); inheriting strong MCPs via a before/after comparison.
+- Amortization: n=4 statistics (a series with medians is needed); LLM-abstraction of a pattern (strip a specific user's particulars) before collective promotion (privacy in a multi-user deploy); inheriting strong MCPs via a before/after comparison.
 
 ---
 ---
@@ -220,8 +220,8 @@ START
                        прогона, переиспользуются decompose/step/synthesize; нет ответа
                        → разумное допущение. Догон в шаге: инструмент ask_user.
                        skill_selector → decompose → skill_injection
-                          (амортизация: при РЕЦЕПТЕ похожей успешной задачи селектор БЕЗ
-                           LLM-вызова; при sim≥0.7 и decompose БЕЗ LLM — план из рецепта)
+                          (амортизация: при ПАТТЕРНЕ похожей успешной задачи селектор БЕЗ
+                           LLM-вызова; при sim≥0.7 и decompose БЕЗ LLM — план из паттерна)
                           → step_executor⟲ (исполнение+валидация ПО ПУНКТАМ,
                              валидатор видит РЕАЛЬНО вызванные тулы: текст ≠ действие)
                           → synthesize ─→ validation → reflect → END               (deliberate)
@@ -229,7 +229,7 @@ START
                                             ├─ проблемы → fix-подшаги → step_executor⟲ → synthesize → validation
                                             └─ чисто → validation
  reflect              запись эпизода (trajectory + журнал взаимодействий), harvest сигнала
-                      (HITL-отказ/clarify-ответ → факты профиля), компиляция РЕЦЕПТА и
+                      (HITL-отказ/clarify-ответ → факты профиля), компиляция ПАТТЕРНА и
                       win/lose применённого, промоушен в коллективный пул, детекция привычки,
                       извлечение фактов(+тэги, рёбра), рефлексия, саммари, prune,
                       трекинг деградации, авто-self-learning
@@ -275,7 +275,7 @@ START
 | Способности-инструменты | **`research.py`** · **`compute.py`** · **`media.py`** · **`mcp_client.py`** | дисциплинированный **research** (план под-вопросов→поиск+сниппеты+чтение→ВЕРИФИКАЦИЯ факта→синтез, зависимая цепочка); **вычислительный слой** `python_exec` (точный счёт в песочнице — rlimits/kill); **vision-чтение фигур PDF** `read_pdf_figures` (рендер→vision, гейт по наличию PDF); **data-MCP само-расширение** `try_connect_discovered` (домен→discover→фильтр релевантности→первый ЖИВОЙ remote-MCP; movie/finance/weather подключаются живьём) |
 | Самообучение / амортизация | `improve/`, **`habits.py`**, **`bandit.py`**, **`collective.py`**, `memory/store.py: recipes` | forward-харвест few-shots (глоб+**пер-юзер**, двухъярусно с baseline); backward: дифф-credit-assignment → per-node gradients → оптимизация промптов; **per-user backward** (`graph_backward_user`: уроки из неудач юзера → его few-shots); **измеримый accept/revert** (прогон ДО/ПОСЛЕ на кейсах) → ParamStore; **привычки** (`habits.py`: k похожих успешных дорогих прогонов → факт-директива → router создаёт навык → привычка закрывается ✅); **бандит-прайор режима** (`bandit.py`: Beta/Thompson по похожим эпизодам юзера, видит и НЕУДАЧИ — в few-shots их нет; прайор в memory_context reflexion, не диктат) |
 | Трейсинг/диагностика | `tracing/` | спаны по нодам (data/traces.db), самодиагностика, ротация |
-| Безопасность | `utils_validation.py` (AST-гейт), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | генерируемый код: AST-запреты + smoke в изолированном процессе (rlimits/kill); side-effect тулы — подтверждение, deny by default; **анти-injection в выводах тулов/MCP/поиска** (`sanitize_tool_output`); **анти-PII пол** (`strip_ungrounded_pii` режет выдуманные email, числа не трогает; `redact_pii` в коллективных рецептах) — «не разглашать» = близнец «не выдумывать»; запреты обучения (не менять архитектуру/промпты, не учиться на взломе) |
+| Безопасность | `utils_validation.py` (AST-гейт), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | генерируемый код: AST-запреты + smoke в изолированном процессе (rlimits/kill); side-effect тулы — подтверждение, deny by default; **анти-injection в выводах тулов/MCP/поиска** (`sanitize_tool_output`); **анти-PII пол** (`strip_ungrounded_pii` режет выдуманные email, числа не трогает; `redact_pii` в коллективных паттернах) — «не разглашать» = близнец «не выдумывать»; запреты обучения (не менять архитектуру/промпты, не учиться на взломе) |
 | Внешнее | `external/context.py` | контекст A2A/MCP в состоянии (слот + плумбинг) |
 | Обслуживание | `maintenance/dep_update.py` | безопасный авто-апдейт зависимостей с health-check и откатом |
 | Интерфейсы | `main.py` (REPL), `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (нативное окно через pywebview) | общий граф + общая память. GUI гонит каждый ход как фоновый прогон с **живым прогрессом** (шаги по узлам через `astream`), **интерактивным clarify** (Q/A-мультиселект через `/run/{id}/respond`) и подтверждением, прикрепление файлов + микрофон (Whisper), история тредов, панель настроек (провайдер/модели/ключ, режимы, токен расширения). Мозг — Python; тонкий клиент + мозг. |
@@ -284,10 +284,10 @@ START
 
 У известных паттернов (ReAct, plan-execute, multi-agent) предельная стоимость задачи
 ~постоянна. Здесь каждый успешный прогон оставляет артефакт, делающий похожие задачи
-ДЕШЕВЛЕ — лестница компиляции опыта: эпизод → few-shot → **рецепт** (план+навыки;
+ДЕШЕВЛЕ — лестница компиляции опыта: эпизод → few-shot → **паттерн** (план+навыки;
 `memory/store.py: recipes`) → привычка (`habits.py`) → навык (код). Похожая задача:
-селектор берёт навыки из рецепта БЕЗ LLM-вызова; при sim≥0.7 decompose тоже БЕЗ LLM
-(план из рецепта); win/lose-трекинг, проигрывающий рецепт самоудаляется. Исполнение —
+селектор берёт навыки из паттерна БЕЗ LLM-вызова; при sim≥0.7 decompose тоже БЕЗ LLM
+(план из паттерна); win/lose-трекинг, проигрывающий паттерн самоудаляется. Исполнение —
 лестница с проверяемой эскалацией (act → deliberate → heavy; вверх только по
 заземлённому провалу).
 
@@ -298,10 +298,10 @@ user_id): тёплый проход **−13% токенов при росте
 (zero-LLM селектор/декомпозиция), а не аннотировать её — хинты/few-shots/прайоры раздувают
 контекст всех вызовов и покупают только надёжность. Оговорки: n=4, время шумит латентностью
 API, confidence — самооценка валидатора.
-**Коллективный ярус** (`collective.py`): проверенный личный рецепт (winrate-гейт) →
+**Коллективный ярус** (`collective.py`): проверенный личный паттерн (winrate-гейт) →
 best-practice инсталляции с отпечатком профиля источника; похожим юзерам — рекомендация
 (запрос-сходство + профиль-гейт), личное всегда приоритетнее, отрава/дрейф отсеиваются
-(инъекции не промоутятся, проигрывающий глобальный рецепт самоудаляется).
+(инъекции не промоутятся, проигрывающий глобальный паттерн самоудаляется).
 
 ## Self-learning как «обучение графа»
 
@@ -366,7 +366,7 @@ best-practice инсталляции с отпечатком профиля ис
 - **Размен play_media ↔ media_control** — лейблы семантически близки, поэтому ~20% play уходит в control (route_eval play_media 80%); оставлено намеренно: «пауза», сорвавшаяся в авто-плей, хуже, чем play, теряющий лишь детерминированный нудж.
 - Syscall-песочница опциональна и зависит от наличия bwrap/firejail; полноценный gVisor/контейнер на каждый smoke — следующий уровень.
 - Работа с УЖЕ ОТКРЫТЫМИ окнами (keystroke/scroll/AX, phone/adb) — пока только macOS; кроссплатформенный UI-automation слой — дальше.
-- Оркестрация = выбор 1 из 6 фикс-режимов-шаблонов (fast/reason/act/deliberate/heavy/clarify), каждый — запечённый конвейер нод; лестница эскалации (act→deliberate→earned-heavy) — единственное рантайм-отклонение. ДАЛЬШЕ (НЕ «склеить несколько целых режимов» — это всё те же шаблоны): разобрать режимы на атомарные когнитивные ПРИМИТИВЫ (recall/reason/tool-act/verify/decompose/reflect) и дать мета-контроллеру КОМПОНОВАТЬ их под задачу из промежуточных результатов (роутер-выбирает-1-из-N → планировщик-собирает-граф-вычисления). Режимы тогда — просто частые запечённые рецепты, а не единственные варианты. **Прототипируется за флагом в `src/agent_experimental.py` (экспериментально, изолировано от рабочего графа).**
+- Оркестрация = выбор 1 из 6 фикс-режимов-шаблонов (fast/reason/act/deliberate/heavy/clarify), каждый — запечённый конвейер нод; лестница эскалации (act→deliberate→earned-heavy) — единственное рантайм-отклонение. ДАЛЬШЕ (НЕ «склеить несколько целых режимов» — это всё те же шаблоны): разобрать режимы на атомарные когнитивные ПРИМИТИВЫ (recall/reason/tool-act/verify/decompose/reflect) и дать мета-контроллеру КОМПОНОВАТЬ их под задачу из промежуточных результатов (роутер-выбирает-1-из-N → планировщик-собирает-граф-вычисления). Режимы тогда — просто частые запечённые паттерны, а не единственные варианты. **Прототипируется за флагом в `src/agent_experimental.py` (экспериментально, изолировано от рабочего графа).**
 - **Переписывание истории между ходами** — маскинг внутри шага сделан (выше), но переписывание истории сообщений МЕЖДУ ходами остаётся за бортом: ею владеет LangGraph `create_agent`, и переписывание там = хрупкий хак.
 - **LightRAG** работает для БЗ документов юзера (`knowledge_base.py`); для ГЛОБАЛЬНОЙ памяти (эпизоды/факты) — GraphRAG-lite: **типизированные рёбра УЖЕ есть** (`memory_edges.relation`: `similar` fact↔fact по cosine, `derived` episode→fact) и **multi-hop обход есть** (`_graph_boost` spreading-activation на `graph_hops`, в конфиге пока 1), поверх recency+relevance+importance + TurboVec-ANN. Реально «следующий уровень» vs полный LightRAG: **LLM-извлечённые семантические типы связей** (entities+relations, а не только структурные similar/derived) и отдельный **графовый retrieval-режим** (сейчас граф лишь пере-взвешивает recall, а не самостоятельный ретривер).
-- Амортизация: статистика n=4 (нужна серия с медианами); LLM-обобщение рецепта (убрать частности конкретного юзера) перед коллективным промоушеном (privacy в мульти-юзер деплое); наследование сильных MCP через before/after-сравнение.
+- Амортизация: статистика n=4 (нужна серия с медианами); LLM-обобщение паттерна (убрать частности конкретного юзера) перед коллективным промоушеном (privacy в мульти-юзер деплое); наследование сильных MCP через before/after-сравнение.
