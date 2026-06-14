@@ -56,8 +56,11 @@ play routes to media_control, but a misrouted play still gets browser hands and 
 plays — only the deterministic nudge is lost; pauses now route correctly instead of auto-playing.)
 Reproduce: `python -m src.eval.route_eval`.
 
-**Amortization** (`scripts/amortize_bench.py`): warm pass **−13% tokens with quality 78%→98%**
-(n=4 — illustrative, not statistically strong). **Tests:** 281, mostly offline (no LLM).
+**Amortization** (`scripts/amortize_bench.py`): one paired cold→warm run over 4 tasks (a fresh
+user, then the *same* user now carrying patterns/few-shots/priors) — the warm pass spends
+**−13% tokens at no worse quality** (confidence 78%→98%). This shows the *mechanism* (a warm pass
+reuses compiled patterns), not a statistical claim — a series with medians is still needed.
+**Tests:** 281, mostly offline (no LLM).
 
 > Caveats: GAIA n=100 → per-level CIs are wide; route_eval threshold is calibrated on its own
 > set (single hyperparameter, low overfit risk); confidence numbers are validator self-assessment.
@@ -423,8 +426,11 @@ media_control, но мисроут play не ломает воспроизвед
 теряется лишь детерминированный дожим; зато «пауза» больше не запускает плей.)
 Воспроизведение: `python -m src.eval.route_eval`.
 
-**Амортизация** (`scripts/amortize_bench.py`): тёплый проход **−13% токенов при качестве 78%→98%**
-(n=4 — иллюстративно, статистически не сильно). **Тесты:** 281, в основном оффлайн (без LLM).
+**Амортизация** (`scripts/amortize_bench.py`): один парный прогон cold→warm на 4 задачах (свежий
+юзер, затем *тот же* юзер — теперь с паттернами/few-shots/прайорами) — тёплый проход тратит
+**−13% токенов при не худшем качестве** (уверенность 78%→98%). Это демонстрация *механизма*
+(тёплый проход переиспользует скомпилированные паттерны), а не статистическое утверждение —
+для строгости нужна серия с медианами. **Тесты:** 281, в основном оффлайн (без LLM).
 
 > Caveats: GAIA n=100 → доверительные интервалы по уровням широкие; порог route_eval откалиброван
 > на своём же наборе (один гиперпараметр, риск оверфита низкий); confidence — самооценка валидатора.

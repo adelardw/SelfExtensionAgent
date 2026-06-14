@@ -109,8 +109,9 @@ user_id): the warm pass is **−13% tokens with quality rising
 conf 78%→98%** (a cold task failed at 18% solved at 95%). The key lesson, learned
 from negative runs #1/#3: the experience artifact must **REPLACE LLM work**
 (zero-LLM selector/decomposition), not annotate it — hints/few-shots/priors inflate the
-context of every call and buy only reliability. Caveats: n=4, time is noisy with API
-latency, confidence is the validator's self-assessment.
+context of every call and buy only reliability. Caveats: this is ONE paired cold→warm run over
+4 tasks (not 4 independent samples) — a mechanism demo, not statistics; time is noisy with API
+latency, confidence is the validator's self-assessment; a series with medians is still needed.
 **Collective tier** (`collective.py`): a vetted personal pattern (winrate gate) →
 best-practice installation with the source profile's fingerprint; to similar users — a recommendation
 (query similarity + profile gate), the personal one always wins, poison/drift are filtered
@@ -296,8 +297,9 @@ user_id): тёплый проход **−13% токенов при росте
 качества conf 78%→98%** (проваленная холодная задача 18% решена на 95%). Ключевой урок,
 добытый отрицательными прогонами №1/№3: артефакт опыта должен **ЗАМЕНЯТЬ LLM-работу**
 (zero-LLM селектор/декомпозиция), а не аннотировать её — хинты/few-shots/прайоры раздувают
-контекст всех вызовов и покупают только надёжность. Оговорки: n=4, время шумит латентностью
-API, confidence — самооценка валидатора.
+контекст всех вызовов и покупают только надёжность. Оговорки: это ОДИН парный прогон cold→warm
+на 4 задачах (не 4 независимых сэмпла) — демонстрация механизма, не статистика; время шумит
+латентностью API, confidence — самооценка валидатора; для строгости нужна серия с медианами.
 **Коллективный ярус** (`collective.py`): проверенный личный паттерн (winrate-гейт) →
 best-practice инсталляции с отпечатком профиля источника; похожим юзерам — рекомендация
 (запрос-сходство + профиль-гейт), личное всегда приоритетнее, отрава/дрейф отсеиваются
