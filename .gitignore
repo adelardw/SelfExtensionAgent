@@ -24,3 +24,6 @@ data/route_examples.db
 # frontend (Vite/React)
 frontend/node_modules/
 frontend/dist/
+
+# рабочий план — только локально, вне git-истории
+develop.md
