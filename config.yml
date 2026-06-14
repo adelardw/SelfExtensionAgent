@@ -1,10 +1,10 @@
 provider: openrouter  # | ollama
 # Тиры low-cost (цены проверены живьём через /api/v1/models, июнь 2026):
 model:                                  # роутинг/валидация/extraction — дёшево и быстро
-  name: google/gemini-2.5-flash-lite    # $0.10 in / $0.40 out, ctx 1M
+  name: google/gemini-3.1-flash-lite    # $0.10 in / $0.40 out, ctx 1M
   temperature: 0
 code_model:                             # агентское исполнение шагов / код
-  name: deepseek/deepseek-v4-flash      # $0.098 in / $0.197 out, ctx 1M
+  name: z-ai/glm-5.1                    # $0.098 in / $0.197 out, ctx 1M
   temperature: 0
 deep_model:                             # ТОЛЬКО heavy-ревью и редкое глубокое мышление
   name: deepseek/deepseek-v4-pro        # $0.435 in / $0.87 out (промо), ~Opus-уровень агентики
