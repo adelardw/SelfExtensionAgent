@@ -1,141 +1,175 @@
 <mxfile host="app.diagrams.net" agent="self-extension-agent">
   <diagram name="self-extension-agent" id="selfext-arch-en">
-    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
         <!-- TITLE -->
-        <mxCell id="title" value="self-extension-agent — architecture (LangGraph graph = trainable program; thin client + Python brain)" style="text;html=1;fontSize=16;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="40" y="20" width="1100" height="30" as="geometry" />
+        <mxCell id="title" value="self-extension-agent — architecture · the LangGraph graph is a TRAINABLE PROGRAM (a run = forward pass, self-learning = backward over the trace) · a cheap model + harness, not model size" style="text;html=1;fontSize=15;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="1220" height="30" as="geometry" />
         </mxCell>
 
-        <!-- ===== CLIENTS / INTERFACES ===== -->
-        <mxCell id="clients" value="Interfaces (thin clients)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="70" width="760" height="110" as="geometry" />
+        <!-- ===== INTERFACES ===== -->
+        <mxCell id="clients" value="Interfaces — thin clients (shared graph + shared memory)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="70" width="780" height="110" as="geometry" />
         </mxCell>
-        <mxCell id="c_gui" value="Web GUI&#10;React+Vite+Tailwind&#10;· desktop.py (pywebview)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="60" y="105" width="170" height="60" as="geometry" />
+        <mxCell id="c_gui" value="Web / Desktop GUI&#10;React+Vite+Tailwind · desktop.py&#10;live progress · clarify card · mic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="60" y="105" width="180" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="c_repl" value="REPL (main.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="250" y="105" width="150" height="60" as="geometry" />
+        <mxCell id="c_repl" value="REPL&#10;main.py&#10;/kb /attach /model …" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="260" y="105" width="150" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="c_tg" value="Telegram (bot.py)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="420" y="105" width="150" height="60" as="geometry" />
+        <mxCell id="c_tg" value="Telegram&#10;bot.py&#10;photos / docs / voice" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="430" y="105" width="150" height="60" as="geometry" />
         </mxCell>
-        <mxCell id="c_ext" value="Chrome extension&#10;(agent in your browser)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="590" y="105" width="190" height="60" as="geometry" />
+        <mxCell id="c_ext" value="Chrome extension&#10;agent in your browser&#10;(+ extension token)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="600" y="105" width="200" height="60" as="geometry" />
         </mxCell>
 
-        <!-- SERVER / BRAIN -->
-        <mxCell id="server" value="FastAPI server (server.py) — background run (astream) · /chat · /run/{id} (poll) · /run/{id}/respond&#10;interactive clarify (Q/A multi-select) + confirm · live per-node progress · /settings · /upload · /transcribe" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="210" width="760" height="70" as="geometry" />
+        <!-- ===== SERVER ===== -->
+        <mxCell id="server" value="FastAPI server (server.py) — background run (astream) · /chat · /run/{id} poll · /run/{id}/respond · /settings · /upload · /transcribe&#10;interactive clarify (Q/A multiselect) + HITL confirm · live per-node progress · thin client ↔ Python brain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="200" width="780" height="66" as="geometry" />
         </mxCell>
 
         <!-- ===== LANGGRAPH FORWARD GRAPH ===== -->
-        <mxCell id="graphbox" value="LangGraph forward graph (one request). Backward = credit-assignment over the trace" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="310" width="760" height="640" as="geometry" />
+        <mxCell id="graphbox" value="LangGraph FORWARD graph (one request)   —   backward (self-learning) = credit-assignment over the trace, writes only ParamStore artifacts (the graph architecture never changes)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="800" height="1040" as="geometry" />
         </mxCell>
 
-        <mxCell id="n_start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="360" y="345" width="120" height="40" as="geometry" />
+        <mxCell id="n_start" value="START" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="360" y="330" width="140" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="n_recall" value="recall — memory + AutoRAG&#10;FLEXIBLE recall (facts AND episodes by relevance),&#10;GraphRAG-lite; query embedded once" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-          <mxGeometry x="290" y="405" width="260" height="60" as="geometry" />
+        <mxCell id="n_recall" value="recall — memory + AutoRAG&#10;episodes/facts/conclusions/goals + external ctx + KB/attachments (BM25 + sanitize)&#10;CONDITIONAL &amp; FLEXIBLE (recall_gate): BOTH facts AND associative memory BY RELEVANCE&#10;GraphRAG-lite boost · the query is embedded ONCE → reused by gate/graph AND the intent router" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="280" y="395" width="300" height="66" as="geometry" />
         </mxCell>
-        <mxCell id="n_goal" value="goal — objective + rubric (kept in context)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="290" y="485" width="260" height="40" as="geometry" />
+        <mxCell id="n_goal" value="goal — aim + a worthwhile goal + rubric (kept in context)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="280" y="490" width="300" height="40" as="geometry" />
         </mxCell>
-        <mxCell id="n_refl" value="reflexion — CHOICE of thinking type&#10;(LLM + bandit prior + few-shots)&#10;high ambiguity → clarify_gate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="290" y="545" width="260" height="64" as="geometry" />
+        <mxCell id="n_refl" value="reflexion — LEVEL-1 routing: CHOICE of thinking mode&#10;ReflexionDecision (LLM) + bandit prior (Beta/Thompson, sees failures) + similarity few-shots&#10;high ambiguity → clarify · heavy is NOT predicted — it is EARNED by runtime evidence" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="280" y="558" width="300" height="70" as="geometry" />
         </mxCell>
 
-        <!-- modes -->
-        <mxCell id="n_fast" value="fast / reason&#10;(System 1/2, no tools)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="70" y="650" width="170" height="50" as="geometry" />
+        <!-- modes row -->
+        <mxCell id="n_fast" value="fast / reason&#10;System 1 / System 2&#10;no tools&#10;(reason → validation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="60" y="672" width="180" height="66" as="geometry" />
         </mxCell>
-        <mxCell id="n_act" value="act — System 1 with hands&#10;(1 action, 1–2 tools;&#10;failed → escalation)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="270" y="650" width="180" height="60" as="geometry" />
+        <mxCell id="n_act" value="act — System 1 with hands&#10;ONE direct action, 1–2 tools&#10;(BM25 skill pick, HITL kept)&#10;0 tools / ESCALATE →" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="280" y="672" width="190" height="66" as="geometry" />
         </mxCell>
-        <mxCell id="n_delib" value="deliberate / heavy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="490" y="650" width="170" height="40" as="geometry" />
+        <mxCell id="n_delib" value="deliberate / heavy&#10;tools + decomposition + per-item execute/validate&#10;heavy adds an end-to-end review by the deep model" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="520" y="672" width="300" height="66" as="geometry" />
         </mxCell>
 
         <!-- deliberate sub-flow -->
-        <mxCell id="n_clar" value="clarify_gate — batched clarifications&#10;(Q/A with options; dedup)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-          <mxGeometry x="470" y="715" width="210" height="46" as="geometry" />
+        <mxCell id="n_clar" value="clarify_gate — batched clarifications (markers/open)&#10;Q/A multiselect; answers → the run's clarification registry (dedup, reused by all nodes)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="540" y="772" width="280" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="n_decomp" value="decompose → skill_injection&#10;(amortization: pattern → no LLM)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="470" y="771" width="210" height="46" as="geometry" />
+        <mxCell id="n_decomp" value="skill_selector → decompose → skill_injection&#10;AMORTIZATION: with a PATTERN the selector runs with NO LLM;&#10;sim≥0.7 → decompose with NO LLM (plan straight from the pattern)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="540" y="844" width="280" height="58" as="geometry" />
         </mxCell>
-        <mxCell id="n_step" value="step_executor ⟲ (per-item execute+validate;&#10;validator sees ACTUALLY called tools)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="450" y="827" width="250" height="46" as="geometry" />
+        <mxCell id="n_step" value="step_executor ⟲ — execute + validate PER ITEM&#10;validator sees the ACTUALLY-called tools (text ≠ action)&#10;within-step context masking · ask_user catch-up" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="540" y="924" width="280" height="58" as="geometry" />
         </mxCell>
-        <mxCell id="n_synth" value="synthesize → (heavy: review⟲) → validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="450" y="883" width="250" height="40" as="geometry" />
+        <mxCell id="n_synth" value="synthesize — assemble the solution from the steps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="540" y="1004" width="280" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="n_review" value="review ⟲ (heavy only)&#10;end-to-end by the deep model&#10;problems → fix sub-steps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="320" y="1004" width="180" height="58" as="geometry" />
+        </mxCell>
+        <mxCell id="n_val" value="validation — grounding + rubric check" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="540" y="1076" width="280" height="44" as="geometry" />
         </mxCell>
 
-        <mxCell id="n_reflect" value="reflect — write episode, harvest signal,&#10;compile PATTERN, facts(+edges), self-learning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="80" y="780" width="300" height="60" as="geometry" />
+        <mxCell id="n_reflect" value="reflect — write the episode (+ interaction journal), harvest signal (HITL/clarify → profile facts),&#10;compile the PATTERN (+ win/lose) → promote to the collective pool, detect a habit,&#10;extract facts (+tags, edges) · summary · prune · degradation tracking · auto self-learning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="90" y="1180" width="330" height="70" as="geometry" />
         </mxCell>
-        <mxCell id="n_end" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
-          <mxGeometry x="180" y="880" width="100" height="40" as="geometry" />
+        <mxCell id="n_end" value="END" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="190" y="1280" width="130" height="40" as="geometry" />
         </mxCell>
 
-        <!-- graph edges -->
-        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_start" target="n_recall"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_recall" target="n_goal"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_goal" target="n_refl"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_refl" target="n_fast"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_refl" target="n_act"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_refl" target="n_delib"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_delib" target="n_clar"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_clar" target="n_decomp"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_decomp" target="n_step"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_step" target="n_synth"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e11" value="act: escalation" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;fontSize=9;" edge="1" parent="1" source="n_act" target="n_delib"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_fast" target="n_reflect"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_act" target="n_reflect"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_synth" target="n_reflect"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="n_reflect" target="n_end"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="e0" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="server" target="n_start"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <!-- ===== graph control-flow edges (solid) ===== -->
+        <mxCell id="e_srv" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="server" target="n_start"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e1" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_start" target="n_recall"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e2" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_recall" target="n_goal"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e3" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_goal" target="n_refl"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e4" value="fast/reason" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_refl" target="n_fast">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="355" y="650"/><mxPoint x="150" y="650"/></Array></mxGeometry></mxCell>
+        <mxCell id="e5" value="act" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_refl" target="n_act">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="430" y="650"/><mxPoint x="375" y="650"/></Array></mxGeometry></mxCell>
+        <mxCell id="e6" value="deliberate/heavy" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.8;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_refl" target="n_delib">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="520" y="650"/><mxPoint x="670" y="650"/></Array></mxGeometry></mxCell>
+
+        <mxCell id="e_esc" value="escalate" style="html=1;endArrow=block;dashed=1;strokeColor=#b85450;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_act" target="n_delib"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e7" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_delib" target="n_clar">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="670" y="755"/><mxPoint x="680" y="755"/></Array></mxGeometry></mxCell>
+        <mxCell id="e8" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_clar" target="n_decomp"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e9" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_decomp" target="n_step"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e10" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_step" target="n_synth"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e11" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_synth" target="n_val"><mxGeometry relative="1" as="geometry" /></mxCell>
+
+        <mxCell id="e_rev" value="heavy review" style="html=1;endArrow=block;dashed=1;strokeColor=#d6b656;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="n_synth" target="n_review"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="e_revloop" value="fix" style="html=1;endArrow=block;dashed=1;strokeColor=#d6b656;exitX=0.5;exitY=0;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_review" target="n_step">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="410" y="953"/></Array></mxGeometry></mxCell>
+
+        <mxCell id="e_fast" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.3;entryY=0;" edge="1" parent="1" source="n_fast" target="n_reflect">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="150" y="1150"/><mxPoint x="189" y="1150"/></Array></mxGeometry></mxCell>
+        <mxCell id="e_act" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.55;entryY=0;" edge="1" parent="1" source="n_act" target="n_reflect">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="375" y="1150"/><mxPoint x="271" y="1150"/></Array></mxGeometry></mxCell>
+        <mxCell id="e_val" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=1;entryY=0.4;" edge="1" parent="1" source="n_val" target="n_reflect">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="680" y="1208"/></Array></mxGeometry></mxCell>
+        <mxCell id="e_end" style="html=1;endArrow=block;strokeColor=#555555;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="n_reflect" target="n_end"><mxGeometry relative="1" as="geometry" /></mxCell>
 
         <!-- ===== CROSS-CUTTING SUBSYSTEMS (right column) ===== -->
-        <mxCell id="sub_mem" value="MEMORY (memory/store.py)&#10;episodes/facts/insights/goals + graph edges&#10;FLEXIBLE recall by relevance · GraphRAG-lite&#10;TurboVec-ANN · journal → implicit feedback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="70" width="320" height="80" as="geometry" />
+        <mxCell id="sub_mem" value="MEMORY  (memory/store.py · embedder · vector_index TurboVec · feedback)&#10;episodes / facts(+tags) / conclusions / goals / summaries + typed graph edges&#10;GraphRAG-lite: densify fact↔fact (cosine) + spreading-activation (per-user, PII containment)&#10;Memory-as-TOOL (3 tiers): search_memory · recall_history · note_to_self" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="70" width="380" height="94" as="geometry" />
         </mxCell>
-        <mxCell id="sub_router" value="INTENT ROUTER (intent.py)&#10;embedding-kNN codebook {web_grounding / physical /&#10;play / media_control / self_contained}; any language&#10;online growth from feedback; pos/neg corpus" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="160" width="320" height="80" as="geometry" />
+        <mxCell id="sub_router" value="INTENT ROUTER — LEVEL-2  (intent.py · eval/route_eval.py)&#10;embedding-kNN codebook on qvec, ANY language (routing regexes REMOVED)&#10;signals = behavior GATES: web_grounding (→ act floor) · physical_browser · play_media&#10;media_control · self_contained · grows from feedback · route_eval 570 cases = 89.3%" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="178" width="380" height="104" as="geometry" />
         </mxCell>
-        <mxCell id="sub_skills" value="SKILLS (skills/* + registry.json)&#10;ToolSearch (BM25S) · browser_control (DOM by #)&#10;device/app/ax/phone · web_search&#10;IMPORT external: quarantine→AST→smoke-sandbox→registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="250" width="320" height="84" as="geometry" />
+        <mxCell id="sub_skills" value="SKILLS  (skills/* · registry.json · retrieval.py)&#10;ToolSearch (BM25S) as the library grows · browser_control: DOM snapshot, click/type by #&#10;device/app/ax/phone · web_search (trafilatura→BM25S→vector-rerank, never the full page)&#10;import external: quarantine → AST gate → smoke-sandbox → registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="296" width="380" height="96" as="geometry" />
         </mxCell>
-        <mxCell id="sub_kb" value="KNOWLEDGE BASE (knowledge_base.py)&#10;LightRAG graph (entities+relations, multi-hop) · BM25 fallback&#10;AutoRAG in recall · session attachments (tmp)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="344" width="320" height="70" as="geometry" />
+        <mxCell id="sub_kb" value="KNOWLEDGE BASE  (knowledge_base.py · lightrag_engine.py)&#10;GLOBAL: real LightRAG graph (entities+relations, multi-hop) · BM25 fallback (no key)&#10;SESSION attachments (tmp) · AutoRAG in recall (cheap BM25 + sanitize, own-data provenance)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="406" width="380" height="84" as="geometry" />
         </mxCell>
-        <mxCell id="sub_cap" value="CAPABILITY TOOLS&#10;research (plan→search→verify→synthesize)&#10;python_exec (sandbox) · vision-PDF · MCP (discover/connect)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="424" width="320" height="74" as="geometry" />
+        <mxCell id="sub_cap" value="CAPABILITY TOOLS  (research.py · compute.py · media.py · mcp_client.py)&#10;research: sub-question plan → search → fact VERIFICATION → synthesize&#10;python_exec (sandbox) · vision PDF figures · MCP discover/connect/use (live remote)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="504" width="380" height="84" as="geometry" />
         </mxCell>
-        <mxCell id="sub_learn" value="SELF-LEARNING / AMORTIZATION&#10;forward: few-shots (global+per-user) · backward: diff-blame→&#10;gradients→prompt optimization (measured BEFORE/AFTER)&#10;patterns→habits→skills · collective tier · bandit" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="508" width="320" height="84" as="geometry" />
+        <mxCell id="sub_learn" value="SELF-LEARNING / AMORTIZATION  (improve/ · habits.py · bandit.py · collective.py)&#10;forward: few-shots (global + PER-USER) · backward: diff-blame → gradients → prompt opt&#10;(measured BEFORE/AFTER, accept/revert) · per-user backward · patterns → habits → skills&#10;collective tier (best-practices to similar users) · mode bandit prior" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="602" width="380" height="104" as="geometry" />
         </mxCell>
-        <mxCell id="sub_sec" value="SECURITY&#10;AST gate + smoke in sandbox (rlimits/syscall) · HITL (deny-by-default)&#10;anti-injection in tool outputs · anti-PII floor · no learning from exploits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="602" width="320" height="80" as="geometry" />
+        <mxCell id="sub_sec" value="SECURITY  (utils_validation.py · utils.py · hitl.py · improve/safety.py)&#10;AST gate on code writes · smoke in a process sandbox (rlimits/kill) · HITL deny-by-default&#10;anti-injection in tool/MCP/search/AutoRAG outputs · anti-PII floor · no learning from exploits" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="720" width="380" height="92" as="geometry" />
         </mxCell>
-        <mxCell id="sub_models" value="MODELS (config.yml, OpenRouter | Ollama)&#10;fast=routing/validation · code=execution · deep=heavy review&#10;cheap tier + harness, not model size" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=6;" vertex="1" parent="1">
-          <mxGeometry x="840" y="692" width="320" height="70" as="geometry" />
+        <mxCell id="sub_models" value="MODELS  (config.yml · OpenRouter | Ollama)&#10;fast = routing/validation/extraction · code = step execution · deep = heavy review ONLY&#10;cheap tier + harness, not model size  (a typical fast query ≈ $0.001)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="826" width="380" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="sub_trace" value="TRACING / DIAGNOSTICS (tracing/) — spans per node (traces.db) · self-diagnosis · rotation   ·   MAINTENANCE: safe dependency auto-update (health-check + rollback)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;" vertex="1" parent="1">
+          <mxGeometry x="880" y="920" width="380" height="56" as="geometry" />
         </mxCell>
 
-        <!-- dashed links graph <-> subsystems -->
-        <mxCell id="l_mem" style="endArrow=none;dashed=1;html=1;strokeColor=#9673a6;" edge="1" parent="1" source="n_recall" target="sub_mem"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="l_router" style="endArrow=none;dashed=1;html=1;strokeColor=#d79b00;" edge="1" parent="1" source="n_refl" target="sub_router"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="l_skills" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="n_step" target="sub_skills"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="l_cap" style="endArrow=none;dashed=1;html=1;strokeColor=#666666;" edge="1" parent="1" source="n_step" target="sub_cap"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="l_learn" style="endArrow=none;dashed=1;html=1;strokeColor=#d6b656;" edge="1" parent="1" source="n_reflect" target="sub_learn"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <!-- ===== dashed links: a graph node USES a subsystem ===== -->
+        <mxCell id="l_mem" style="html=1;endArrow=none;dashed=1;strokeColor=#9673a6;exitX=1;exitY=0.35;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_recall" target="sub_mem">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="848" y="418"/><mxPoint x="848" y="117"/></Array></mxGeometry></mxCell>
+        <mxCell id="l_kb" style="html=1;endArrow=none;dashed=1;strokeColor=#666666;exitX=1;exitY=0.75;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_recall" target="sub_kb">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="860" y="445"/><mxPoint x="860" y="448"/></Array></mxGeometry></mxCell>
+        <mxCell id="l_router" style="html=1;endArrow=none;dashed=1;strokeColor=#d79b00;exitX=1;exitY=0.4;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_refl" target="sub_router">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="856" y="586"/><mxPoint x="856" y="230"/></Array></mxGeometry></mxCell>
+        <mxCell id="l_skills" style="html=1;endArrow=none;dashed=1;strokeColor=#666666;exitX=1;exitY=0.3;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_step" target="sub_skills">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="852" y="941"/><mxPoint x="852" y="344"/></Array></mxGeometry></mxCell>
+        <mxCell id="l_cap" style="html=1;endArrow=none;dashed=1;strokeColor=#666666;exitX=1;exitY=0.6;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_step" target="sub_cap">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="844" y="959"/><mxPoint x="844" y="546"/></Array></mxGeometry></mxCell>
+        <mxCell id="l_sec" style="html=1;endArrow=none;dashed=1;strokeColor=#b85450;exitX=1;exitY=0.9;entryX=0;entryY=0.5;" edge="1" parent="1" source="n_step" target="sub_sec">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="836" y="976"/><mxPoint x="836" y="766"/></Array></mxGeometry></mxCell>
+        <mxCell id="l_learn" style="html=1;endArrow=none;dashed=1;strokeColor=#d6b656;exitX=1;exitY=0.5;entryX=0;entryY=0.7;" edge="1" parent="1" source="n_reflect" target="sub_learn">
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="828" y="1215"/><mxPoint x="828" y="675"/></Array></mxGeometry></mxCell>
 
         <!-- legend -->
-        <mxCell id="legend" value="Legend: blue=interfaces/models · green=graph nodes · orange=routing/clarification · purple=memory · yellow=self-learning · red=security · gray=skills/capabilities/KB&#10;solid arrow=graph flow · dashed=uses subsystem" style="text;html=1;align=left;verticalAlign=top;fontSize=10;fillColor=#ffffff;strokeColor=#cccccc;" vertex="1" parent="1">
-          <mxGeometry x="40" y="965" width="1120" height="40" as="geometry" />
+        <mxCell id="legend" value="Legend — blue: interfaces/models · green: graph nodes · orange: routing/clarify · purple: memory · yellow: self-learning · red: security · gray: skills/KB/capabilities&#10;solid arrow = graph control flow · dashed = a node uses a cross-cutting subsystem · ⟲ = internal loop · TWO routings: LEVEL-1 thinking mode (reflexion-LLM) vs LEVEL-2 intent signals (embedding-kNN)" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fillColor=#ffffff;strokeColor=#cccccc;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1360" width="1220" height="44" as="geometry" />
         </mxCell>
 
       </root>

@@ -1,175 +1,201 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1570" height="1668" viewBox="0 0 1570 1668" font-family="Helvetica,Arial,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1444" viewBox="0 0 1300 1444" font-family="Helvetica,Arial,sans-serif">
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#555"/></marker></defs>
-<rect width="1570" height="1668" fill="#ffffff"/>
-<line x1="540" y1="306" x2="540" y2="372" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="541" y1="412" x2="543" y2="440" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="545" y1="532" x2="545" y2="558" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="545" y1="614" x2="545" y2="640" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="440" y1="718" x2="301" y2="770" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<text x="370" y="741" font-size="9" fill="#555555" text-anchor="middle">fast/reason</text>
-<line x1="530" y1="718" x2="511" y2="770" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<text x="521" y="741" font-size="9" fill="#555555" text-anchor="middle">act</text>
-<line x1="640" y1="718" x2="785" y2="778" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<text x="712" y="745" font-size="9" fill="#555555" text-anchor="middle">deliberate/heavy</text>
-<line x1="867" y1="848" x2="863" y2="890" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="860" y1="970" x2="860" y2="1000" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="860" y1="1084" x2="860" y2="1114" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="860" y1="1210" x2="860" y2="1240" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="630" y1="813" x2="720" y2="813" stroke="#b85450" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
-<text x="675" y="810" font-size="9" fill="#b85450" text-anchor="middle">не вышло → эскалация</text>
-<line x1="195" y1="856" x2="319" y2="1380" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="483" y1="856" x2="342" y2="1380" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="715" y1="1320" x2="497" y2="1380" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="330" y1="1472" x2="330" y2="1500" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="642" y1="440" x2="1205" y2="174" stroke="#9673a6" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="614" y1="640" x2="1223" y2="294" stroke="#d79b00" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="887" y1="1114" x2="1285" y2="414" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="898" y1="1114" x2="1280" y2="626" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="392" y1="1380" x2="1245" y2="746" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4"/>
-<text x="48" y="42" font-size="17" fill="#1a1a1a" text-anchor="start" font-weight="bold">self-extension-agent — архитектура · LangGraph-граф = обучаемая программа · тонкий клиент + Python-мозг</text>
-<rect x="40" y="70" width="1000" height="120" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="540" y="86" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Интерфейсы — тонкие клиенты (один Python-мозг под всеми)</text>
-<rect x="60" y="112" width="230" height="64" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="175" y="126" font-size="12" fill="#1a1a1a" text-anchor="middle">Web GUI</text>
-<text x="175" y="141" font-size="12" fill="#1a1a1a" text-anchor="middle">React + Vite + Tailwind</text>
-<text x="175" y="156" font-size="12" fill="#1a1a1a" text-anchor="middle">Atlassian-токены, Inter</text>
-<text x="175" y="171" font-size="12" fill="#1a1a1a" text-anchor="middle">desktop.py (нативный webview)</text>
-<rect x="310" y="112" width="220" height="64" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="420" y="134" font-size="12" fill="#1a1a1a" text-anchor="middle">REPL</text>
-<text x="420" y="148" font-size="12" fill="#1a1a1a" text-anchor="middle">main.py (rich, история)</text>
-<text x="420" y="164" font-size="12" fill="#1a1a1a" text-anchor="middle">one-shot режим</text>
-<rect x="550" y="112" width="200" height="64" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="650" y="141" font-size="12" fill="#1a1a1a" text-anchor="middle">Telegram</text>
-<text x="650" y="156" font-size="12" fill="#1a1a1a" text-anchor="middle">bot.py</text>
-<rect x="770" y="112" width="250" height="64" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="895" y="134" font-size="12" fill="#1a1a1a" text-anchor="middle">Chrome-расширение</text>
-<text x="895" y="148" font-size="12" fill="#1a1a1a" text-anchor="middle">агент в ТВОЁМ браузере</text>
-<text x="895" y="164" font-size="12" fill="#1a1a1a" text-anchor="middle">(твои логины/вкладки, WS-мост)</text>
-<rect x="40" y="220" width="1000" height="86" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="50" y="236" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">FastAPI-сервер · server.py</text>
-<text x="50" y="251" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">фоновый прогон (astream) · /chat → run_id · /run/{id} (poll живого прогресса по узлам) · /run/{id}/respond</text>
-<text x="50" y="266" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">ИНТЕРАКТИВНЫЙ clarify (Q/A-мультиселект) + confirm (HITL) через contextvar · /settings · /upload · /transcribe</text>
-<text x="50" y="281" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">AsyncSqliteSaver-чекпоинты · режим auto-accept (ты локальный оператор)</text>
-<rect x="30" y="340" width="1030" height="1230" rx="8" fill="#fafafa" stroke="#999999" stroke-width="1.3" stroke-dasharray="6,4"/>
-<text x="545" y="356" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">LangGraph forward-граф (один запрос) · backward = credit-assignment по трейсу (самообучение)</text>
-<ellipse cx="540" cy="392" rx="60" ry="20" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="540" y="396" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">START</text>
-<rect x="330" y="440" width="430" height="92" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
-<text x="340" y="457" font-size="10" fill="#1a1a1a" text-anchor="start">recall — память + AutoRAG</text>
-<text x="340" y="470" font-size="10" fill="#1a1a1a" text-anchor="start">• ГИБКИЙ recall: факты И эпизоды по РЕЛЕВАНТНОСТИ (не «персона всегда»)</text>
-<text x="340" y="483" font-size="10" fill="#1a1a1a" text-anchor="start">• порог fg = max(0.18, gate·0.85) + graph-boost — устраняет утечку</text>
-<text x="340" y="496" font-size="10" fill="#1a1a1a" text-anchor="start">контекста между задачами</text>
-<text x="340" y="509" font-size="10" fill="#1a1a1a" text-anchor="start">• GraphRAG-lite по рёбрам · эмбеддинг запроса вычисляется один раз ·</text>
-<text x="340" y="522" font-size="10" fill="#1a1a1a" text-anchor="start">добавление фрагментов БЗ/own_docs · очистка от PII</text>
-<rect x="330" y="558" width="430" height="56" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="340" y="576" font-size="12" fill="#1a1a1a" text-anchor="start">goal — цель + rubric</text>
-<text x="340" y="590" font-size="12" fill="#1a1a1a" text-anchor="start">формализует критерий успеха и держит его в контексте до конца</text>
-<text x="340" y="606" font-size="12" fill="#1a1a1a" text-anchor="start">прогона</text>
-<rect x="330" y="640" width="430" height="78" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
-<text x="340" y="655" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">reflexion — ВЫБОР типа мышления (роутер)</text>
-<text x="340" y="669" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">LLM-классификатор + априорная оценка бандита + few-shots (без</text>
-<text x="340" y="683" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">эвристик по ключевым словам)</text>
-<text x="340" y="697" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">высокая неоднозначность → clarify_gate · цена/риск задачи → класс</text>
-<text x="340" y="711" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">модели</text>
-<rect x="60" y="770" width="250" height="86" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="70" y="795" font-size="12" fill="#1a1a1a" text-anchor="start">fast / reason</text>
-<text x="70" y="810" font-size="12" fill="#1a1a1a" text-anchor="start">System 1 / System 2</text>
-<text x="70" y="825" font-size="12" fill="#1a1a1a" text-anchor="start">прямой ответ без инструментов</text>
-<text x="70" y="840" font-size="12" fill="#1a1a1a" text-anchor="start">(короткий ответ либо рассуждение)</text>
-<rect x="360" y="770" width="270" height="86" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="370" y="795" font-size="12" fill="#1a1a1a" text-anchor="start">act — System 1 «с руками»</text>
-<text x="370" y="810" font-size="12" fill="#1a1a1a" text-anchor="start">1 намерение, 1–2 инструмента</text>
-<text x="370" y="825" font-size="12" fill="#1a1a1a" text-anchor="start">(браузер / устройство / поиск)</text>
-<text x="370" y="840" font-size="12" fill="#1a1a1a" text-anchor="start">не вышло → эскалация в deliberate</text>
-<rect x="720" y="778" width="300" height="70" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="730" y="802" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">deliberate / heavy</text>
-<text x="730" y="818" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">многошаговый план</text>
-<text x="730" y="832" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">(heavy = + ревью-петля)</text>
-<rect x="700" y="890" width="320" height="80" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
-<text x="710" y="904" font-size="12" fill="#1a1a1a" text-anchor="start">clarify_gate — батч уточнений</text>
-<text x="710" y="920" font-size="12" fill="#1a1a1a" text-anchor="start">Q/A с вариантами (мультиселект), дедуп по</text>
-<text x="710" y="934" font-size="12" fill="#1a1a1a" text-anchor="start">нормализации</text>
-<text x="710" y="950" font-size="12" fill="#1a1a1a" text-anchor="start">ответы уходят в контекст плана (не</text>
-<text x="710" y="964" font-size="12" fill="#1a1a1a" text-anchor="start">переспрашивает)</text>
-<rect x="700" y="1000" width="320" height="84" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="710" y="1016" font-size="12" fill="#1a1a1a" text-anchor="start">decompose → skill_injection</text>
-<text x="710" y="1032" font-size="12" fill="#1a1a1a" text-anchor="start">разбивка на пункты + добавление релевантных</text>
-<text x="710" y="1046" font-size="12" fill="#1a1a1a" text-anchor="start">навыков</text>
-<text x="710" y="1062" font-size="12" fill="#1a1a1a" text-anchor="start">амортизация: есть паттерн → шаги без LLM</text>
-<text x="710" y="1076" font-size="12" fill="#1a1a1a" text-anchor="start">(дешевле и стабильнее)</text>
-<rect x="700" y="1114" width="320" height="96" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="710" y="1129" font-size="12" fill="#1a1a1a" text-anchor="start">step_executor ⟲ — цикл по пунктам</text>
-<text x="710" y="1144" font-size="12" fill="#1a1a1a" text-anchor="start">исполнение + покритериальная валидация</text>
-<text x="710" y="1159" font-size="12" fill="#1a1a1a" text-anchor="start">валидатор видит РЕАЛЬНО вызванные</text>
-<text x="710" y="1174" font-size="12" fill="#1a1a1a" text-anchor="start">инструменты (защита от галлюцинаций)</text>
-<text x="710" y="1189" font-size="12" fill="#1a1a1a" text-anchor="start">консенсус-судьи (опц.) · ретрай при провале</text>
-<text x="710" y="1204" font-size="12" fill="#1a1a1a" text-anchor="start">пункта</text>
-<rect x="700" y="1240" width="320" height="80" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="710" y="1262" font-size="12" fill="#1a1a1a" text-anchor="start">synthesize → validation</text>
-<text x="710" y="1277" font-size="12" fill="#1a1a1a" text-anchor="start">сборка ответа с привязкой к источникам</text>
-<text x="710" y="1292" font-size="12" fill="#1a1a1a" text-anchor="start">heavy: review ⟲ (deep-модель повторяет ревью</text>
-<text x="710" y="1307" font-size="12" fill="#1a1a1a" text-anchor="start">до достижения порога)</text>
-<rect x="80" y="1380" width="500" height="92" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
-<text x="90" y="1400" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">reflect — запись эпизода + harvest сигнала</text>
-<text x="90" y="1416" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">компиляция ПАТТЕРНА (паттерн → привычка → навык) · извлечение фактов (+</text>
-<text x="90" y="1430" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">рёбра графа)</text>
-<text x="90" y="1446" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">implicit feedback из journal · триггер backward-самообучения при</text>
-<text x="90" y="1460" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">деградации</text>
-<ellipse cx="330" cy="1522" rx="60" ry="22" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
-<text x="330" y="1526" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">END</text>
-<rect x="1100" y="70" width="430" height="104" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
-<text x="1110" y="85" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">ПАМЯТЬ · memory/store.py</text>
-<text x="1110" y="99" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">типы: эпизоды / факты / выводы / цели + рёбра графа</text>
-<text x="1110" y="113" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">ГИБКИЙ recall по релевантности (устранение утечки контекста между</text>
-<text x="1110" y="127" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">задачами)</text>
-<text x="1110" y="141" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">TurboVec-ANN (семантика) · важность не разделяет → решает</text>
-<text x="1110" y="155" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">релевантность</text>
-<text x="1110" y="169" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">journal → implicit feedback для backward</text>
-<rect x="1100" y="190" width="430" height="104" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
-<text x="1110" y="206" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">INTENT-РОУТЕР · intent.py</text>
-<text x="1110" y="221" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">embedding-kNN кодбук интентов: web_grounding / physical /</text>
-<text x="1110" y="236" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">play / media_control / self_contained · любой язык</text>
-<text x="1110" y="251" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">(мультиязычно)</text>
-<text x="1110" y="266" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">few-shots pos/neg · онлайн-рост из фидбека</text>
-<text x="1110" y="281" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">creation-seed → self_contained (анти-hijack веб-поиска)</text>
-<rect x="1100" y="310" width="430" height="104" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
-<text x="1110" y="326" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">НАВЫКИ · skills/* + registry.json</text>
-<text x="1110" y="341" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">ToolSearch (BM25S) поверх каталога инструментов</text>
-<text x="1110" y="356" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">browser_control (снимок DOM, клик по №) · device/app/ax/phone</text>
-<text x="1110" y="371" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">web_search · skill_creation (агент пишет себе навык)</text>
-<text x="1110" y="386" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">ИМПОРТ внешних:</text>
-<text x="1110" y="401" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">карантин(анти-zip-slip)→AST-гейт→smoke-песочница→registry</text>
-<rect x="1100" y="430" width="430" height="90" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
-<text x="1110" y="446" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">БАЗА ЗНАНИЙ · knowledge_base.py</text>
-<text x="1110" y="461" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">LightRAG-граф: сущности + связи, multi-hop обход</text>
-<text x="1110" y="476" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">BM25 fallback (граф за инструментом) · добавление AutoRAG в</text>
-<text x="1110" y="491" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">recall</text>
-<text x="1110" y="506" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">сессионные вложения файлов (tmp, флаг own_docs)</text>
-<rect x="1100" y="536" width="430" height="90" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
-<text x="1110" y="552" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">СПОСОБНОСТИ-ТУЛЫ</text>
-<text x="1110" y="567" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">research: план → поиск (SearXNG / cloakbrowser) → верификация</text>
-<text x="1110" y="582" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">→ синтез</text>
-<text x="1110" y="597" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">python_exec (песочница rlimits) · vision-разбор PDF</text>
-<text x="1110" y="612" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">MCP: discover в реестре → approve → connect (uvx / npx)</text>
-<rect x="1100" y="642" width="430" height="104" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
-<text x="1110" y="657" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">САМООБУЧЕНИЕ / АМОРТИЗАЦИЯ</text>
-<text x="1110" y="671" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">forward: few-shots (глобальные + пер-юзер)</text>
-<text x="1110" y="685" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">backward: дифф-вина по трейсу → «градиенты» → оптимизация промптов</text>
-<text x="1110" y="699" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">измеримо ДО/ПОСЛЕ · ParamStore (НЕ трогает код графа)</text>
-<text x="1110" y="713" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">лестница паттерн→привычка→навык · коллективный ярус · бандит-выбор</text>
-<rect x="1100" y="762" width="430" height="90" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
-<text x="1110" y="777" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">БЕЗОПАСНОСТЬ</text>
-<text x="1110" y="791" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">AST-гейт + smoke в песочнице (rlimits / syscall-sandbox)</text>
-<text x="1110" y="805" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">HITL deny-by-default на действия · защита от инъекций в выводах</text>
-<text x="1110" y="819" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">инструментов</text>
-<text x="1110" y="833" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">гарантированная фильтрация PII в recall · запрет обучения на</text>
-<text x="1110" y="847" font-size="11" fill="#1a1a1a" text-anchor="start" font-weight="bold">эксплойтах/взломе</text>
-<rect x="1100" y="868" width="430" height="90" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="1110" y="884" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">МОДЕЛИ · config.yml (OpenRouter | Ollama локально)</text>
-<text x="1110" y="899" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">роли: fast=роутинг/валидация · code=исполнение ·</text>
-<text x="1110" y="914" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">deep=heavy-ревью</text>
-<text x="1110" y="929" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">тезис: дешёвый класс моделей + harness, НЕ размер модели</text>
-<text x="1110" y="944" font-size="12" fill="#1a1a1a" text-anchor="start" font-weight="bold">провайдер / ключ / base_url в GUI или config.local.yml</text>
-<text x="48" y="1601" font-size="11" fill="#1a1a1a" text-anchor="start">Легенда — цвета: синий = интерфейсы/модели · зелёный = ноды графа · оранжевый = маршрутизация/уточнения · фиолетовый = память · жёлтый = самообучение · красный = безопасность · серый = навыки/способности/БЗ</text>
-<text x="48" y="1615" font-size="11" fill="#1a1a1a" text-anchor="start">линии: сплошная стрелка = поток графа · пунктир красный = эскалация · пунктир цветной = нода использует подсистему</text>
+<rect width="1300" height="1444" fill="#ffffff"/>
+<polyline points="430,266 430,330" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="430,370 430,395" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="430,461 430,490" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="430,530 430,558" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="355,628 355,650 150,650 150,672" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<rect x="220" y="638" width="65" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="252" y="648" font-size="9" fill="#555555" text-anchor="middle">fast/reason</text>
+<polyline points="430,628 430,650 375,650 375,672" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<rect x="391" y="638" width="22" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="402" y="648" font-size="9" fill="#555555" text-anchor="middle">act</text>
+<polyline points="520,628 520,650 670,650 670,672" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<rect x="549" y="638" width="92" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="595" y="648" font-size="9" fill="#555555" text-anchor="middle">deliberate/heavy</text>
+<polyline points="470,705 520,705" fill="none" stroke="#b85450" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="468" y="693" width="55" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="495" y="703" font-size="9" fill="#b85450" text-anchor="middle">эскалация</text>
+<polyline points="670,738 670,755 680,755 680,772" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,822 680,844" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,902 680,924" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,982 680,1004" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,1054 680,1076" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="540,1029 500,1033" fill="none" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="487" y="1019" width="65" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="520" y="1029" font-size="9" fill="#d6b656" text-anchor="middle">heavy-ревью</text>
+<polyline points="410,1004 410,953 540,953" fill="none" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="464" y="941" width="22" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="475" y="951" font-size="9" fill="#d6b656" text-anchor="middle">fix</text>
+<polyline points="150,738 150,1150 189,1150 189,1180" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="375,738 375,1150 271,1150 272,1180" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,1120 680,1208 420,1208" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="255,1250 255,1280" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="580,418 848,418 848,117 880,117" fill="none" stroke="#9673a6" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="580,444 860,445 860,448 880,448" fill="none" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="580,586 856,586 856,230 880,230" fill="none" stroke="#d79b00" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="820,941 852,941 852,344 880,344" fill="none" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="820,959 844,959 844,546 880,546" fill="none" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="820,976 836,976 836,766 880,766" fill="none" stroke="#b85450" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="420,1215 828,1215 828,675 880,675" fill="none" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4"/>
+<text x="48" y="32" font-size="15" fill="#1a1a1a" text-anchor="start" font-weight="bold">self-extension-agent — архитектура · граф LangGraph = ОБУЧАЕМАЯ ПРОГРАММА (прогон = forward pass, self-learning = backward по трейсу) · дешёвая</text>
+<text x="48" y="50" font-size="15" fill="#1a1a1a" text-anchor="start" font-weight="bold">модель + harness, не размер модели</text>
+<rect x="40" y="70" width="780" height="110" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="430" y="86" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Интерфейсы — тонкие клиенты (общий граф + общая память)</text>
+<rect x="60" y="105" width="180" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="150" y="121" font-size="8" fill="#1a1a1a" text-anchor="middle">Web / Desktop GUI</text>
+<text x="150" y="132" font-size="8" fill="#1a1a1a" text-anchor="middle">React+Vite+Tailwind · desktop.py</text>
+<text x="150" y="143" font-size="8" fill="#1a1a1a" text-anchor="middle">живой прогресс · карточка clarify ·</text>
+<text x="150" y="154" font-size="8" fill="#1a1a1a" text-anchor="middle">микрофон</text>
+<rect x="260" y="105" width="150" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="335" y="125" font-size="11" fill="#1a1a1a" text-anchor="middle">REPL</text>
+<text x="335" y="139" font-size="11" fill="#1a1a1a" text-anchor="middle">main.py</text>
+<text x="335" y="153" font-size="11" fill="#1a1a1a" text-anchor="middle">/kb /attach /model …</text>
+<rect x="430" y="105" width="150" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="505" y="118" font-size="11" fill="#1a1a1a" text-anchor="middle">Telegram</text>
+<text x="505" y="132" font-size="11" fill="#1a1a1a" text-anchor="middle">bot.py</text>
+<text x="505" y="146" font-size="11" fill="#1a1a1a" text-anchor="middle">фото / документы /</text>
+<text x="505" y="160" font-size="11" fill="#1a1a1a" text-anchor="middle">voice</text>
+<rect x="600" y="105" width="200" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="700" y="124" font-size="12" fill="#1a1a1a" text-anchor="middle">Chrome-расширение</text>
+<text x="700" y="140" font-size="12" fill="#1a1a1a" text-anchor="middle">агент в твоём браузере</text>
+<text x="700" y="154" font-size="12" fill="#1a1a1a" text-anchor="middle">(+ токен расширения)</text>
+<rect x="40" y="200" width="780" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="430" y="215" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">FastAPI-сервер (server.py) — фоновый прогон (astream) · /chat · /run/{id} поллинг · /run/{id}/respond · /settings</text>
+<text x="430" y="230" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">· /upload · /transcribe</text>
+<text x="430" y="245" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">интерактивный clarify (Q/A мультиселект) + подтверждение HITL · живой прогресс по узлам · тонкий клиент ↔</text>
+<text x="430" y="260" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Python-мозг</text>
+<rect x="40" y="300" width="800" height="1040" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3" stroke-dasharray="6,4"/>
+<text x="440" y="316" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">FORWARD-граф LangGraph (один запрос) — backward (self-learning) = credit-assignment по трейсу, пишет только</text>
+<text x="440" y="331" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">артефакты ParamStore (архитектура графа никогда не меняется)</text>
+<ellipse cx="430" cy="350" rx="70" ry="20" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="430" y="354" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">START</text>
+<rect x="280" y="395" width="300" height="66" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
+<text x="430" y="400" font-size="7" fill="#1a1a1a" text-anchor="middle">recall — память + AutoRAG</text>
+<text x="430" y="410" font-size="7" fill="#1a1a1a" text-anchor="middle">эпизоды/факты/выводы/цели + external ctx + БЗ/вложения (BM25 +</text>
+<text x="430" y="420" font-size="7" fill="#1a1a1a" text-anchor="middle">sanitize)</text>
+<text x="430" y="430" font-size="7" fill="#1a1a1a" text-anchor="middle">УСЛОВНЫЙ и ГИБКИЙ (recall_gate): И факты, И ассоциативная память ПО</text>
+<text x="430" y="440" font-size="7" fill="#1a1a1a" text-anchor="middle">РЕЛЕВАНТНОСТИ</text>
+<text x="430" y="450" font-size="7" fill="#1a1a1a" text-anchor="middle">GraphRAG-lite boost · запрос эмбеддится ОДИН раз → переиспользуется в</text>
+<text x="430" y="460" font-size="7" fill="#1a1a1a" text-anchor="middle">gate/graph И intent-роутере</text>
+<rect x="280" y="490" width="300" height="40" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="430" y="507" font-size="12" fill="#1a1a1a" text-anchor="middle">goal — цель + «стоящая» цель + rubric</text>
+<text x="430" y="522" font-size="12" fill="#1a1a1a" text-anchor="middle">(держится в контексте)</text>
+<rect x="280" y="558" width="300" height="70" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
+<text x="430" y="574" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflexion — маршрутизация УРОВНЯ-1: ВЫБОР режима мышления</text>
+<text x="430" y="584" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">ReflexionDecision (LLM) + априорная оценка бандита</text>
+<text x="430" y="596" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">(Beta/Thompson, видит неудачи) + similarity few-shots</text>
+<text x="430" y="606" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">высокая неоднозначность → clarify · heavy НЕ предсказывается —</text>
+<text x="430" y="618" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">ЗАРАБАТЫВАЕТСЯ рантайм-evidence</text>
+<rect x="60" y="672" width="180" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="150" y="687" font-size="12" fill="#1a1a1a" text-anchor="middle">fast / reason</text>
+<text x="150" y="702" font-size="12" fill="#1a1a1a" text-anchor="middle">System 1 / System 2</text>
+<text x="150" y="717" font-size="12" fill="#1a1a1a" text-anchor="middle">без инструментов</text>
+<text x="150" y="732" font-size="12" fill="#1a1a1a" text-anchor="middle">(reason → validation)</text>
+<rect x="280" y="672" width="190" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="375" y="691" font-size="8" fill="#1a1a1a" text-anchor="middle">act — System 1 с руками</text>
+<text x="375" y="702" font-size="8" fill="#1a1a1a" text-anchor="middle">ОДНО прямое действие, 1–2 инструмента</text>
+<text x="375" y="713" font-size="8" fill="#1a1a1a" text-anchor="middle">(BM25-подбор навыка, HITL сохранён)</text>
+<text x="375" y="724" font-size="8" fill="#1a1a1a" text-anchor="middle">0 инструментов / ESCALATE →</text>
+<rect x="520" y="672" width="300" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="670" y="688" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold">deliberate / heavy</text>
+<text x="670" y="702" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold">инструменты + декомпозиция + по-пунктовое</text>
+<text x="670" y="716" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold">исполнение/валидация</text>
+<text x="670" y="730" font-size="11" fill="#1a1a1a" text-anchor="middle" font-weight="bold">heavy добавляет сквозной ревью deep-моделью</text>
+<rect x="540" y="772" width="280" height="50" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
+<text x="680" y="788" font-size="9" fill="#1a1a1a" text-anchor="middle">clarify_gate — батч уточнений (маркеры/открытые)</text>
+<text x="680" y="800" font-size="9" fill="#1a1a1a" text-anchor="middle">Q/A мультиселект; ответы → реестр уточнений прогона</text>
+<text x="680" y="812" font-size="9" fill="#1a1a1a" text-anchor="middle">(дедуп, переиспользуют все ноды)</text>
+<rect x="540" y="844" width="280" height="58" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="858" font-size="9" fill="#1a1a1a" text-anchor="middle">skill_selector → decompose → skill_injection</text>
+<text x="680" y="870" font-size="9" fill="#1a1a1a" text-anchor="middle">АМОРТИЗАЦИЯ: при ПАТТЕРНЕ селектор БЕЗ LLM-вызова;</text>
+<text x="680" y="882" font-size="9" fill="#1a1a1a" text-anchor="middle">sim≥0.7 → decompose БЕЗ LLM (план прямо из</text>
+<text x="680" y="894" font-size="9" fill="#1a1a1a" text-anchor="middle">паттерна)</text>
+<rect x="540" y="924" width="280" height="58" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="938" font-size="9" fill="#1a1a1a" text-anchor="middle">step_executor ⟲ — исполнение + валидация ПО ПУНКТАМ</text>
+<text x="680" y="950" font-size="9" fill="#1a1a1a" text-anchor="middle">валидатор видит РЕАЛЬНО вызванные инструменты</text>
+<text x="680" y="962" font-size="9" fill="#1a1a1a" text-anchor="middle">(текст ≠ действие)</text>
+<text x="680" y="974" font-size="9" fill="#1a1a1a" text-anchor="middle">маскинг контекста внутри шага · догон ask_user</text>
+<rect x="540" y="1004" width="280" height="50" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="1034" font-size="12" fill="#1a1a1a" text-anchor="middle">synthesize — сборка решения из шагов</text>
+<rect x="320" y="1004" width="180" height="58" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
+<text x="410" y="1024" font-size="10" fill="#1a1a1a" text-anchor="middle">review ⟲ (только heavy)</text>
+<text x="410" y="1036" font-size="10" fill="#1a1a1a" text-anchor="middle">сквозной ревью deep-моделью</text>
+<text x="410" y="1050" font-size="10" fill="#1a1a1a" text-anchor="middle">проблемы → fix-подшаги</text>
+<rect x="540" y="1076" width="280" height="44" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="1095" font-size="12" fill="#1a1a1a" text-anchor="middle">validation — заземление + проверка по</text>
+<text x="680" y="1110" font-size="12" fill="#1a1a1a" text-anchor="middle">rubric</text>
+<rect x="90" y="1180" width="330" height="70" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
+<text x="255" y="1190" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflect — запись эпизода (+ журнал взаимодействий), harvest сигнала</text>
+<text x="255" y="1201" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">(HITL/clarify → факты профиля),</text>
+<text x="255" y="1212" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">компиляция ПАТТЕРНА (+ win/lose) → промоушен в коллективный пул,</text>
+<text x="255" y="1223" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">детекция привычки,</text>
+<text x="255" y="1234" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">извлечение фактов (+тэги, рёбра) · саммари · prune · трекинг</text>
+<text x="255" y="1245" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">деградации · авто self-learning</text>
+<ellipse cx="255" cy="1300" rx="65" ry="20" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
+<text x="255" y="1304" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">END</text>
+<rect x="880" y="70" width="380" height="94" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
+<text x="888" y="83" font-size="9" fill="#1a1a1a" text-anchor="start">ПАМЯТЬ  (memory/store.py · embedder · vector_index TurboVec · feedback)</text>
+<text x="888" y="95" font-size="9" fill="#1a1a1a" text-anchor="start">эпизоды / факты(+тэги) / выводы / цели / саммари + типизированные</text>
+<text x="888" y="107" font-size="9" fill="#1a1a1a" text-anchor="start">граф-рёбра</text>
+<text x="888" y="119" font-size="9" fill="#1a1a1a" text-anchor="start">GraphRAG-lite: densify fact↔fact (cosine) + spreading-activation</text>
+<text x="888" y="131" font-size="9" fill="#1a1a1a" text-anchor="start">(per-user, PII-контейнмент)</text>
+<text x="888" y="143" font-size="9" fill="#1a1a1a" text-anchor="start">Память-как-TOOL (3 яруса): search_memory · recall_history · note_to_self</text>
+<rect x="880" y="178" width="380" height="104" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
+<text x="888" y="193" font-size="11" fill="#1a1a1a" text-anchor="start">INTENT-РОУТЕР — УРОВЕНЬ-2  (intent.py · eval/route_eval.py)</text>
+<text x="888" y="207" font-size="11" fill="#1a1a1a" text-anchor="start">embedding-kNN кодбук на qvec, ЛЮБОЙ язык (регулярные</text>
+<text x="888" y="221" font-size="11" fill="#1a1a1a" text-anchor="start">выражения маршрутизации УДАЛЕНЫ)</text>
+<text x="888" y="235" font-size="11" fill="#1a1a1a" text-anchor="start">сигналы = ГЕЙТЫ поведения: web_grounding (→ пол act) ·</text>
+<text x="888" y="249" font-size="11" fill="#1a1a1a" text-anchor="start">physical_browser · play_media</text>
+<text x="888" y="263" font-size="11" fill="#1a1a1a" text-anchor="start">media_control · self_contained · растёт из фидбека ·</text>
+<text x="888" y="277" font-size="11" fill="#1a1a1a" text-anchor="start">route_eval 570 кейсов = 89.3%</text>
+<rect x="880" y="296" width="380" height="96" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="310" font-size="10" fill="#1a1a1a" text-anchor="start">НАВЫКИ  (skills/* · registry.json · retrieval.py)</text>
+<text x="888" y="323" font-size="10" fill="#1a1a1a" text-anchor="start">ToolSearch (BM25S) при росте библиотеки · browser_control: снимок</text>
+<text x="888" y="336" font-size="10" fill="#1a1a1a" text-anchor="start">DOM, клик/ввод по №</text>
+<text x="888" y="349" font-size="10" fill="#1a1a1a" text-anchor="start">device/app/ax/phone · web_search</text>
+<text x="888" y="362" font-size="10" fill="#1a1a1a" text-anchor="start">(trafilatura→BM25S→vector-rerank, не вся страница)</text>
+<text x="888" y="375" font-size="10" fill="#1a1a1a" text-anchor="start">импорт внешних: карантин → AST-гейт → smoke-песочница → registry</text>
+<rect x="880" y="406" width="380" height="84" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="422" font-size="12" fill="#1a1a1a" text-anchor="start">БАЗА ЗНАНИЙ  (knowledge_base.py · lightrag_engine.py)</text>
+<text x="888" y="437" font-size="12" fill="#1a1a1a" text-anchor="start">ГЛОБАЛЬНАЯ: настоящий LightRAG-граф (сущности+связи,</text>
+<text x="888" y="452" font-size="12" fill="#1a1a1a" text-anchor="start">multi-hop) · BM25 fallback (без ключа)</text>
+<text x="888" y="467" font-size="12" fill="#1a1a1a" text-anchor="start">СЕССИОННЫЕ вложения (tmp) · AutoRAG в recall (дешёвый</text>
+<text x="888" y="482" font-size="12" fill="#1a1a1a" text-anchor="start">BM25 + sanitize, провенанс «свои данные»)</text>
+<rect x="880" y="504" width="380" height="84" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="518" font-size="10" fill="#1a1a1a" text-anchor="start">ИНСТРУМЕНТЫ-СПОСОБНОСТИ (research.py · compute.py · media.py ·</text>
+<text x="888" y="531" font-size="10" fill="#1a1a1a" text-anchor="start">mcp_client.py)</text>
+<text x="888" y="544" font-size="10" fill="#1a1a1a" text-anchor="start">research: план под-вопросов → поиск → ВЕРИФИКАЦИЯ факта → синтез</text>
+<text x="888" y="557" font-size="10" fill="#1a1a1a" text-anchor="start">python_exec (песочница) · vision-фигуры PDF · MCP</text>
+<text x="888" y="570" font-size="10" fill="#1a1a1a" text-anchor="start">discover/connect/use (живой remote)</text>
+<rect x="880" y="602" width="380" height="104" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
+<text x="888" y="615" font-size="9" fill="#1a1a1a" text-anchor="start">САМООБУЧЕНИЕ / АМОРТИЗАЦИЯ (improve/ · habits.py · bandit.py ·</text>
+<text x="888" y="627" font-size="9" fill="#1a1a1a" text-anchor="start">collective.py)</text>
+<text x="888" y="639" font-size="9" fill="#1a1a1a" text-anchor="start">forward: few-shots (глобальные + ПЕР-ЮЗЕР) · backward: дифф-blame →</text>
+<text x="888" y="651" font-size="9" fill="#1a1a1a" text-anchor="start">градиенты → опт. промптов</text>
+<text x="888" y="663" font-size="9" fill="#1a1a1a" text-anchor="start">(измеримо ДО/ПОСЛЕ, accept/revert) · per-user backward · паттерны →</text>
+<text x="888" y="675" font-size="9" fill="#1a1a1a" text-anchor="start">привычки → навыки</text>
+<text x="888" y="687" font-size="9" fill="#1a1a1a" text-anchor="start">коллективный ярус (best-practices похожим юзерам) · априорная оценка</text>
+<text x="888" y="699" font-size="9" fill="#1a1a1a" text-anchor="start">режима (бандит)</text>
+<rect x="880" y="720" width="380" height="92" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
+<text x="888" y="735" font-size="11" fill="#1a1a1a" text-anchor="start">БЕЗОПАСНОСТЬ (utils_validation.py · utils.py · hitl.py ·</text>
+<text x="888" y="749" font-size="11" fill="#1a1a1a" text-anchor="start">improve/safety.py)</text>
+<text x="888" y="763" font-size="11" fill="#1a1a1a" text-anchor="start">AST-гейт на записи кода · smoke в процесс-песочнице</text>
+<text x="888" y="777" font-size="11" fill="#1a1a1a" text-anchor="start">(rlimits/kill) · HITL deny-by-default</text>
+<text x="888" y="791" font-size="11" fill="#1a1a1a" text-anchor="start">анти-инъекция в выводах tool/MCP/search/AutoRAG · анти-PII</text>
+<text x="888" y="805" font-size="11" fill="#1a1a1a" text-anchor="start">пол · не учится на взломе</text>
+<rect x="880" y="826" width="380" height="80" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="888" y="842" font-size="12" fill="#1a1a1a" text-anchor="start">МОДЕЛИ  (config.yml · OpenRouter | Ollama)</text>
+<text x="888" y="857" font-size="12" fill="#1a1a1a" text-anchor="start">fast = роутинг/валидация/extraction · code =</text>
+<text x="888" y="872" font-size="12" fill="#1a1a1a" text-anchor="start">исполнение шагов · deep = ТОЛЬКО heavy-ревью</text>
+<text x="888" y="887" font-size="12" fill="#1a1a1a" text-anchor="start">дешёвый тир + harness, не размер модели (типичный</text>
+<text x="888" y="902" font-size="12" fill="#1a1a1a" text-anchor="start">fast-запрос ≈ $0.001)</text>
+<rect x="880" y="920" width="380" height="56" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="935" font-size="11" fill="#1a1a1a" text-anchor="start">ТРЕЙСИНГ / ДИАГНОСТИКА (tracing/) — спаны по нодам</text>
+<text x="888" y="949" font-size="11" fill="#1a1a1a" text-anchor="start">(traces.db) · самодиагностика · ротация · ОБСЛУЖИВАНИЕ:</text>
+<text x="888" y="963" font-size="11" fill="#1a1a1a" text-anchor="start">безопасный авто-апдейт зависимостей (health-check + откат)</text>
+<text x="48" y="1375" font-size="11" fill="#1a1a1a" text-anchor="start">Легенда — синий: интерфейсы/модели · зелёный: ноды графа · оранжевый: роутинг/clarify · фиолетовый: память · жёлтый: самообучение · красный: безопасность · серый: навыки/БЗ/способности</text>
+<text x="48" y="1389" font-size="11" fill="#1a1a1a" text-anchor="start">сплошная стрелка = поток управления графа · пунктир = нода использует сквозную подсистему · ⟲ = внутренний цикл · ДВЕ маршрутизации: УРОВЕНЬ-1 режим мышления (reflexion-LLM) vs УРОВЕНЬ-2</text>
+<text x="48" y="1403" font-size="11" fill="#1a1a1a" text-anchor="start">интент-сигналы (embedding-kNN)</text>
 </svg>

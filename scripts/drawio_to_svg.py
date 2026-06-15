@@ -3,8 +3,10 @@
     python scripts/drawio_to_svg.py docs/architecture.drawio docs/architecture.svg
 
 Поддерживает узлы (rounded-rect / ellipse / text), многострочный value (&#10;),
-заливку/обводку, пунктир, выравнивание, жирный шрифт, и рёбра со стрелками
-(обрезка у границы прямоугольника, пунктир, подпись). Этого достаточно для наших схем.
+заливку/обводку, пунктир, выравнивание, жирный шрифт, и рёбра со стрелками.
+Рёбра — ОРТОГОНАЛЬНЫЕ (polyline): точки крепления exitX/exitY/entryX/entryY (доля 0..1
+по границе бокса) + явные путевые точки (<mxGeometry><Array as="points">). Без точек
+крепления — обрезка по лучу из центра (как раньше). Этого достаточно для наших схем.
 """
 from __future__ import annotations
 
@@ -49,7 +51,7 @@ def main() -> int:
             geo[c.get("id")] = (x, y, w, h)
             verts[c.get("id")] = (c.get("value", ""), st, (x, y, w, h))
         elif c.get("edge") == "1":
-            edges.append((c.get("source"), c.get("target"), st, c.get("value", "")))
+            edges.append((c.get("source"), c.get("target"), st, c.get("value", ""), c))
 
     maxx = max((x + w for x, y, w, h in geo.values()), default=800) + 40
     maxy = max((y + h for x, y, w, h in geo.values()), default=600) + 40
@@ -66,6 +68,10 @@ def main() -> int:
         x, y, w, h = geo[i]
         return (x + w / 2, y + h / 2)
 
+    def conn(i, fx, fy):  # точка крепления на границе бокса по доле (fx,fy) ∈ [0,1]
+        x, y, w, h = geo[i]
+        return (x + fx * w, y + fy * h)
+
     def clip(cx, cy, i):  # точка на границе прямоугольника i по лучу из его центра к (cx,cy)
         x, y, w, h = geo[i]
         mx, my = x + w / 2, y + h / 2
@@ -77,21 +83,42 @@ def main() -> int:
         s = min(sx, sy)
         return mx + dx * s, my + dy * s
 
-    # рёбра — первыми (под узлами)
-    for srcid, tgtid, st, val in edges:
+    def waypoints(cell):
+        pts = []
+        for arr in cell.findall("mxGeometry/Array"):
+            if arr.get("as") == "points":
+                for p in arr.findall("mxPoint"):
+                    pts.append((float(p.get("x", 0)), float(p.get("y", 0))))
+        return pts
+
+    # рёбра — первыми (под узлами); ортогональные polyline через путевые точки
+    for srcid, tgtid, st, val, cell in edges:
         if srcid not in geo or tgtid not in geo:
             continue
-        sc, tc = center(srcid), center(tgtid)
-        x1, y1 = clip(*tc, srcid)
-        x2, y2 = clip(*sc, tgtid)
+        wps = waypoints(cell)
+        if "exitX" in st:
+            sp = conn(srcid, float(st["exitX"]), float(st.get("exitY", 0.5)))
+        else:
+            sp = clip(*(wps[0] if wps else center(tgtid)), srcid)
+        if "entryX" in st:
+            ep = conn(tgtid, float(st["entryX"]), float(st.get("entryY", 0.5)))
+        else:
+            ep = clip(*(wps[-1] if wps else center(srcid)), tgtid)
+        pts = [sp] + wps + [ep]
         stroke = st.get("strokeColor", "#555555")
         dash = ' stroke-dasharray="5,4"' if st.get("dashed") == "1" else ""
         arrow = "" if st.get("endArrow") == "none" else ' marker-end="url(#arrow)"'
-        out.append(f'<line x1="{x1:.0f}" y1="{y1:.0f}" x2="{x2:.0f}" y2="{y2:.0f}" '
-                   f'stroke="{stroke}" stroke-width="1.4"{dash}{arrow}/>')
+        d = " ".join(f"{px:.0f},{py:.0f}" for px, py in pts)
+        out.append(f'<polyline points="{d}" fill="none" stroke="{stroke}" '
+                   f'stroke-width="1.4"{dash}{arrow}/>')
         if val:
-            mx, my = (x1 + x2) / 2, (y1 + y2) / 2
-            out.append(f'<text x="{mx:.0f}" y="{my-3:.0f}" font-size="9" fill="{stroke}" '
+            # подпись — на середине самого длинного сегмента
+            seg = max(range(len(pts) - 1),
+                      key=lambda k: abs(pts[k+1][0]-pts[k][0]) + abs(pts[k+1][1]-pts[k][1]))
+            mx, my = (pts[seg][0] + pts[seg+1][0]) / 2, (pts[seg][1] + pts[seg+1][1]) / 2
+            out.append(f'<rect x="{mx-len(val)*2.7-3:.0f}" y="{my-12:.0f}" '
+                       f'width="{len(val)*5.4+6:.0f}" height="13" fill="#ffffff" opacity="0.85"/>')
+            out.append(f'<text x="{mx:.0f}" y="{my-2:.0f}" font-size="9" fill="{stroke}" '
                        f'text-anchor="middle">{escape(val)}</text>')
 
     # узлы

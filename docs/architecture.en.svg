@@ -1,135 +1,196 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1045" viewBox="0 0 1200 1045" font-family="Helvetica,Arial,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="1444" viewBox="0 0 1300 1444" font-family="Helvetica,Arial,sans-serif">
 <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#555"/></marker></defs>
-<rect width="1200" height="1045" fill="#ffffff"/>
-<line x1="420" y1="385" x2="420" y2="405" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="420" y1="465" x2="420" y2="485" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="420" y1="525" x2="420" y2="545" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="333" y1="609" x2="223" y2="650" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="401" y1="609" x2="377" y2="650" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="473" y1="609" x2="542" y2="650" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="575" y1="690" x2="575" y2="715" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="575" y1="761" x2="575" y2="771" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="575" y1="817" x2="575" y2="827" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="575" y1="873" x2="575" y2="883" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="450" y1="676" x2="490" y2="674" stroke="#555555" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
-<text x="470" y="672" font-size="9" fill="#555555" text-anchor="middle">act: escalation</text>
-<line x1="169" y1="700" x2="213" y2="780" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="330" y1="710" x2="260" y2="780" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="501" y1="883" x2="341" y2="840" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="230" y1="840" x2="230" y2="880" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="420" y1="280" x2="420" y2="345" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
-<line x1="474" y1="405" x2="929" y2="150" stroke="#9673a6" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="469" y1="545" x2="938" y2="240" stroke="#d79b00" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="593" y1="827" x2="968" y2="334" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="600" y1="827" x2="960" y2="498" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
-<line x1="319" y1="780" x2="876" y2="592" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4"/>
-<text x="48" y="42" font-size="16" fill="#1a1a1a" text-anchor="start" font-weight="bold">self-extension-agent — architecture (LangGraph graph = trainable program; thin client + Python brain)</text>
-<rect x="40" y="70" width="760" height="110" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="420" y="86" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Interfaces (thin clients)</text>
-<rect x="60" y="105" width="170" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="145" y="125" font-size="11" fill="#1a1a1a" text-anchor="middle">Web GUI</text>
-<text x="145" y="139" font-size="11" fill="#1a1a1a" text-anchor="middle">React+Vite+Tailwind</text>
-<text x="145" y="153" font-size="11" fill="#1a1a1a" text-anchor="middle">· desktop.py (pywebview)</text>
-<rect x="250" y="105" width="150" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="325" y="140" font-size="12" fill="#1a1a1a" text-anchor="middle">REPL (main.py)</text>
-<rect x="420" y="105" width="150" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="495" y="140" font-size="12" fill="#1a1a1a" text-anchor="middle">Telegram (bot.py)</text>
-<rect x="590" y="105" width="190" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="685" y="132" font-size="12" fill="#1a1a1a" text-anchor="middle">Chrome extension</text>
-<text x="685" y="147" font-size="12" fill="#1a1a1a" text-anchor="middle">(agent in your browser)</text>
-<rect x="40" y="210" width="760" height="70" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="420" y="242" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">FastAPI server (server.py) — background run (astream) · /chat · /run/{id} (poll) · /run/{id}/respond</text>
-<text x="420" y="257" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">interactive clarify (Q/A multi-select) + confirm · live per-node progress · /settings · /upload · /transcribe</text>
-<rect x="40" y="310" width="760" height="640" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3" stroke-dasharray="6,4"/>
-<text x="420" y="326" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">LangGraph forward graph (one request). Backward = credit-assignment over the trace</text>
-<ellipse cx="420" cy="365" rx="60" ry="20" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="420" y="370" font-size="12" fill="#1a1a1a" text-anchor="middle">START</text>
-<rect x="290" y="405" width="260" height="60" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
-<text x="420" y="418" font-size="11" fill="#1a1a1a" text-anchor="middle">recall — memory + AutoRAG</text>
-<text x="420" y="432" font-size="11" fill="#1a1a1a" text-anchor="middle">FLEXIBLE recall (facts AND episodes by</text>
-<text x="420" y="446" font-size="11" fill="#1a1a1a" text-anchor="middle">relevance),</text>
-<text x="420" y="460" font-size="11" fill="#1a1a1a" text-anchor="middle">GraphRAG-lite; query embedded once</text>
-<rect x="290" y="485" width="260" height="40" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="420" y="502" font-size="12" fill="#1a1a1a" text-anchor="middle">goal — objective + rubric (kept in</text>
-<text x="420" y="517" font-size="12" fill="#1a1a1a" text-anchor="middle">context)</text>
-<rect x="290" y="545" width="260" height="64" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
-<text x="420" y="566" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflexion — CHOICE of thinking type</text>
-<text x="420" y="582" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">(LLM + bandit prior + few-shots)</text>
-<text x="420" y="596" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">high ambiguity → clarify_gate</text>
-<rect x="70" y="650" width="170" height="50" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="155" y="672" font-size="12" fill="#1a1a1a" text-anchor="middle">fast / reason</text>
-<text x="155" y="687" font-size="12" fill="#1a1a1a" text-anchor="middle">(System 1/2, no tools)</text>
-<rect x="270" y="650" width="180" height="60" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="360" y="670" font-size="11" fill="#1a1a1a" text-anchor="middle">act — System 1 with hands</text>
-<text x="360" y="684" font-size="11" fill="#1a1a1a" text-anchor="middle">(1 action, 1–2 tools;</text>
-<text x="360" y="698" font-size="11" fill="#1a1a1a" text-anchor="middle">failed → escalation)</text>
-<rect x="490" y="650" width="170" height="40" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="575" y="674" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">deliberate / heavy</text>
-<rect x="470" y="715" width="210" height="46" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
-<text x="575" y="728" font-size="11" fill="#1a1a1a" text-anchor="middle">clarify_gate — batched</text>
-<text x="575" y="742" font-size="11" fill="#1a1a1a" text-anchor="middle">clarifications</text>
-<text x="575" y="756" font-size="11" fill="#1a1a1a" text-anchor="middle">(Q/A with options; dedup)</text>
-<rect x="470" y="771" width="210" height="46" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="575" y="784" font-size="11" fill="#1a1a1a" text-anchor="middle">decompose → skill_injection</text>
-<text x="575" y="798" font-size="11" fill="#1a1a1a" text-anchor="middle">(amortization: pattern → no</text>
-<text x="575" y="812" font-size="11" fill="#1a1a1a" text-anchor="middle">LLM)</text>
-<rect x="450" y="827" width="250" height="46" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="575" y="840" font-size="11" fill="#1a1a1a" text-anchor="middle">step_executor ⟲ (per-item</text>
-<text x="575" y="854" font-size="11" fill="#1a1a1a" text-anchor="middle">execute+validate;</text>
-<text x="575" y="868" font-size="11" fill="#1a1a1a" text-anchor="middle">validator sees ACTUALLY called tools)</text>
-<rect x="450" y="883" width="250" height="40" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
-<text x="575" y="900" font-size="12" fill="#1a1a1a" text-anchor="middle">synthesize → (heavy: review⟲) →</text>
-<text x="575" y="915" font-size="12" fill="#1a1a1a" text-anchor="middle">validation</text>
-<rect x="80" y="780" width="300" height="60" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
-<text x="230" y="800" font-size="12" fill="#1a1a1a" text-anchor="middle">reflect — write episode, harvest signal,</text>
-<text x="230" y="814" font-size="12" fill="#1a1a1a" text-anchor="middle">compile PATTERN, facts(+edges),</text>
-<text x="230" y="830" font-size="12" fill="#1a1a1a" text-anchor="middle">self-learning</text>
-<ellipse cx="230" cy="900" rx="50" ry="20" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
-<text x="230" y="904" font-size="12" fill="#1a1a1a" text-anchor="middle">END</text>
-<rect x="840" y="70" width="320" height="80" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
-<text x="846" y="86" font-size="12" fill="#1a1a1a" text-anchor="start">MEMORY (memory/store.py)</text>
-<text x="846" y="101" font-size="12" fill="#1a1a1a" text-anchor="start">episodes/facts/insights/goals + graph edges</text>
-<text x="846" y="116" font-size="12" fill="#1a1a1a" text-anchor="start">FLEXIBLE recall by relevance · GraphRAG-lite</text>
-<text x="846" y="131" font-size="12" fill="#1a1a1a" text-anchor="start">TurboVec-ANN · journal → implicit feedback</text>
-<rect x="840" y="160" width="320" height="80" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
-<text x="846" y="175" font-size="11" fill="#1a1a1a" text-anchor="start">INTENT ROUTER (intent.py)</text>
-<text x="846" y="189" font-size="11" fill="#1a1a1a" text-anchor="start">embedding-kNN codebook {web_grounding / physical /</text>
-<text x="846" y="203" font-size="11" fill="#1a1a1a" text-anchor="start">play / media_control / self_contained}; any</text>
-<text x="846" y="217" font-size="11" fill="#1a1a1a" text-anchor="start">language</text>
-<text x="846" y="231" font-size="11" fill="#1a1a1a" text-anchor="start">online growth from feedback; pos/neg corpus</text>
-<rect x="840" y="250" width="320" height="84" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
-<text x="846" y="265" font-size="11" fill="#1a1a1a" text-anchor="start">SKILLS (skills/* + registry.json)</text>
-<text x="846" y="279" font-size="11" fill="#1a1a1a" text-anchor="start">ToolSearch (BM25S) · browser_control (DOM by #)</text>
-<text x="846" y="293" font-size="11" fill="#1a1a1a" text-anchor="start">device/app/ax/phone · web_search</text>
-<text x="846" y="307" font-size="11" fill="#1a1a1a" text-anchor="start">IMPORT external:</text>
-<text x="846" y="321" font-size="11" fill="#1a1a1a" text-anchor="start">quarantine→AST→smoke-sandbox→registry</text>
-<rect x="840" y="344" width="320" height="70" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
-<text x="846" y="360" font-size="12" fill="#1a1a1a" text-anchor="start">KNOWLEDGE BASE (knowledge_base.py)</text>
-<text x="846" y="375" font-size="12" fill="#1a1a1a" text-anchor="start">LightRAG graph (entities+relations,</text>
-<text x="846" y="390" font-size="12" fill="#1a1a1a" text-anchor="start">multi-hop) · BM25 fallback</text>
-<text x="846" y="405" font-size="12" fill="#1a1a1a" text-anchor="start">AutoRAG in recall · session attachments (tmp)</text>
-<rect x="840" y="424" width="320" height="74" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
-<text x="846" y="440" font-size="12" fill="#1a1a1a" text-anchor="start">CAPABILITY TOOLS</text>
-<text x="846" y="455" font-size="12" fill="#1a1a1a" text-anchor="start">research (plan→search→verify→synthesize)</text>
-<text x="846" y="470" font-size="12" fill="#1a1a1a" text-anchor="start">python_exec (sandbox) · vision-PDF · MCP</text>
-<text x="846" y="485" font-size="12" fill="#1a1a1a" text-anchor="start">(discover/connect)</text>
-<rect x="840" y="508" width="320" height="84" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
-<text x="846" y="522" font-size="10" fill="#1a1a1a" text-anchor="start">SELF-LEARNING / AMORTIZATION</text>
-<text x="846" y="535" font-size="10" fill="#1a1a1a" text-anchor="start">forward: few-shots (global+per-user) · backward:</text>
-<text x="846" y="548" font-size="10" fill="#1a1a1a" text-anchor="start">diff-blame→</text>
-<text x="846" y="561" font-size="10" fill="#1a1a1a" text-anchor="start">gradients→prompt optimization (measured BEFORE/AFTER)</text>
-<text x="846" y="574" font-size="10" fill="#1a1a1a" text-anchor="start">patterns→habits→skills · collective tier · bandit</text>
-<rect x="840" y="602" width="320" height="80" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
-<text x="846" y="618" font-size="12" fill="#1a1a1a" text-anchor="start">SECURITY</text>
-<text x="846" y="633" font-size="12" fill="#1a1a1a" text-anchor="start">AST gate + smoke in sandbox (rlimits/syscall)</text>
-<text x="846" y="648" font-size="12" fill="#1a1a1a" text-anchor="start">· HITL (deny-by-default)</text>
-<text x="846" y="663" font-size="12" fill="#1a1a1a" text-anchor="start">anti-injection in tool outputs · anti-PII</text>
-<text x="846" y="678" font-size="12" fill="#1a1a1a" text-anchor="start">floor · no learning from exploits</text>
-<rect x="840" y="692" width="320" height="70" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
-<text x="846" y="708" font-size="12" fill="#1a1a1a" text-anchor="start">MODELS (config.yml, OpenRouter | Ollama)</text>
-<text x="846" y="723" font-size="12" fill="#1a1a1a" text-anchor="start">fast=routing/validation · code=execution ·</text>
-<text x="846" y="738" font-size="12" fill="#1a1a1a" text-anchor="start">deep=heavy review</text>
-<text x="846" y="753" font-size="12" fill="#1a1a1a" text-anchor="start">cheap tier + harness, not model size</text>
-<text x="48" y="979" font-size="10" fill="#1a1a1a" text-anchor="start">Legend: blue=interfaces/models · green=graph nodes · orange=routing/clarification · purple=memory · yellow=self-learning · red=security · gray=skills/capabilities/KB</text>
-<text x="48" y="992" font-size="10" fill="#1a1a1a" text-anchor="start">solid arrow=graph flow · dashed=uses subsystem</text>
+<rect width="1300" height="1444" fill="#ffffff"/>
+<polyline points="430,266 430,330" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="430,370 430,395" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="430,461 430,490" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="430,530 430,558" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="355,628 355,650 150,650 150,672" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<rect x="220" y="638" width="65" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="252" y="648" font-size="9" fill="#555555" text-anchor="middle">fast/reason</text>
+<polyline points="430,628 430,650 375,650 375,672" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<rect x="391" y="638" width="22" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="402" y="648" font-size="9" fill="#555555" text-anchor="middle">act</text>
+<polyline points="520,628 520,650 670,650 670,672" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<rect x="549" y="638" width="92" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="595" y="648" font-size="9" fill="#555555" text-anchor="middle">deliberate/heavy</text>
+<polyline points="470,705 520,705" fill="none" stroke="#b85450" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="470" y="693" width="49" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="495" y="703" font-size="9" fill="#b85450" text-anchor="middle">escalate</text>
+<polyline points="670,738 670,755 680,755 680,772" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,822 680,844" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,902 680,924" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,982 680,1004" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,1054 680,1076" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="540,1029 500,1033" fill="none" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="485" y="1019" width="71" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="520" y="1029" font-size="9" fill="#d6b656" text-anchor="middle">heavy review</text>
+<polyline points="410,1004 410,953 540,953" fill="none" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+<rect x="464" y="941" width="22" height="13" fill="#ffffff" opacity="0.85"/>
+<text x="475" y="951" font-size="9" fill="#d6b656" text-anchor="middle">fix</text>
+<polyline points="150,738 150,1150 189,1150 189,1180" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="375,738 375,1150 271,1150 272,1180" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="680,1120 680,1208 420,1208" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="255,1250 255,1280" fill="none" stroke="#555555" stroke-width="1.4" marker-end="url(#arrow)"/>
+<polyline points="580,418 848,418 848,117 880,117" fill="none" stroke="#9673a6" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="580,444 860,445 860,448 880,448" fill="none" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="580,586 856,586 856,230 880,230" fill="none" stroke="#d79b00" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="820,941 852,941 852,344 880,344" fill="none" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="820,959 844,959 844,546 880,546" fill="none" stroke="#666666" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="820,976 836,976 836,766 880,766" fill="none" stroke="#b85450" stroke-width="1.4" stroke-dasharray="5,4"/>
+<polyline points="420,1215 828,1215 828,675 880,675" fill="none" stroke="#d6b656" stroke-width="1.4" stroke-dasharray="5,4"/>
+<text x="48" y="32" font-size="15" fill="#1a1a1a" text-anchor="start" font-weight="bold">self-extension-agent — architecture · the LangGraph graph is a TRAINABLE PROGRAM (a run = forward pass, self-learning = backward over the</text>
+<text x="48" y="50" font-size="15" fill="#1a1a1a" text-anchor="start" font-weight="bold">trace) · a cheap model + harness, not model size</text>
+<rect x="40" y="70" width="780" height="110" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="430" y="86" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Interfaces — thin clients (shared graph + shared memory)</text>
+<rect x="60" y="105" width="180" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="150" y="126" font-size="8" fill="#1a1a1a" text-anchor="middle">Web / Desktop GUI</text>
+<text x="150" y="138" font-size="8" fill="#1a1a1a" text-anchor="middle">React+Vite+Tailwind · desktop.py</text>
+<text x="150" y="148" font-size="8" fill="#1a1a1a" text-anchor="middle">live progress · clarify card · mic</text>
+<rect x="260" y="105" width="150" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="335" y="125" font-size="11" fill="#1a1a1a" text-anchor="middle">REPL</text>
+<text x="335" y="139" font-size="11" fill="#1a1a1a" text-anchor="middle">main.py</text>
+<text x="335" y="153" font-size="11" fill="#1a1a1a" text-anchor="middle">/kb /attach /model …</text>
+<rect x="430" y="105" width="150" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="505" y="125" font-size="11" fill="#1a1a1a" text-anchor="middle">Telegram</text>
+<text x="505" y="139" font-size="11" fill="#1a1a1a" text-anchor="middle">bot.py</text>
+<text x="505" y="153" font-size="11" fill="#1a1a1a" text-anchor="middle">photos / docs / voice</text>
+<rect x="600" y="105" width="200" height="60" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="700" y="124" font-size="12" fill="#1a1a1a" text-anchor="middle">Chrome extension</text>
+<text x="700" y="140" font-size="12" fill="#1a1a1a" text-anchor="middle">agent in your browser</text>
+<text x="700" y="154" font-size="12" fill="#1a1a1a" text-anchor="middle">(+ extension token)</text>
+<rect x="40" y="200" width="780" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="430" y="222" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">FastAPI server (server.py) — background run (astream) · /chat · /run/{id} poll · /run/{id}/respond · /settings ·</text>
+<text x="430" y="238" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">/upload · /transcribe</text>
+<text x="430" y="252" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">interactive clarify (Q/A multiselect) + HITL confirm · live per-node progress · thin client ↔ Python brain</text>
+<rect x="40" y="300" width="800" height="1040" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3" stroke-dasharray="6,4"/>
+<text x="440" y="316" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">LangGraph FORWARD graph (one request) — backward (self-learning) = credit-assignment over the trace, writes only</text>
+<text x="440" y="331" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">ParamStore artifacts (the graph architecture never changes)</text>
+<ellipse cx="430" cy="350" rx="70" ry="20" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="430" y="354" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">START</text>
+<rect x="280" y="395" width="300" height="66" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
+<text x="430" y="400" font-size="7" fill="#1a1a1a" text-anchor="middle">recall — memory + AutoRAG</text>
+<text x="430" y="410" font-size="7" fill="#1a1a1a" text-anchor="middle">episodes/facts/conclusions/goals + external ctx + KB/attachments (BM25</text>
+<text x="430" y="420" font-size="7" fill="#1a1a1a" text-anchor="middle">+ sanitize)</text>
+<text x="430" y="430" font-size="7" fill="#1a1a1a" text-anchor="middle">CONDITIONAL &amp; FLEXIBLE (recall_gate): BOTH facts AND associative memory</text>
+<text x="430" y="440" font-size="7" fill="#1a1a1a" text-anchor="middle">BY RELEVANCE</text>
+<text x="430" y="450" font-size="7" fill="#1a1a1a" text-anchor="middle">GraphRAG-lite boost · the query is embedded ONCE → reused by gate/graph</text>
+<text x="430" y="460" font-size="7" fill="#1a1a1a" text-anchor="middle">AND the intent router</text>
+<rect x="280" y="490" width="300" height="40" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="430" y="507" font-size="12" fill="#1a1a1a" text-anchor="middle">goal — aim + a worthwhile goal + rubric</text>
+<text x="430" y="522" font-size="12" fill="#1a1a1a" text-anchor="middle">(kept in context)</text>
+<rect x="280" y="558" width="300" height="70" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
+<text x="430" y="572" font-size="9" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflexion — LEVEL-1 routing: CHOICE of thinking mode</text>
+<text x="430" y="584" font-size="9" fill="#1a1a1a" text-anchor="middle" font-weight="bold">ReflexionDecision (LLM) + bandit prior (Beta/Thompson,</text>
+<text x="430" y="596" font-size="9" fill="#1a1a1a" text-anchor="middle" font-weight="bold">sees failures) + similarity few-shots</text>
+<text x="430" y="608" font-size="9" fill="#1a1a1a" text-anchor="middle" font-weight="bold">high ambiguity → clarify · heavy is NOT predicted — it</text>
+<text x="430" y="620" font-size="9" fill="#1a1a1a" text-anchor="middle" font-weight="bold">is EARNED by runtime evidence</text>
+<rect x="60" y="672" width="180" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="150" y="687" font-size="12" fill="#1a1a1a" text-anchor="middle">fast / reason</text>
+<text x="150" y="702" font-size="12" fill="#1a1a1a" text-anchor="middle">System 1 / System 2</text>
+<text x="150" y="717" font-size="12" fill="#1a1a1a" text-anchor="middle">no tools</text>
+<text x="150" y="732" font-size="12" fill="#1a1a1a" text-anchor="middle">(reason → validation)</text>
+<rect x="280" y="672" width="190" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="375" y="689" font-size="10" fill="#1a1a1a" text-anchor="middle">act — System 1 with hands</text>
+<text x="375" y="702" font-size="10" fill="#1a1a1a" text-anchor="middle">ONE direct action, 1–2 tools</text>
+<text x="375" y="715" font-size="10" fill="#1a1a1a" text-anchor="middle">(BM25 skill pick, HITL kept)</text>
+<text x="375" y="728" font-size="10" fill="#1a1a1a" text-anchor="middle">0 tools / ESCALATE →</text>
+<rect x="520" y="672" width="300" height="66" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="670" y="696" font-size="10" fill="#1a1a1a" text-anchor="middle" font-weight="bold">deliberate / heavy</text>
+<text x="670" y="708" font-size="10" fill="#1a1a1a" text-anchor="middle" font-weight="bold">tools + decomposition + per-item execute/validate</text>
+<text x="670" y="722" font-size="10" fill="#1a1a1a" text-anchor="middle" font-weight="bold">heavy adds an end-to-end review by the deep model</text>
+<rect x="540" y="772" width="280" height="50" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
+<text x="680" y="788" font-size="8" fill="#1a1a1a" text-anchor="middle">clarify_gate — batched clarifications (markers/open)</text>
+<text x="680" y="800" font-size="8" fill="#1a1a1a" text-anchor="middle">Q/A multiselect; answers → the run&#x27;s clarification</text>
+<text x="680" y="810" font-size="8" fill="#1a1a1a" text-anchor="middle">registry (dedup, reused by all nodes)</text>
+<rect x="540" y="844" width="280" height="58" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="865" font-size="7" fill="#1a1a1a" text-anchor="middle">skill_selector → decompose → skill_injection</text>
+<text x="680" y="875" font-size="7" fill="#1a1a1a" text-anchor="middle">AMORTIZATION: with a PATTERN the selector runs with NO LLM;</text>
+<text x="680" y="885" font-size="7" fill="#1a1a1a" text-anchor="middle">sim≥0.7 → decompose with NO LLM (plan straight from the pattern)</text>
+<rect x="540" y="924" width="280" height="58" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="938" font-size="9" fill="#1a1a1a" text-anchor="middle">step_executor ⟲ — execute + validate PER ITEM</text>
+<text x="680" y="950" font-size="9" fill="#1a1a1a" text-anchor="middle">validator sees the ACTUALLY-called tools (text ≠</text>
+<text x="680" y="962" font-size="9" fill="#1a1a1a" text-anchor="middle">action)</text>
+<text x="680" y="974" font-size="9" fill="#1a1a1a" text-anchor="middle">within-step context masking · ask_user catch-up</text>
+<rect x="540" y="1004" width="280" height="50" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="1026" font-size="12" fill="#1a1a1a" text-anchor="middle">synthesize — assemble the solution</text>
+<text x="680" y="1041" font-size="12" fill="#1a1a1a" text-anchor="middle">from the steps</text>
+<rect x="320" y="1004" width="180" height="58" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
+<text x="410" y="1024" font-size="10" fill="#1a1a1a" text-anchor="middle">review ⟲ (heavy only)</text>
+<text x="410" y="1036" font-size="10" fill="#1a1a1a" text-anchor="middle">end-to-end by the deep model</text>
+<text x="410" y="1050" font-size="10" fill="#1a1a1a" text-anchor="middle">problems → fix sub-steps</text>
+<rect x="540" y="1076" width="280" height="44" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="1.3"/>
+<text x="680" y="1102" font-size="12" fill="#1a1a1a" text-anchor="middle">validation — grounding + rubric check</text>
+<rect x="90" y="1180" width="330" height="70" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
+<text x="255" y="1190" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflect — write the episode (+ interaction journal), harvest signal</text>
+<text x="255" y="1201" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">(HITL/clarify → profile facts),</text>
+<text x="255" y="1212" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">compile the PATTERN (+ win/lose) → promote to the collective pool,</text>
+<text x="255" y="1223" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">detect a habit,</text>
+<text x="255" y="1234" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">extract facts (+tags, edges) · summary · prune · degradation tracking</text>
+<text x="255" y="1245" font-size="8" fill="#1a1a1a" text-anchor="middle" font-weight="bold">· auto self-learning</text>
+<ellipse cx="255" cy="1300" rx="65" ry="20" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
+<text x="255" y="1304" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">END</text>
+<rect x="880" y="70" width="380" height="94" rx="8" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.3"/>
+<text x="888" y="83" font-size="9" fill="#1a1a1a" text-anchor="start">MEMORY  (memory/store.py · embedder · vector_index TurboVec · feedback)</text>
+<text x="888" y="95" font-size="9" fill="#1a1a1a" text-anchor="start">episodes / facts(+tags) / conclusions / goals / summaries + typed graph</text>
+<text x="888" y="107" font-size="9" fill="#1a1a1a" text-anchor="start">edges</text>
+<text x="888" y="119" font-size="9" fill="#1a1a1a" text-anchor="start">GraphRAG-lite: densify fact↔fact (cosine) + spreading-activation</text>
+<text x="888" y="131" font-size="9" fill="#1a1a1a" text-anchor="start">(per-user, PII containment)</text>
+<text x="888" y="143" font-size="9" fill="#1a1a1a" text-anchor="start">Memory-as-TOOL (3 tiers): search_memory · recall_history · note_to_self</text>
+<rect x="880" y="178" width="380" height="104" rx="8" fill="#ffe6cc" stroke="#d79b00" stroke-width="1.3"/>
+<text x="888" y="193" font-size="11" fill="#1a1a1a" text-anchor="start">INTENT ROUTER — LEVEL-2  (intent.py · eval/route_eval.py)</text>
+<text x="888" y="207" font-size="11" fill="#1a1a1a" text-anchor="start">embedding-kNN codebook on qvec, ANY language (routing</text>
+<text x="888" y="221" font-size="11" fill="#1a1a1a" text-anchor="start">regexes REMOVED)</text>
+<text x="888" y="235" font-size="11" fill="#1a1a1a" text-anchor="start">signals = behavior GATES: web_grounding (→ act floor) ·</text>
+<text x="888" y="249" font-size="11" fill="#1a1a1a" text-anchor="start">physical_browser · play_media</text>
+<text x="888" y="263" font-size="11" fill="#1a1a1a" text-anchor="start">media_control · self_contained · grows from feedback ·</text>
+<text x="888" y="277" font-size="11" fill="#1a1a1a" text-anchor="start">route_eval 570 cases = 89.3%</text>
+<rect x="880" y="296" width="380" height="96" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="310" font-size="10" fill="#1a1a1a" text-anchor="start">SKILLS  (skills/* · registry.json · retrieval.py)</text>
+<text x="888" y="323" font-size="10" fill="#1a1a1a" text-anchor="start">ToolSearch (BM25S) as the library grows · browser_control: DOM</text>
+<text x="888" y="336" font-size="10" fill="#1a1a1a" text-anchor="start">snapshot, click/type by #</text>
+<text x="888" y="349" font-size="10" fill="#1a1a1a" text-anchor="start">device/app/ax/phone · web_search</text>
+<text x="888" y="362" font-size="10" fill="#1a1a1a" text-anchor="start">(trafilatura→BM25S→vector-rerank, never the full page)</text>
+<text x="888" y="375" font-size="10" fill="#1a1a1a" text-anchor="start">import external: quarantine → AST gate → smoke-sandbox → registry</text>
+<rect x="880" y="406" width="380" height="84" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="421" font-size="11" fill="#1a1a1a" text-anchor="start">KNOWLEDGE BASE  (knowledge_base.py · lightrag_engine.py)</text>
+<text x="888" y="435" font-size="11" fill="#1a1a1a" text-anchor="start">GLOBAL: real LightRAG graph (entities+relations, multi-hop)</text>
+<text x="888" y="449" font-size="11" fill="#1a1a1a" text-anchor="start">· BM25 fallback (no key)</text>
+<text x="888" y="463" font-size="11" fill="#1a1a1a" text-anchor="start">SESSION attachments (tmp) · AutoRAG in recall (cheap BM25 +</text>
+<text x="888" y="477" font-size="11" fill="#1a1a1a" text-anchor="start">sanitize, own-data provenance)</text>
+<rect x="880" y="504" width="380" height="84" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="518" font-size="10" fill="#1a1a1a" text-anchor="start">CAPABILITY TOOLS (research.py · compute.py · media.py ·</text>
+<text x="888" y="531" font-size="10" fill="#1a1a1a" text-anchor="start">mcp_client.py)</text>
+<text x="888" y="544" font-size="10" fill="#1a1a1a" text-anchor="start">research: sub-question plan → search → fact VERIFICATION →</text>
+<text x="888" y="557" font-size="10" fill="#1a1a1a" text-anchor="start">synthesize</text>
+<text x="888" y="570" font-size="10" fill="#1a1a1a" text-anchor="start">python_exec (sandbox) · vision PDF figures · MCP</text>
+<text x="888" y="583" font-size="10" fill="#1a1a1a" text-anchor="start">discover/connect/use (live remote)</text>
+<rect x="880" y="602" width="380" height="104" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="1.3"/>
+<text x="888" y="615" font-size="9" fill="#1a1a1a" text-anchor="start">SELF-LEARNING / AMORTIZATION (improve/ · habits.py · bandit.py ·</text>
+<text x="888" y="627" font-size="9" fill="#1a1a1a" text-anchor="start">collective.py)</text>
+<text x="888" y="639" font-size="9" fill="#1a1a1a" text-anchor="start">forward: few-shots (global + PER-USER) · backward: diff-blame →</text>
+<text x="888" y="651" font-size="9" fill="#1a1a1a" text-anchor="start">gradients → prompt opt</text>
+<text x="888" y="663" font-size="9" fill="#1a1a1a" text-anchor="start">(measured BEFORE/AFTER, accept/revert) · per-user backward · patterns →</text>
+<text x="888" y="675" font-size="9" fill="#1a1a1a" text-anchor="start">habits → skills</text>
+<text x="888" y="687" font-size="9" fill="#1a1a1a" text-anchor="start">collective tier (best-practices to similar users) · mode bandit prior</text>
+<rect x="880" y="720" width="380" height="92" rx="8" fill="#f8cecc" stroke="#b85450" stroke-width="1.3"/>
+<text x="888" y="735" font-size="11" fill="#1a1a1a" text-anchor="start">SECURITY (utils_validation.py · utils.py · hitl.py ·</text>
+<text x="888" y="749" font-size="11" fill="#1a1a1a" text-anchor="start">improve/safety.py)</text>
+<text x="888" y="763" font-size="11" fill="#1a1a1a" text-anchor="start">AST gate on code writes · smoke in a process sandbox</text>
+<text x="888" y="777" font-size="11" fill="#1a1a1a" text-anchor="start">(rlimits/kill) · HITL deny-by-default</text>
+<text x="888" y="791" font-size="11" fill="#1a1a1a" text-anchor="start">anti-injection in tool/MCP/search/AutoRAG outputs ·</text>
+<text x="888" y="805" font-size="11" fill="#1a1a1a" text-anchor="start">anti-PII floor · no learning from exploits</text>
+<rect x="880" y="826" width="380" height="80" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.3"/>
+<text x="888" y="842" font-size="12" fill="#1a1a1a" text-anchor="start">MODELS  (config.yml · OpenRouter | Ollama)</text>
+<text x="888" y="857" font-size="12" fill="#1a1a1a" text-anchor="start">fast = routing/validation/extraction · code = step</text>
+<text x="888" y="872" font-size="12" fill="#1a1a1a" text-anchor="start">execution · deep = heavy review ONLY</text>
+<text x="888" y="887" font-size="12" fill="#1a1a1a" text-anchor="start">cheap tier + harness, not model size (a typical fast</text>
+<text x="888" y="902" font-size="12" fill="#1a1a1a" text-anchor="start">query ≈ $0.001)</text>
+<rect x="880" y="920" width="380" height="56" rx="8" fill="#f5f5f5" stroke="#666666" stroke-width="1.3"/>
+<text x="888" y="936" font-size="12" fill="#1a1a1a" text-anchor="start">TRACING / DIAGNOSTICS (tracing/) — spans per node</text>
+<text x="888" y="951" font-size="12" fill="#1a1a1a" text-anchor="start">(traces.db) · self-diagnosis · rotation · MAINTENANCE:</text>
+<text x="888" y="966" font-size="12" fill="#1a1a1a" text-anchor="start">safe dependency auto-update (health-check + rollback)</text>
+<text x="48" y="1375" font-size="11" fill="#1a1a1a" text-anchor="start">Legend — blue: interfaces/models · green: graph nodes · orange: routing/clarify · purple: memory · yellow: self-learning · red: security · gray: skills/KB/capabilities</text>
+<text x="48" y="1389" font-size="11" fill="#1a1a1a" text-anchor="start">solid arrow = graph control flow · dashed = a node uses a cross-cutting subsystem · ⟲ = internal loop · TWO routings: LEVEL-1 thinking mode (reflexion-LLM) vs LEVEL-2 intent signals</text>
+<text x="48" y="1403" font-size="11" fill="#1a1a1a" text-anchor="start">(embedding-kNN)</text>
 </svg>
