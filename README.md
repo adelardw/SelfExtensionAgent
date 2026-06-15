@@ -15,13 +15,15 @@ with quality rising 78%→98%** (`scripts/amortize_bench.py`).
 
 ## Architecture
 
-Annotated architecture — interfaces, the FastAPI server, the LangGraph forward graph and the
-cross-cutting subsystems (rendered from the editable diagram
-[`docs/architecture.en.drawio`](docs/architecture.en.drawio)):
+The **real LangGraph forward graph** — nodes and edges exactly as built in `src/agent.py`
+(**solid** = fixed transition `add_edge`, **dashed** = conditional `add_conditional_edges`).
+Generated from the live edge list by [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py)
+→ editable [`docs/architecture.en.drawio`](docs/architecture.en.drawio) → SVG:
 
 ![Architecture](docs/architecture.en.svg)
 
-Full write-up — see [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Layer-by-layer write-up (memory, two-level routing, skills, security, self-learning, …) —
+see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 > 🇷🇺 **Русская версия — [ниже](#self-extension-agent-русская-версия).**
 
@@ -393,12 +395,15 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 
 ## Архитектура
 
-Аннотированная архитектура — интерфейсы, FastAPI-сервер, forward-граф LangGraph и сквозные
-подсистемы (отрисовано из редактируемой схемы [`docs/architecture.drawio`](docs/architecture.drawio)):
+**Реальный forward-граф LangGraph** — ноды и рёбра ровно так, как они строятся в `src/agent.py`
+(**сплошная** = фиксированный переход `add_edge`, **пунктир** = условный `add_conditional_edges`).
+Генерируется из живого списка рёбер скриптом [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py)
+→ редактируемая [`docs/architecture.drawio`](docs/architecture.drawio) → SVG:
 
 ![Архитектура](docs/architecture.svg)
 
-Полное описание — в [`ARCHITECTURE.md`](ARCHITECTURE.md).
+Послойное описание (память, двухуровневая маршрутизация, навыки, безопасность, самообучение, …) —
+в [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Бенчмарки и результаты
 

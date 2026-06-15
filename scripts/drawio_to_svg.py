@@ -2,18 +2,19 @@
 
     python scripts/drawio_to_svg.py docs/architecture.drawio docs/architecture.svg
 
-Поддерживает узлы (rounded-rect / ellipse / text), многострочный value (&#10;),
-заливку/обводку, пунктир, выравнивание, жирный шрифт, и рёбра со стрелками.
-Рёбра — ОРТОГОНАЛЬНЫЕ (polyline): точки крепления exitX/exitY/entryX/entryY (доля 0..1
-по границе бокса) + явные путевые точки (<mxGeometry><Array as="points">). Без точек
-крепления — обрезка по лучу из центра (как раньше). Этого достаточно для наших схем.
+Узлы: rounded-rect / ellipse / text, многострочный value (&#10;), заливка/обводка,
+пунктир, выравнивание, авто-подбор шрифта. Рёбра: ОРТОГОНАЛЬНЫЕ со СКРУГЛЁННЫМИ углами
+(точки крепления exitX/exitY/entryX/entryY как доля 0..1 по границе + явные путевые точки
+<mxGeometry><Array as="points">). Стрелки наследуют цвет ребра. Без точек крепления —
+обрезка по лучу из центра. Этого достаточно для наших схем (граф агента и пр.).
 """
 from __future__ import annotations
 
 import re
 import sys
 import xml.etree.ElementTree as ET
-from html import escape
+from html import escape, unescape
+from math import hypot
 
 
 def parse_style(s: str) -> dict:
@@ -31,9 +32,29 @@ def parse_style(s: str) -> dict:
 
 def text_lines(val: str) -> list[str]:
     val = val.replace("&#10;", "\n").replace("<br>", "\n")
-    val = re.sub(r"<[^>]+>", "", val)          # срезать html-теги
-    from html import unescape
+    val = re.sub(r"<[^>]+>", "", val)
     return [unescape(x) for x in val.split("\n")]
+
+
+def rounded_path(pts: list[tuple[float, float]], r: float = 12.0) -> str:
+    """SVG-path через точки со скруглёнными углами (квадратичные дуги в вершинах)."""
+    if len(pts) < 2:
+        return ""
+    if len(pts) == 2:
+        return f"M {pts[0][0]:.1f},{pts[0][1]:.1f} L {pts[1][0]:.1f},{pts[1][1]:.1f}"
+    d = [f"M {pts[0][0]:.1f},{pts[0][1]:.1f}"]
+    for i in range(1, len(pts) - 1):
+        p0, p1, p2 = pts[i - 1], pts[i], pts[i + 1]
+        v1x, v1y = p1[0] - p0[0], p1[1] - p0[1]
+        v2x, v2y = p2[0] - p1[0], p2[1] - p1[1]
+        l1, l2 = hypot(v1x, v1y) or 1, hypot(v2x, v2y) or 1
+        rr = min(r, l1 / 2, l2 / 2)
+        ax, ay = p1[0] - v1x / l1 * rr, p1[1] - v1y / l1 * rr
+        bx, by = p1[0] + v2x / l2 * rr, p1[1] + v2y / l2 * rr
+        d.append(f"L {ax:.1f},{ay:.1f}")
+        d.append(f"Q {p1[0]:.1f},{p1[1]:.1f} {bx:.1f},{by:.1f}")
+    d.append(f"L {pts[-1][0]:.1f},{pts[-1][1]:.1f}")
+    return " ".join(d)
 
 
 def main() -> int:
@@ -56,23 +77,15 @@ def main() -> int:
     maxx = max((x + w for x, y, w, h in geo.values()), default=800) + 40
     maxy = max((y + h for x, y, w, h in geo.values()), default=600) + 40
 
-    out = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{maxx:.0f}" height="{maxy:.0f}" '
-        f'viewBox="0 0 {maxx:.0f} {maxy:.0f}" font-family="Helvetica,Arial,sans-serif">',
-        '<defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" '
-        'orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#555"/></marker></defs>',
-        f'<rect width="{maxx:.0f}" height="{maxy:.0f}" fill="#ffffff"/>',
-    ]
-
     def center(i):
         x, y, w, h = geo[i]
         return (x + w / 2, y + h / 2)
 
-    def conn(i, fx, fy):  # точка крепления на границе бокса по доле (fx,fy) ∈ [0,1]
+    def conn(i, fx, fy):
         x, y, w, h = geo[i]
         return (x + fx * w, y + fy * h)
 
-    def clip(cx, cy, i):  # точка на границе прямоугольника i по лучу из его центра к (cx,cy)
+    def clip(cx, cy, i):
         x, y, w, h = geo[i]
         mx, my = x + w / 2, y + h / 2
         dx, dy = cx - mx, cy - my
@@ -91,11 +104,14 @@ def main() -> int:
                     pts.append((float(p.get("x", 0)), float(p.get("y", 0))))
         return pts
 
-    # рёбра — первыми (под узлами); ортогональные polyline через путевые точки
+    body, edge_colors = [], set()
+
+    # рёбра — первыми (под узлами); скруглённые ортогональные пути
     for srcid, tgtid, st, val, cell in edges:
         if srcid not in geo or tgtid not in geo:
             continue
         wps = waypoints(cell)
+        self_loop = srcid == tgtid
         if "exitX" in st:
             sp = conn(srcid, float(st["exitX"]), float(st.get("exitY", 0.5)))
         else:
@@ -103,23 +119,23 @@ def main() -> int:
         if "entryX" in st:
             ep = conn(tgtid, float(st["entryX"]), float(st.get("entryY", 0.5)))
         else:
-            ep = clip(*(wps[-1] if wps else center(srcid)), tgtid)
+            aim = wps[-1] if wps else (sp if self_loop else center(srcid))
+            ep = clip(*aim, tgtid)
         pts = [sp] + wps + [ep]
         stroke = st.get("strokeColor", "#555555")
-        dash = ' stroke-dasharray="5,4"' if st.get("dashed") == "1" else ""
-        arrow = "" if st.get("endArrow") == "none" else ' marker-end="url(#arrow)"'
-        d = " ".join(f"{px:.0f},{py:.0f}" for px, py in pts)
-        out.append(f'<polyline points="{d}" fill="none" stroke="{stroke}" '
-                   f'stroke-width="1.4"{dash}{arrow}/>')
+        edge_colors.add(stroke)
+        dash = ' stroke-dasharray="6,5"' if st.get("dashed") == "1" else ""
+        arrow = "" if st.get("endArrow") == "none" else f' marker-end="url(#a_{stroke.lstrip("#")})"'
+        body.append(f'<path d="{rounded_path(pts)}" fill="none" stroke="{stroke}" '
+                    f'stroke-width="1.7"{dash}{arrow}/>')
         if val:
-            # подпись — на середине самого длинного сегмента
             seg = max(range(len(pts) - 1),
-                      key=lambda k: abs(pts[k+1][0]-pts[k][0]) + abs(pts[k+1][1]-pts[k][1]))
-            mx, my = (pts[seg][0] + pts[seg+1][0]) / 2, (pts[seg][1] + pts[seg+1][1]) / 2
-            out.append(f'<rect x="{mx-len(val)*2.7-3:.0f}" y="{my-12:.0f}" '
-                       f'width="{len(val)*5.4+6:.0f}" height="13" fill="#ffffff" opacity="0.85"/>')
-            out.append(f'<text x="{mx:.0f}" y="{my-2:.0f}" font-size="9" fill="{stroke}" '
-                       f'text-anchor="middle">{escape(val)}</text>')
+                      key=lambda k: abs(pts[k + 1][0] - pts[k][0]) + abs(pts[k + 1][1] - pts[k][1]))
+            mx, my = (pts[seg][0] + pts[seg + 1][0]) / 2, (pts[seg][1] + pts[seg + 1][1]) / 2
+            body.append(f'<rect x="{mx - len(val) * 3.1 - 3:.0f}" y="{my - 13:.0f}" '
+                        f'width="{len(val) * 6.2 + 6:.0f}" height="15" rx="3" fill="#ffffff" opacity="0.9"/>')
+            body.append(f'<text x="{mx:.0f}" y="{my - 2:.0f}" font-size="10" fill="{stroke}" '
+                        f'text-anchor="middle">{escape(val)}</text>')
 
     # узлы
     for vid, (val, st, (x, y, w, h)) in verts.items():
@@ -128,13 +144,13 @@ def main() -> int:
         dash = ' stroke-dasharray="6,4"' if st.get("dashed") == "1" else ""
         is_text = st.get("text") == "1"
         if is_text:
-            pass  # без рамки
+            pass
         elif "ellipse" in st:
-            out.append(f'<ellipse cx="{x+w/2:.0f}" cy="{y+h/2:.0f}" rx="{w/2:.0f}" ry="{h/2:.0f}" '
-                       f'fill="{fill}" stroke="{stroke}" stroke-width="1.3"{dash}/>')
+            body.append(f'<ellipse cx="{x+w/2:.0f}" cy="{y+h/2:.0f}" rx="{w/2:.0f}" ry="{h/2:.0f}" '
+                        f'fill="{fill}" stroke="{stroke}" stroke-width="1.5"{dash}/>')
         else:
-            out.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" rx="8" '
-                       f'fill="{fill}" stroke="{stroke}" stroke-width="1.3"{dash}/>')
+            body.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" rx="9" '
+                        f'fill="{fill}" stroke="{stroke}" stroke-width="1.5"{dash}/>')
 
         bold = ' font-weight="bold"' if st.get("fontStyle") in ("1", "3") else ""
         valign = st.get("verticalAlign", "middle")
@@ -159,7 +175,6 @@ def main() -> int:
                     ls.append(cur)
             return ls
 
-        # авто-подбор шрифта: уменьшаем, пока текст не влезет в бокс по высоте
         start_fs = int(st.get("fontSize", 12))
         fs = start_fs
         while fs > 7:
@@ -184,11 +199,24 @@ def main() -> int:
         else:
             tx = x + w / 2; anchor = "middle"
         for ln in lines:
-            out.append(f'<text x="{tx:.0f}" y="{ty:.0f}" font-size="{fs}" fill="#1a1a1a" '
-                       f'text-anchor="{anchor}"{bold}>{escape(ln)}</text>')
+            body.append(f'<text x="{tx:.0f}" y="{ty:.0f}" font-size="{fs}" fill="#1a1a1a" '
+                        f'text-anchor="{anchor}"{bold}>{escape(ln)}</text>')
             ty += lh
 
-    out.append("</svg>")
+    # сборка: маркеры-стрелки по цвету ребра
+    markers = "".join(
+        f'<marker id="a_{c.lstrip("#")}" markerWidth="9" markerHeight="9" refX="7.5" refY="3" '
+        f'orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="{c}"/></marker>'
+        for c in sorted(edge_colors)
+    )
+    out = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{maxx:.0f}" height="{maxy:.0f}" '
+        f'viewBox="0 0 {maxx:.0f} {maxy:.0f}" font-family="Helvetica,Arial,sans-serif">',
+        f'<defs>{markers}</defs>',
+        f'<rect width="{maxx:.0f}" height="{maxy:.0f}" fill="#ffffff"/>',
+        *body,
+        "</svg>",
+    ]
     open(dst, "w", encoding="utf-8").write("\n".join(out))
     print(f"{src} → {dst} ({len(verts)} узлов, {len(edges)} рёбер, {maxx:.0f}×{maxy:.0f})")
     return 0
