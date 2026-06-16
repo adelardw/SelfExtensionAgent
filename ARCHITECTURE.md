@@ -6,6 +6,14 @@ A self-extending, self-improving agent on LangGraph. The agent's graph is treate
 **trainable program**: a run = forward pass (a trace of node activations), and self-learning
 is the backward pass over that trace.
 
+![Architecture](docs/architecture.en.svg)
+
+> The real LangGraph forward graph (exact node/edge topology from `src/agent.py`; **solid** =
+> `add_edge`, **dashed** = `add_conditional_edges`), each node annotated with what it does. Source:
+> [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py) → editable
+> [`docs/architecture.en.drawio`](docs/architecture.en.drawio) → SVG. The same graph is described
+> step by step below.
+
 ## Forward graph (one request)
 
 ```
@@ -193,6 +201,13 @@ best-practice installation with the source profile's fingerprint; to similar use
 Самораширяющийся, самообучающийся агент на LangGraph. Граф агента трактуется как
 **обучаемая программа**: прогон = forward pass (трейс активаций), а self-learning —
 backward pass по этому трейсу.
+
+![Архитектура](docs/architecture.svg)
+
+> Реальный forward-граф LangGraph (точная топология нод/рёбер из `src/agent.py`; **сплошная** =
+> `add_edge`, **пунктир** = `add_conditional_edges`), каждая нода подписана — что в ней происходит.
+> Источник: [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py) → редактируемая
+> [`docs/architecture.drawio`](docs/architecture.drawio) → SVG. Тот же граф пошагово описан ниже.
 
 ## Forward-граф (один запрос)
 

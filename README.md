@@ -15,14 +15,17 @@ with quality rising 78%→98%** (`scripts/amortize_bench.py`).
 
 ## Architecture
 
-The **real LangGraph forward graph** — nodes and edges exactly as built in `src/agent.py`
-(**solid** = fixed transition `add_edge`, **dashed** = conditional `add_conditional_edges`).
-Generated from the live edge list by [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py)
-→ editable [`docs/architecture.en.drawio`](docs/architecture.en.drawio) → SVG:
+The **real LangGraph forward graph** — the exact node/edge topology from `src/agent.py`, with
+**every node annotated by what it does and how** (**solid** = `add_edge`, **dashed** =
+`add_conditional_edges`). Entry points (REPL · Telegram · Desktop/Web GUI · Chrome extension ·
+FastAPI) feed the graph; nodes are colour-coded by role (memory · routing · skills · thinking ·
+review). Generated from the live edge list by
+[`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py) → editable
+[`docs/architecture.en.drawio`](docs/architecture.en.drawio) → SVG:
 
 ![Architecture](docs/architecture.en.svg)
 
-Layer-by-layer write-up (memory, two-level routing, skills, security, self-learning, …) —
+Full layer-by-layer write-up (memory, two-level routing, skills, security, self-learning, …) —
 see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 > 🇷🇺 **Русская версия — [ниже](#self-extension-agent-русская-версия).**
@@ -395,14 +398,17 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 
 ## Архитектура
 
-**Реальный forward-граф LangGraph** — ноды и рёбра ровно так, как они строятся в `src/agent.py`
-(**сплошная** = фиксированный переход `add_edge`, **пунктир** = условный `add_conditional_edges`).
-Генерируется из живого списка рёбер скриптом [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py)
-→ редактируемая [`docs/architecture.drawio`](docs/architecture.drawio) → SVG:
+**Реальный forward-граф LangGraph** — точная топология нод/рёбер из `src/agent.py`, где
+**каждая нода подписана: что и как в ней происходит** (**сплошная** = `add_edge`, **пунктир** =
+`add_conditional_edges`). Сверху — entrypoints (REPL · Telegram · Desktop/Web GUI · Chrome-расширение ·
+FastAPI), входящие в граф; ноды раскрашены по роли (память · роутинг · навыки · мышление · ревью).
+Генерируется из живого списка рёбер скриптом
+[`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py) → редактируемая
+[`docs/architecture.drawio`](docs/architecture.drawio) → SVG:
 
 ![Архитектура](docs/architecture.svg)
 
-Послойное описание (память, двухуровневая маршрутизация, навыки, безопасность, самообучение, …) —
+Полное послойное описание (память, двухуровневая маршрутизация, навыки, безопасность, …) —
 в [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Бенчмарки и результаты
