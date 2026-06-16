@@ -33,12 +33,12 @@ def test_ext_sets_disjoint():
 
 def test_progress_view_flow():
     pv = ProgressView()
-    assert "режим" in pv.on_update("reflexion", {"mode": "heavy"})
-    assert "3 шаг" in pv.on_update("decompose", {"subtasks": [
+    assert "mode" in pv.on_update("reflexion", {"mode": "heavy"})
+    assert "3 step" in pv.on_update("decompose", {"subtasks": [
         {"goal": "a"}, {"goal": "b"}, {"goal": "c"}]})
     lbl = pv.on_update("step_executor", {"current_step": 1})
     assert "1/3" in lbl and "a" in lbl
-    assert "ретрай" in pv.on_update("step_executor", {"step_retries": 1})
+    assert "retry" in pv.on_update("step_executor", {"step_retries": 1})
     # ревью добавил подшаги доработки
     lbl = pv.on_update("review", {"subtasks": [{}] * 5})
     assert "+2" in lbl

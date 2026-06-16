@@ -143,14 +143,15 @@ def main() -> int:
         stroke = st.get("strokeColor", "#888888")
         dash = ' stroke-dasharray="6,4"' if st.get("dashed") == "1" else ""
         is_text = st.get("text") == "1"
+        shadow = ' filter="url(#nodeshadow)"' if st.get("shadow") == "1" else ""
         if is_text:
             pass
         elif "ellipse" in st:
             body.append(f'<ellipse cx="{x+w/2:.0f}" cy="{y+h/2:.0f}" rx="{w/2:.0f}" ry="{h/2:.0f}" '
-                        f'fill="{fill}" stroke="{stroke}" stroke-width="1.5"{dash}/>')
+                        f'fill="{fill}" stroke="{stroke}" stroke-width="1.5"{dash}{shadow}/>')
         else:
-            body.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" rx="9" '
-                        f'fill="{fill}" stroke="{stroke}" stroke-width="1.5"{dash}/>')
+            body.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" rx="10" '
+                        f'fill="{fill}" stroke="{stroke}" stroke-width="1.5"{dash}{shadow}/>')
 
         bold = ' font-weight="bold"' if st.get("fontStyle") in ("1", "3") else ""
         valign = st.get("verticalAlign", "middle")
@@ -212,10 +213,13 @@ def main() -> int:
         f'orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="{c}"/></marker>'
         for c in sorted(edge_colors)
     )
+    shadow_def = ('<filter id="nodeshadow" x="-10%" y="-10%" width="125%" height="130%">'
+                  '<feDropShadow dx="0" dy="2.5" stdDeviation="3.5" flood-color="#3a3a5a" flood-opacity="0.30"/>'
+                  '</filter>')
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{maxx:.0f}" height="{maxy:.0f}" '
         f'viewBox="0 0 {maxx:.0f} {maxy:.0f}" font-family="Helvetica,Arial,sans-serif">',
-        f'<defs>{markers}</defs>',
+        f'<defs>{markers}{shadow_def}</defs>',
         f'<rect width="{maxx:.0f}" height="{maxy:.0f}" fill="#ffffff"/>',
         *body,
         "</svg>",

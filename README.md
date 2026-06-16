@@ -69,7 +69,9 @@ Reproduce: `python -m src.eval.route_eval`.
 user, then the *same* user now carrying patterns/few-shots/priors) — the warm pass spends
 **−13% tokens at no worse quality** (confidence 78%→98%). This shows the *mechanism* (a warm pass
 reuses compiled patterns), not a statistical claim — a series with medians is still needed.
-**Tests:** 281, mostly offline (no LLM).
+**Tests:** 408, mostly offline (no LLM) — incl. concurrency/isolation tests (per-request run_context,
+per-user HITL grants, SQLite-WAL writers, atomic codebook/registry/ParamStore, runtime skill sandbox)
+and characterization tests pinning the anti-hallucination + embedding-injection gates.
 
 > Caveats: GAIA n=100 → per-level CIs are wide; route_eval threshold is calibrated on its own
 > set (single hyperparameter, low overfit risk); confidence numbers are validator self-assessment.
@@ -208,14 +210,46 @@ Three real layers — not prompt instructions:
    of skills (`skills.confirm`: device/app/ax/phone) require explicit human confirmation: REPL —
    `y/N` in the terminal, Telegram — inline buttons; where there's no confirmation channel (HTTP
    server) — **deny by default**. Plus an independent `AGENT_DRY_RUN`.
+4. **Load-time gate** (`src/tools/skill_creation._load_skill_module`). HITL gates the tool *call*,
+   but a module's top-level code runs at *import*. So a skill is gated BEFORE `exec_module`, by a
+   three-tier trust policy: **core/protected** — run as-is (the owner wrote them; legit
+   `subprocess`); **imported** (OpenClaw CLI wrappers) — a *module-level* AST check (`subprocess`
+   in a tool *body* is fine — it's under HITL + a binary allowlist — but not at import time);
+   **everything else** (orphan/generated on disk) — the full AST gate. Loaded modules are cached by
+   mtime, so skills aren't re-`exec`'d on every step.
+5. **Dangerous-tool checkpoint survives `auto-accept`** (`src/hitl.py: _is_dangerous`, config
+   `skills.dangerous`). A tool command can come from an LLM steered by web-content injection, so
+   irreversible/shell tools (`run_bash`, `edit_file`) and any imported skill are NOT silently
+   executed by the convenience default (`auto-accept`): only full `auto` (an explicit autonomy
+   opt-in) or a deliberate per-tool grant skips the human checkpoint. Plus an **SSRF denylist**
+   (`web_search._ssrf_blocked`) on LLM-driven `browse`/`read_url`: fetches to
+   loopback/link-local/RFC1918/cloud-metadata (169.254.169.254) are rejected (`search_web` uses the
+   operator's configured host and is unaffected). And `device_control.notify`/`speak` escape the
+   LLM-controlled text into the osascript/PowerShell literals (`_esc`/`_ps_esc`) — `notify` is
+   read-only (never confirmed), so raw interpolation there was injection→RCE with no checkpoint.
+6. **File-read tools are scoped to the project root + a secret denylist** (`src/skills/code`:
+   `_safe_path`/`_is_secret_file`). The `code` skill's read tools (`read_lines`/`grep_repo`/
+   `glob_files`/`list_tree`) are read-only (never confirmed), so without scoping an injection-steered
+   agent could `read_lines('.env')` and exfiltrate the key via an external `browse` (SSRF blocks
+   internal, not external) — the read twin of the `run_bash` RCE. Now every path is resolved and
+   kept inside the project root (`AGENT_PROJECT_ROOT`/cwd; `.resolve()` catches symlink/`..` escape),
+   and secret files (`.env`, `id_rsa`, `*.pem`, `*.key`, `credentials`, …) are unreadable even inside
+   the repo. `edit_file` is scoped the same way.
 
 Additionally: core skills are protected from overwrite and deletion by the agent (`delete_skill`
 has no `force`; owner deletion — only `force_delete_skill` from code/CLI).
 
-**Protection against injection via tool outputs** (`safety.sanitize_tool_output`): the output of
-any tool/MCP/skill/search is untrusted DATA; on a prompt-injection attempt ("ignore previous…",
-"reveal system prompt", hidden commands) the triggers are neutralized and the text is marked "this
-is data, not instructions" — protection against skills-/mcp-/search-injection. The same sanitize
+**Protection against injection via tool outputs** (`safety.sanitize_tool_output`, **embedding-based**,
+not regex — multilingual, with a labeled corpus accruing for a future trained classifier; without an
+embedder detection is disabled — fail-open, but surfaced via the degradation counter, not silent):
+the output of any tool/MCP/skill/search is untrusted DATA; on a prompt-injection attempt ("ignore previous…",
+"reveal system prompt", hidden commands) the whole output is wrapped as "this is data, not
+instructions" — protection against skills-/mcp-/search-injection. The check is **source-gated
+(fail-safe)**: provably-internal outputs (compute, memory, echoes, reading one's own skill code) skip
+the embedding; everything external — browser snapshots, web search, MCP, KB, files, and ANY new
+generated skill — is always checked (unknown → checked). The verdict is **cached by content hash**
+(repeated `browser_see` snapshots aren't re-embedded), and the embedding runs in a thread
+(`asyncio.to_thread`) so it never blocks the server's event loop. The same sanitize
 sits on the **AutoRAG knowledge-base injection** (a poisoned document is data, not commands), KB
 paths are protected from traversal, and **collective patterns** aren't promoted from injection
 queries ("don't learn from a break-in" extends to the shared pool).
@@ -224,25 +258,57 @@ queries ("don't learn from a break-in" extends to the shared pool).
 query about addresses/prices/"where to buy" → web, not from memory), cutting fabricated URLs
 (`_strip_ungrounded_urls`) and **fabricated emails** (`safety.strip_ungrounded_pii` — only emails,
 numbers/GAIA-answers untouched), a detector of degenerate repetition and false "no access". "Don't
-disclose" = the twin of "don't fabricate": `safety.redact_pii` masks PII (email/phone/card) in
-**collective patterns** before passing them to other users.
+disclose" = the twin of "don't fabricate": `safety.redact_pii` masks PII (email/phone/card) across
+the **whole cross-user surface** of a promoted collective pattern — not just the query, but the plan
+step-leaves and the source profile — before passing them to other users. All these gates — routing, sanitizers
+and the LLM judges (false_refusal / false_completion / meta_stub) — are catalogued in one
+**decision table with their thresholds and fail-direction**:
+[`docs/anti_hallucination_gates.md`](docs/anti_hallucination_gates.md), pinned by characterization
+tests so the tower can be refactored without silent threshold drift.
 
 **Learning bans** (locked by tests `test_optimization_policy`): backward does NOT change the
 architecture (writes only ParamStore artifacts, not code/graph), does NOT rewrite the system
 prompts of key nodes (frozen), and does NOT learn from defense-bypass attempts
-(`safety.filter_learnable` excludes jailbreaks from the training batch).
+(`safety.filter_learnable` excludes jailbreaks from the training batch — checking both query AND
+answer, so an injection that arrived via a tool output and poisoned the trajectory is dropped too).
 
-**Honest boundaries**: the sandbox is process-level isolation (rlimits + kill), not gVisor/seccomp;
-AST analysis doesn't catch dynamic code generation (but `exec`/`eval` are fully banned); core
-skills (AppleScript/AX/adb) run trusted — the owner wrote them. Device/app/ax skills are currently
-**macOS-only**; Linux/Windows backends — on the roadmap.
+**Concurrency isolation** (server/Telegram): a single per-request context (`run_context`, run_id +
+user_id, set at each request boundary) isolates ALL per-request state so two concurrent clients can't
+clobber each other: the token budget (`runbudget`), the clarification/interaction ledgers, the
+anti-typosquatting domains, the degradation counters, and HITL state — **grants and work-mode are
+per-user** (one client's "yes, always" can't leak to others, and only the single operator's grants
+persist to `config.local.yml`). The memory store uses a per-thread SQLite connection with WAL;
+intent codebook, ParamStore and the **skill registry** are written atomically (temp + `os.replace`,
+no half-written JSON silently zeroing learned state). REPL/eval are sequential and behave exactly as
+before. (Mutable state lives in run-id-keyed dicts, not a contextvar `.set()` inside a node — a
+contextvar set in a node isn't visible to sibling nodes; only the boundary set propagates down.)
+
+**Runtime skill sandbox**: an untrusted (generated/orphan) skill's tool is invoked in a SEPARATE
+subprocess (`run_tool_sandboxed`), never in the agent process — closing the "AST-gate then run
+in-process with full rights" gap. The always-available `python_exec` compute tool (the widest exfil
+surface — always on, no HITL, LLM-supplied code) runs **network-off by default** (matching its "no
+network" contract). Injection detection on tool/MCP/search outputs is
+**embedding-contrastive** (multilingual, no brittle regex), with a labeled corpus accruing for a
+future trained classifier.
+
+**Honest boundaries**: the sandbox always applies rlimits (CPU/mem/FSIZE) + wall-kill, but FS-read
+isolation (`~/.ssh`/`.env`) and network egress require the syscall sandbox (Linux bwrap/firejail;
+macOS `sandbox-exec` under `AGENT_SANDBOX_EXEC=1`) — on bare macOS only rlimits apply, so a sandboxed
+skill can still read files and reach the network (`AGENT_SKILL_SANDBOX_NO_NET=1` for full network
+lockdown). AST analysis is **parity, not a sandbox**. A conscious ceiling for the "owner's own
+machine" threat model. Core skills (AppleScript/AX/adb) run trusted. Device/app/ax skills are
+currently **macOS-only**; Linux/Windows backends — on the roadmap.
 
 ## Install
 
 ```bash
 uv sync
-.venv/bin/python -m playwright install chromium   # for cloakbrowser search
+uv pip install -e .                                # installs the `sea` CLI command
+.venv/bin/python -m playwright install chromium    # for cloakbrowser search
 ```
+
+After `uv pip install -e .` the `sea` command is available (see **Run**). Without it, run
+`main.py` directly.
 
 ## Configuration
 
@@ -251,6 +317,8 @@ uv sync
 OPEN_ROUTER_API_KEY=...              # required (LLM AND embeddings via OpenRouter)
 SEARXNG_URL=http://localhost:8080    # opt. — private fresh search
 TELEGRAM_BOT_TOKEN=...               # opt. — for the Telegram bot
+TELEGRAM_ALLOWED_IDS=11111,22222     # opt. but recommended — only these chat_ids may command the bot
+                                     # (unset → bot answers anyone, with a loud startup warning)
 # OPENAI_API_KEY=...                 # opt. — alternative to OpenRouter for embeddings
 
 # Embeddings (semantic recall + TurboVec) are enabled in config.yml: memory.embeddings=true
@@ -276,15 +344,65 @@ A typical fast query ≈ $0.001; deliberate ≈ $0.005–0.02; heavy adds 1–2 
 ## Run
 
 ```bash
+sea                                      # interactive REPL (after `uv pip install -e .`)
+sea "your task"                          # one-shot: run and exit (exit code 0/1)
+sea --auto "your task"                   # one-shot without confirmations (autonomous)
+sea init                                 # scaffold .sea/ + SEA.md/MEMORY.md/MCP.md (scans the repo)
+sea --version | --help
+# equivalents without the installed command:
 .venv/bin/python main.py                 # REPL
 .venv/bin/python bot.py                  # Telegram bot
 uvicorn src.server:app --port 8000       # HTTP API
+python desktop.py                        # native desktop window (uv sync --group gui)
 ```
 
 API: `POST /chat {user_id, query}`, `GET /diagnose`, `/memory/facts`, `/memory/goal`, `/traces`.
 
 REPL commands: `/kb add|ls|mkdir|find` (knowledge base, LightRAG graph), `/attach <file>`
-(session attachment), `/model /voice /facts /goal /diagnose /traces /improve /usage /new`.
+(session attachment), `/auto plan|ask|edit|off` (work mode), `/compact` (= `/compress`),
+`/sync`, `/model /voice /facts /goal /diagnose /traces /improve /usage /new`.
+
+### CLI (`sea`) — the project-rooted surface
+
+One brain (the LangGraph graph), several surfaces: CLI · desktop · Telegram · Chrome extension.
+The CLI is the terminal, **project-rooted** surface — run it from a project directory and it picks
+up convention files from the project root (like `CLAUDE.md`):
+
+- **`SEA.md`** — project instructions for the agent (loaded into every request). `sea init` writes
+  a starting map of the repo here (stack, structure, key files, build/test commands). Because the
+  agent can run in an **arbitrary cwd** (the `code` skill, "analyze this cloned repo"), `SEA.md`/
+  `SKILL.md` content is **injection-checked** (per-sentence embedding) before being injected as
+  instructions — a malicious convention file in an untrusted repo is wrapped as data, not followed.
+- **`MEMORY.md`** — project memory index (curated; the agent also writes typed notes to
+  `data/project_memory/`).
+- **`MCP.md`** — your MCP server registry (YAML fields like a skill): connected from the CLI and the
+  desktop alike. A server is **auto-trusted only with explicit `trusted: true`** (otherwise it's
+  visible to the agent but launched only via confirmation) — so a cloned repo's `MCP.md` can't
+  silently `uvx`/remote-run foreign code (anti-RCE).
+- **`SKILL.md`** — your own (external) skills, as project context.
+
+**Work modes** (presets of the HITL confirmation system, apply to any action): `auto` (full
+autonomy) · `ask` (confirm before acting) · `edit-auto` (auto-confirm actions) · `plan` (read-only:
+side-effect actions are not executed, the agent only plans). `run_bash` and file edits always go
+through this — `plan` blocks them, `ask` asks, `auto` runs.
+
+**`.sea/`** (created by `sea init`, git-ignored) — per-project working dir: history, an
+accept/reject decision log, and **project-scoped skills** (`.sea/skills/`). Skills the agent
+creates are three-tier, like memory: **global/user** (`src/skills/`, cross-project),
+**project** (`.sea/skills/`, this project only), **external** (`SKILL.md`).
+
+**Code capability** — the `code` skill: `glob_files` · `grep_repo` · `list_tree` · `read_lines`
+(read-only) and `edit_file` · `run_bash` (side-effect, mode-gated). Run-budget is task-aware: code
+and action tasks get more budget than a simple research query.
+
+**Context management** — a status bar shows how much of the context window the session has filled
+(thresholds 128k / 256k / 512k / 1M). You compact it yourself with **`/compact`** (alias
+`/compress`): the session is summarized into **`COMPACT.md`** — cumulative and representative (key
+points/insights, MCP and skills you connected vs. the agent chose, project overview), each
+compaction referencing the previous ones; the last scope is kept so you don't lose the thread.
+Auto-compaction triggers at 1M. **`/sync`** then rebuilds `SEA.md` from the accumulated `COMPACT.md`
+(keeps your manual instructions, refreshes the repo map, folds in the current state) — running
+`/sync` after a `/compact` is a natural next step.
 
 ## Self-learning & maintenance (CLI)
 
@@ -310,7 +428,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # 272 tests, mostly without LLM (memory/retrieval/router/security/…)
+.venv/bin/python -m pytest tests/ -q   # 408 tests, mostly without LLM (memory/retrieval/router/security/concurrency/…)
 ```
 Graph-build tests require an API key (the LLM is built on import), the rest run offline.
 A quick pass of everyday scenarios through the real graph: `python -m src.eval.daily_eval [N]`.
@@ -323,7 +441,7 @@ src/
   agent.py            graph (recall→goal→reflexion→{fast|reason|act|deliberate|heavy}→…→reflect)
   prompts.py          prompts + registry of trainable ones (OPTIMIZABLE_PROMPTS)
   structured_outputs.py
-  memory/             store(SQLite: episodes/facts/recipes) + embedder + vector_index(TurboVec) + feedback
+  memory/             store(SQLite WAL, per-thread conn: episodes/facts/recipes) + embedder + vector_index(TurboVec) + feedback
   memory_tools.py     memory-as-tool (3 tiers: search_memory / recall_history / scratch)
   knowledge_base.py   user knowledge base (/kb, folder hierarchy) + session attachments (/attach)
   lightrag_engine.py  KB graph on LightRAG (per-user, indexing cost estimate)
@@ -336,7 +454,7 @@ src/
   mcp_client.py       discover/connect/use MCP (registry + trusted catalog)
   subagents.py        sub-agents/sub-graphs as tools
   clarify.py          clarification registry (onboarding-by-execution)
-  runbudget.py        token/time budget for a run (anti-runaway)
+  runbudget.py        token/time budget for a run (anti-runaway), isolated per run_id (run_scope)
   media.py            files (pdf/excel/docx/pptx/video/gif/image/audio)
   tracing/            tracer(spans) + diagnose
   external/           A2A/MCP context   ·  maintenance/  dependency auto-update
@@ -350,7 +468,7 @@ main.py / bot.py      REPL / Telegram
 
 ## Status
 
-Implemented and tested (272 tests): the core, **6 thinking modes** (incl. act with
+Implemented and tested (408 tests): the core, **6 thinking modes** (incl. act with
 auto-escalation; **heavy review earned by runtime evidence**), a **universal embedding intent
 router** (any language, route_eval 89.3%), **conditional recall + GraphRAG-lite memory**, per-step
 execution with **action grounding** + **context masking**, memory + **memory-as-tool (3
@@ -449,7 +567,9 @@ media_control, но ошибочная маршрутизация play не ло
 юзер, затем *тот же* юзер — теперь с паттернами/few-shots/априорными оценками) — тёплый проход тратит
 **−13% токенов при не худшем качестве** (уверенность 78%→98%). Это демонстрация *механизма*
 (тёплый проход переиспользует скомпилированные паттерны), а не статистическое утверждение —
-для строгости нужна серия с медианами. **Тесты:** 281, в основном оффлайн (без LLM).
+для строгости нужна серия с медианами. **Тесты:** 408, в основном оффлайн (без LLM) — включая
+concurrency/изоляция-тесты (per-request run_context, HITL-гранты per-user, SQLite-WAL, атомарные
+кодбук/реестр/ParamStore, рантайм-песочница навыков) и характеризационные тесты гейтов.
 
 > Caveats: GAIA n=100 → доверительные интервалы по уровням широкие; порог route_eval откалиброван
 > на своём же наборе (один гиперпараметр, риск оверфита низкий); confidence — самооценка валидатора.
@@ -595,15 +715,45 @@ media_control, но ошибочная маршрутизация play не ло
    подтверждения человеком: REPL — `y/N` в терминале, Telegram — inline-кнопки;
    где канала подтверждения нет (HTTP-сервер) — **deny by default**. Плюс
    независимый `AGENT_DRY_RUN`.
+4. **Гейт загрузки** (`src/tools/skill_creation._load_skill_module`). HITL гейтит *вызов* тула, но
+   module-level код навыка исполняется при *импорте*. Поэтому навык гейтится ПЕРЕД `exec_module`,
+   по трёхуровневой модели доверия: **core/protected** — как есть (их писал владелец; легальный
+   `subprocess`); **imported** (OpenClaw CLI-обёртки) — AST-проверка *уровня модуля* (`subprocess`
+   в *теле* тула ок — он под HITL + allowlist бинарей, — но не при импорте); **прочее**
+   (orphan/сгенерированное на диске) — полный AST-гейт. Загруженные модули кэшируются по mtime —
+   навыки не ре-`exec`'аются на каждом шаге.
+5. **Чекпойнт опасных тулов переживает `auto-accept`** (`src/hitl.py: _is_dangerous`, конфиг
+   `skills.dangerous`). Команда тула может прийти от LLM под инъекцией из веб-контента, поэтому
+   необратимые/шелл-тулзы (`run_bash`, `edit_file`) и любой импортированный скилл НЕ исполняются
+   молча удобным дефолтом (`auto-accept`): чекпойнт снимает только полный `auto` (явный opt-in в
+   автономию) или сознательный per-tool грант. Плюс **SSRF-денилист** (`web_search._ssrf_blocked`)
+   на LLM-управляемых `browse`/`read_url`: fetch к loopback/link-local/RFC1918/cloud-metadata
+   (169.254.169.254) отклоняется (`search_web` ходит на operator-config хост — не затронут). А
+   `device_control.notify`/`speak` экранируют LLM-управляемый текст в литералы osascript/PowerShell
+   (`_esc`/`_ps_esc`) — `notify` read-only (без подтверждения), сырая интерполяция там была
+   injection→RCE без чекпойнта.
+6. **Файловые read-тулзы скоупятся к корню проекта + денилист секретов** (`src/skills/code`:
+   `_safe_path`/`_is_secret_file`). Read-тулзы навыка `code` (`read_lines`/`grep_repo`/`glob_files`/
+   `list_tree`) read-only (без подтверждения), поэтому без скоупа агент под инъекцией мог бы
+   `read_lines('.env')` и слить ключ через внешний `browse` (SSRF режет internal, не external) —
+   read-близнец run_bash-RCE. Теперь любой путь резолвится и удерживается в корне проекта
+   (`AGENT_PROJECT_ROOT`/cwd; `.resolve()` ловит symlink/`..`-escape), а секрет-файлы (`.env`,
+   `id_rsa`, `*.pem`, `*.key`, `credentials`, …) не читаются даже ВНУТРИ репо. `edit_file` скоупится так же.
 
 Дополнительно: core-навыки защищены от перезаписи и удаления агентом (`delete_skill`
 не имеет `force`; владельческое удаление — только `force_delete_skill` из кода/CLI).
 
-**Защита от инъекций через выводы инструментов** (`safety.sanitize_tool_output`): вывод
+**Защита от инъекций через выводы инструментов** (`safety.sanitize_tool_output`, **на эмбеддингах**,
+не регэксп — мультиязык, с накоплением корпуса под будущий классификатор; без эмбеддера детект
+отключается — fail-open, но виден через счётчик деградации, не молча): вывод
 любого инструмента/MCP/навыка/поиска — недоверенные ДАННЫЕ; при попытке prompt-injection
-(«ignore previous…», «reveal system prompt», скрытые команды) триггеры обезвреживаются и
-текст помечается «это данные, не инструкции» — защита от skills-/mcp-/search-injection.
-Тот же sanitize стоит на **добавлении базы знаний через AutoRAG** (отравленный документ — данные,
+(«ignore previous…», «reveal system prompt», скрытые команды) весь вывод оборачивается рамкой
+«это данные, не инструкции» — защита от skills-/mcp-/search-injection. Проверка **source-gated
+(fail-safe)**: доказуемо-внутренние выводы (compute, память, эхо, чтение своего кода навыков) не
+эмбеддятся; всё внешнее — снапшоты браузера, web-поиск, MCP, БЗ, файлы и ЛЮБОЙ новый навык —
+проверяется всегда (неизвестный → проверяется). Вердикт **кэшируется по хешу контента** (повторные
+`browser_see`-снапшоты не эмбеддятся заново), а сам embed идёт в потоке (`asyncio.to_thread`) — не
+блокирует event-loop сервера. Тот же sanitize стоит на **добавлении базы знаний через AutoRAG** (отравленный документ — данные,
 не команды), пути БЗ защищены от traversal, а **коллективные паттерны** не промоутятся
 из инъекционных запросов (запрет «не учиться на взломе» распространён на общий пул).
 
@@ -612,25 +762,54 @@ media_control, но ошибочная маршрутизация play не ло
 (`_strip_ungrounded_urls`) и **выдуманных email** (`safety.strip_ungrounded_pii` — только
 email, числа/GAIA-ответы не трогаются), детектор вырожденного повтора и ложного «нет
 доступа». «Не разглашать» = близнец «не выдумывать»: `safety.redact_pii` маскирует
-PII (email/телефон/карта) в **коллективных паттернах** перед передачей другим юзерам.
+PII (email/телефон/карта) во **всей кросс-юзер-поверхности** промоутируемого коллективного
+паттерна — не только в запросе, но и в строках-листьях плана и профиле источника — перед
+передачей другим юзерам.
+Все эти гейты — роутинг, санитайзеры и LLM-судьи (false_refusal / false_completion / meta_stub) —
+собраны в единую **decision-таблицу с порогами и fail-direction**:
+[`docs/anti_hallucination_gates.md`](docs/anti_hallucination_gates.md), закреплённую
+характеризационными тестами, чтобы башню можно было рефакторить без молчаливого дрейфа порогов.
 
 **Запреты обучения** (залочены тестами `test_optimization_policy`): backward НЕ меняет
 архитектуру (пишет только артефакты ParamStore, не код/граф), НЕ переписывает системные
 промпты ключевых нод (заморожены), и НЕ учится на попытках обхода защиты
-(`safety.filter_learnable` исключает джейлбреки из обучающего батча).
+(`safety.filter_learnable` исключает джейлбреки из обучающего батча — по query И answer, чтобы
+инъекция, пришедшая через вывод тула и отравившая траекторию, тоже выпадала из обучения).
 
-**Честные границы**: песочница — изоляция уровня процесса (rlimits + kill), не
-gVisor/seccomp; AST-анализ не ловит динамическую кодогенерацию (но `exec`/`eval`
-запрещены целиком); core-навыки (AppleScript/AX/adb) исполняются доверенно — их
-писал владелец. Device/app/ax-навыки сейчас **macOS-only**; Linux/Windows-бэкенды —
-в roadmap.
+**Изоляция под конкуренцией** (сервер/Telegram): единый per-request контекст (`run_context`, run_id +
+user_id, выставляется на границе запроса) изолирует ВСЁ per-request состояние, чтобы два клиента не
+затёрли друг друга: бюджет (`runbudget`), реестры уточнений/взаимодействий, анти-тайпсквоттинг-домены,
+счётчики деградации и HITL — **гранты и режим работы per-user** (рантайм-«да, всегда» одного клиента
+не течёт другим; в `config.local.yml` персистит только грант единственного оператора). Стор памяти —
+пер-поточный SQLite+WAL; кодбук интентов, ParamStore и **реестр навыков** пишутся атомарно
+(temp + `os.replace` — полузаписанный JSON не обнуляет молча выученное). REPL/eval последовательны,
+как раньше. (Мутабельное состояние — в словарях по run_id, НЕ через `.set()` contextvar внутри ноды:
+set в ноде не виден сёстрам, надёжно наследуется только set на границе.)
+
+**Рантайм-песочница навыков**: вызов недоверенного (сгенерированного/orphan) навыка идёт в ОТДЕЛЬНОМ
+подпроцессе (`run_tool_sandboxed`), не в процессе агента — закрыт разрыв «AST-гейт, а потом исполнение
+in-process с полными правами». Всегда-доступный `python_exec` (широчайший канал эксфильтрации — всегда
+включён, без HITL, код от LLM) исполняется **с отрезанной сетью по умолчанию** (по его контракту «без
+сети»). Детект инъекций в выводах тулов/MCP/поиска —
+**эмбеддинг-контраст** (мультиязык, без хрупких регэкспов), с накоплением размеченного корпуса под
+будущий классификатор.
+
+**Честные границы**: песочница ВСЕГДА даёт rlimits (CPU/mem/FSIZE) + wall-kill, но изоляция ФС-ЧТЕНИЯ
+(`~/.ssh`/`.env`) и сети — только при syscall-песочнице (Linux bwrap/firejail; macOS `sandbox-exec`
+под `AGENT_SANDBOX_EXEC=1`); на голом macOS — лишь rlimits, т.е. навык МОЖЕТ читать файлы и ходить в
+сеть (`AGENT_SKILL_SANDBOX_NO_NET=1` — полный сетевой lockdown). AST-анализ — **паритет, не песочница**.
+Сознательный потолок «своя машина владельца». Core-навыки (AppleScript/AX/adb) — доверенно. Device/
+app/ax-навыки сейчас **macOS-only**; Linux/Windows — в roadmap.
 
 ## Установка
 
 ```bash
 uv sync
-.venv/bin/python -m playwright install chromium   # для cloakbrowser-поиска
+uv pip install -e .                                # ставит CLI-команду `sea`
+.venv/bin/python -m playwright install chromium    # для cloakbrowser-поиска
 ```
+
+После `uv pip install -e .` доступна команда `sea` (см. **Запуск**). Без неё запускай `main.py`.
 
 ## Настройка
 
@@ -639,6 +818,8 @@ uv sync
 OPEN_ROUTER_API_KEY=...              # обязателен (LLM И эмбеддинги через OpenRouter)
 SEARXNG_URL=http://localhost:8080    # опц. — приватный свежий поиск
 TELEGRAM_BOT_TOKEN=...               # опц. — для Telegram-бота
+TELEGRAM_ALLOWED_IDS=11111,22222     # опц., но рекомендуется — только эти chat_id могут командовать ботом
+                                     # (пусто → бот отвечает любому, с громким предупреждением при старте)
 # OPENAI_API_KEY=...                 # опц. — альтернатива OpenRouter для эмбеддингов
 
 # Эмбеддинги (семантический recall + TurboVec) включаются в config.yml: memory.embeddings=true
@@ -664,15 +845,65 @@ TELEGRAM_BOT_TOKEN=...               # опц. — для Telegram-бота
 ## Запуск
 
 ```bash
+sea                                      # интерактивный REPL (после `uv pip install -e .`)
+sea "твоя задача"                        # one-shot: выполнить и выйти (код 0/1)
+sea --auto "твоя задача"                 # one-shot без подтверждений (автономно)
+sea init                                 # создать .sea/ + SEA.md/MEMORY.md/MCP.md (сканит репо)
+sea --version | --help
+# эквиваленты без установленной команды:
 .venv/bin/python main.py                 # REPL
 .venv/bin/python bot.py                  # Telegram-бот
 uvicorn src.server:app --port 8000       # HTTP API
+python desktop.py                        # нативное десктоп-окно (uv sync --group gui)
 ```
 
 API: `POST /chat {user_id, query}`, `GET /diagnose`, `/memory/facts`, `/memory/goal`, `/traces`.
 
 Команды REPL: `/kb add|ls|mkdir|find` (база знаний, граф LightRAG), `/attach <файл>`
-(вложение сессии), `/model /voice /facts /goal /diagnose /traces /improve /usage /new`.
+(вложение сессии), `/auto plan|ask|edit|off` (режим работы), `/compact` (= `/compress`),
+`/sync`, `/model /voice /facts /goal /diagnose /traces /improve /usage /new`.
+
+### CLI (`sea`) — project-rooted поверхность
+
+Один мозг (граф LangGraph), несколько поверхностей: CLI · десктоп · Telegram · Chrome-расширение.
+CLI — терминальная, **project-rooted** поверхность: запускаешь из каталога проекта, и агент
+подцепляет из корня файлы-конвенции (как `CLAUDE.md`):
+
+- **`SEA.md`** — инструкции проекта для агента (грузятся в каждый запрос). Агент может работать в
+  ПРОИЗВОЛЬНОМ cwd (навык `code`, «проанализируй этот репо»), поэтому содержимое `SEA.md`/`SKILL.md`
+  **проверяется на инъекции** (по-предложенчно, эмбеддингом) перед впрыском как инструкции —
+  вредоносный конвенц-файл из чужого репо оборачивается как данные, а не выполняется.
+  `sea init` пишет сюда
+  стартовую карту репо (стек, структура, ключевые файлы, команды build/test).
+- **`MEMORY.md`** — индекс проектной памяти (курируемый; агент также пишет типизированные заметки
+  в `data/project_memory/`).
+- **`MCP.md`** — пользовательский реестр MCP-серверов (yml-поля, как у навыка): подключается и из
+  CLI, и из десктопа. Сервер авто-доверен **только по явному `trusted: true`** (иначе виден агенту,
+  но запускается лишь через подтверждение) — чтобы `MCP.md` из чужого репо не запустил молча
+  `uvx`/remote чужой код (анти-RCE).
+- **`SKILL.md`** — твои (внешние) навыки как контекст проекта.
+
+**Режимы работы** (пресеты HITL-подтверждений, для любого действия): `auto` (полная автономия) ·
+`ask` (спрашивать перед действием) · `edit-auto` (авто-подтверждение действий) · `plan` (read-only:
+side-effect действия не исполняются, агент только планирует). `run_bash` и правки файлов всегда
+проходят через это — `plan` блокирует, `ask` спрашивает, `auto` выполняет.
+
+**`.sea/`** (создаётся `sea init`, в .gitignore) — рабочий каталог проекта: история, лог решений
+accept/reject и **проектные навыки** (`.sea/skills/`). Создаваемые агентом навыки трёхъярусны, как
+память: **глобальные/user** (`src/skills/`, кросс-проект), **проектные** (`.sea/skills/`, только
+этот проект), **внешние** (`SKILL.md`).
+
+**Способность «код»** — навык `code`: `glob_files` · `grep_repo` · `list_tree` · `read_lines`
+(read-only) и `edit_file` · `run_bash` (side-effect, под режимом). Бюджет прогона зависит от типа
+задачи: код/действия получают больше, чем простой research-запрос.
+
+**Управление контекстом** — статус-бар показывает, насколько за сессию заполнено контекстное окно
+(пороги 128k / 256k / 512k / 1M). Сжимаешь сам командой **`/compact`** (алиас `/compress`): сессия
+сворачивается в **`COMPACT.md`** — кумулятивно и репрезентативно (ключевое/инсайты, какие MCP и
+навыки подключил ты, а какие выбрал агент, суть проекта), каждое сжатие ссылается на прошлые;
+последний скоуп сохраняется, чтобы не терять нить. На 1M — авто-сжатие. **`/sync`** затем
+перестраивает `SEA.md` из накопленного `COMPACT.md` (сохраняет твои ручные инструкции, обновляет
+карту репо, подтягивает текущее состояние) — запустить `/sync` после `/compact` имеет смысл.
 
 ## Самообучение и обслуживание (CLI)
 
@@ -698,7 +929,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ## Тесты
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # 272 теста, в осн. без LLM (память/retrieval/роутер/безопасность/…)
+.venv/bin/python -m pytest tests/ -q   # 408 тестов, в осн. без LLM (память/retrieval/роутер/безопасность/конкурентность/…)
 ```
 Тесты сборки графа требуют API-ключ (LLM строится на импорте), остальные — оффлайн.
 Быстрый прогон повседневных сценариев через реальный граф: `python -m src.eval.daily_eval [N]`.
@@ -711,7 +942,7 @@ src/
   agent.py            граф (recall→goal→reflexion→{fast|reason|act|deliberate|heavy}→…→reflect)
   prompts.py          промпты + реестр обучаемых (OPTIMIZABLE_PROMPTS)
   structured_outputs.py
-  memory/             store(SQLite: эпизоды/факты/паттерны) + embedder + vector_index(TurboVec) + feedback
+  memory/             store(SQLite WAL, пер-поточный conn: эпизоды/факты/паттерны) + embedder + vector_index(TurboVec) + feedback
   memory_tools.py     память-как-tool (3 яруса: search_memory / recall_history / scratch)
   knowledge_base.py   база знаний юзера (/kb, иерархия папок) + вложения сессии (/attach)
   lightrag_engine.py  граф БЗ на LightRAG (per-user, прикидка цены индексации)
@@ -724,7 +955,7 @@ src/
   mcp_client.py       discover/connect/use MCP (реестр + доверенный каталог)
   subagents.py        под-агенты/под-графы как инструменты
   clarify.py          реестр уточнений (онбординг-по-исполнению)
-  runbudget.py        токен/время-бюджет прогона (анти-runaway)
+  runbudget.py        токен/время-бюджет прогона (анти-runaway), изолирован по run_id (run_scope)
   media.py            файлы (pdf/excel/docx/pptx/видео/gif/image/audio)
   tracing/            tracer(спаны) + diagnose
   external/           контекст A2A/MCP   ·  maintenance/  авто-апдейт зависимостей
@@ -738,7 +969,7 @@ main.py / bot.py      REPL / Telegram
 
 ## Статус
 
-Реализовано и протестировано (272 теста): ядро, **6 режимов мышления** (вкл. act с
+Реализовано и протестировано (408 тестов): ядро, **6 режимов мышления** (вкл. act с
 автоэскалацией; **heavy-ревью зарабатывается рантайм-evidence**), **универсальный
 embedding-роутер интентов** (любой язык, route_eval 89.3%), **условный recall + GraphRAG-lite
 память**, по-пунктовое исполнение с **заземлением действий** + **маскинг контекста**, память +

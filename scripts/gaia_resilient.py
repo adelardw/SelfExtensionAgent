@@ -39,12 +39,22 @@ def _aggregate(jsonl: Path) -> None:
         by.setdefault(lvl, [0, 0])
         by[lvl][0] += bool(r.get("ok"))
         by[lvl][1] += 1
+    # Тайминги ответов (цель: сохранить время и прочее). sec пишет gaia_runner per-task.
+    secs = sorted(float(r["sec"]) for r in rows if r.get("sec") is not None)
+    avg_s = sum(secs) / len(secs) if secs else 0.0
+    med_s = secs[len(secs) // 2] if secs else 0.0
+    cached = sum(int(r.get("cached", 0) or 0) for r in rows)
+    toks_in = sum(int(r.get("in", 0) or 0) for r in rows)
+    hit = (cached / toks_in) if toks_in else 0.0
     print("\n" + "=" * 100)
     print(f"GAIA РЕЗИЛЬЕНТНЫЙ ИТОГ: {correct}/{n} = {correct / n:.1%}  ·  крашей пропущено: {crashes}  ·  стоимость ${cost:.4f}")
     for lvl in (1, 2, 3):
         c, t = by.get(lvl, [0, 0])
         if t:
             print(f"  Level {lvl}: {c}/{t} = {c / t:.0%}")
+    if secs:
+        print(f"  Время ответа: сред {avg_s:.0f}с · медиана {med_s:.0f}с · макс {secs[-1]:.0f}с"
+              f"  ·  prefix-cache hit: {hit:.0%}")
     print("=" * 100)
 
 

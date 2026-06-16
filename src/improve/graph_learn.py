@@ -70,6 +70,18 @@ def _format_failure_chains(fails: list, failures: list[dict]) -> str:
         )
     return "\n\n".join(blocks)
 
+def _is_poisoned(f) -> bool:
+    """Эпизод-неудача отравлен инъекцией? Смотрим И query, И answer (инъекция могла прийти через
+    вывод тула и отравить траекторию). Real backward (graph_backward / graph_backward_user) ходит
+    через ЭТО, а не через query-only is_unsafe_to_learn (долг ревью B3)."""
+    from .safety import is_unsafe_to_learn
+    try:
+        ans = f["answer"] if "answer" in f.keys() else ""
+    except Exception:  # noqa: BLE001
+        ans = ""
+    return is_unsafe_to_learn(f["query"]) or is_unsafe_to_learn(ans)
+
+
 # Нода графа → роль оптимизируемого промпта (artifact в ParamStore).
 # Теперь graph-wide: каждая когнитивная нода — обучаемый параметр.
 OPTIMIZABLE = {
@@ -101,11 +113,10 @@ def credit_assignment(memory_store: MemoryStore, min_batch: int) -> tuple[dict, 
     ЧАЩЕ, чем в успехах (blame = failRate − successRate). Так goal/reflexion,
     срабатывающие всегда, не получают ложную вину — выделяются реально слабые связи.
     """
-    from .safety import is_unsafe_to_learn
-
     # Не учимся на попытках взлома собственной защиты (инъекции/джейлбреки исключаются
-    # ДО анализа вины — иначе backward мог бы «оптимизировать» обход guardrails).
-    fails = [f for f in memory_store.get_failures(n=60) if not is_unsafe_to_learn(f["query"])]
+    # ДО анализа вины — иначе backward мог бы «оптимизировать» обход guardrails). Проверяем И query,
+    # И answer (инъекция могла прийти через вывод тула и отравить траекторию — B3).
+    fails = [f for f in memory_store.get_failures(n=60) if not _is_poisoned(f)]
     if len(fails) < min_batch:
         return {}, list(fails)
     sucs = memory_store.get_successes(n=40)
@@ -215,7 +226,7 @@ def graph_backward_user(memory_store: MemoryStore, user_id: str, min_batch: int 
     if provider() == "openrouter" and not (_os.getenv("OPEN_ROUTER_API_KEY") or _os.getenv("OPENAI_API_KEY")):
         return {"status": "error", "reason": "нет API-ключа"}
 
-    fails = [f for f in memory_store.get_failures(n=40, user_id=user_id) if not is_unsafe_to_learn(f["query"])]
+    fails = [f for f in memory_store.get_failures(n=40, user_id=user_id) if not _is_poisoned(f)]
     if len(fails) < min_batch:
         return {"status": "skipped", "reason": f"мало неудач у пользователя ({len(fails)}/{min_batch})"}
 
@@ -240,8 +251,9 @@ def graph_backward_user(memory_store: MemoryStore, user_id: str, min_batch: int 
     if accept:
         for l in lessons:
             if l.node in OPTIMIZABLE:
-                # урок → персональный few-shot нужной ноды (high score: приоритетнее общих)
-                add_user_fewshot(user_id, OPTIMIZABLE[l.node], l.trigger, l.lesson, score=0.9)
+                # урок → персональный few-shot нужной ноды (high score: приоритетнее общих).
+                # kind='lesson' → рендерится ОТДЕЛЬНЫМ блоком, не подменяет mode-метку (B6).
+                add_user_fewshot(user_id, OPTIMIZABLE[l.node], l.trigger, l.lesson, score=0.9, kind="lesson")
                 stored.append({"node": l.node, "trigger": l.trigger[:60]})
     return {"status": "done", "user_id": user_id, "blame": blame, "blamed_nodes": blamed,
             "batch_size": len(fails), "lessons_stored": stored,

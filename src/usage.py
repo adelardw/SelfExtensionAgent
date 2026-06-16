@@ -28,6 +28,10 @@ class TokenTracker(BaseCallbackHandler):
         self.input = 0
         self.output = 0
         self.calls = 0
+        # K3: видимость авто-prefix-cache. DeepSeek/Gemini/OpenAI-совместимые отдают долю
+        # входных токенов, прочитанных из кэша (prompt_tokens_details.cached_tokens). Без
+        # этого нельзя измерить эффект стабилизации префикса — диагностика была слепой.
+        self.cached = 0
 
     def on_llm_end(self, response, **kwargs) -> None:  # noqa: ANN001
         self.calls += 1
@@ -36,6 +40,11 @@ class TokenTracker(BaseCallbackHandler):
         if usage:
             self.input += usage.get("prompt_tokens", 0) or usage.get("input_tokens", 0)
             self.output += usage.get("completion_tokens", 0) or usage.get("output_tokens", 0)
+            details = usage.get("prompt_tokens_details") or {}
+            self.cached += (
+                (details.get("cached_tokens", 0) if isinstance(details, dict) else 0)
+                or usage.get("cache_read_input_tokens", 0)
+            )
             return
         # фолбэк: usage_metadata на сообщениях
         try:
@@ -45,11 +54,19 @@ class TokenTracker(BaseCallbackHandler):
                     if um:
                         self.input += um.get("input_tokens", 0)
                         self.output += um.get("output_tokens", 0)
+                        itd = um.get("input_token_details") or {}
+                        if isinstance(itd, dict):
+                            self.cached += itd.get("cache_read", 0)
         except Exception:  # noqa: BLE001
             pass
 
     def snapshot(self) -> tuple[int, int, int]:
         return (self.input, self.output, self.calls)
+
+    @property
+    def cache_hit_rate(self) -> float:
+        """Доля входных токенов, прочитанных из авто-кэша (0..1). 0 = префикс не кэшируется."""
+        return self.cached / self.input if self.input else 0.0
 
     @property
     def total(self) -> int:

@@ -158,14 +158,18 @@ def notify(title: str, message: str) -> str:
         title: Notification title.
         message: Notification body.
     """
+    # message/title — LLM-управляемы (steerable инъекцией) → ЭКРАНИРУЕМ: notify в _DEFAULT_READONLY,
+    # HITL не зовётся никогда, так что неэкранированная интерполяция = injection→RCE без чекпойнта
+    # (баг ревью RESIDUAL-B, острее SEC-1). osascript → _esc, PowerShell → _ps_esc.
     if _OS == "Darwin":
-        ok, out = _run(["osascript", "-e", f'display notification "{message}" with title "{title}"'])
+        ok, out = _run(["osascript", "-e",
+                        f'display notification "{_esc(message)}" with title "{_esc(title)}"'])
     elif _OS == "Windows":
         ps = (
             "Add-Type -AssemblyName System.Windows.Forms; "
             "$n=New-Object System.Windows.Forms.NotifyIcon; "
             "$n.Icon=[System.Drawing.SystemIcons]::Information; $n.Visible=$true; "
-            f"$n.ShowBalloonTip(5000,'{title}','{message}',[System.Windows.Forms.ToolTipIcon]::Info)"
+            f"$n.ShowBalloonTip(5000,'{_ps_esc(title)}','{_ps_esc(message)}',[System.Windows.Forms.ToolTipIcon]::Info)"
         )
         ok, out = _run(["powershell", "-NoProfile", "-Command", ps])
     else:  # Linux
@@ -186,7 +190,7 @@ def speak(text: str) -> str:
     if _OS == "Darwin":
         ok, out = _run(["say", t])
     elif _OS == "Windows":
-        ps = f"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{t}')"
+        ps = f"Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('{_ps_esc(t)}')"
         ok, out = _run(["powershell", "-NoProfile", "-Command", ps], timeout=30)
     else:  # Linux
         tts = _first_tool("spd-say", "espeak-ng", "espeak")
@@ -213,7 +217,14 @@ def _osa(script: str) -> tuple[bool, str]:
 
 
 def _esc(text: str) -> str:
+    """Экранирование для строкового литерала AppleScript (двойные кавычки)."""
     return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _ps_esc(text: str) -> str:
+    """Экранирование для одинарно-кавыченного литерала PowerShell: ' → '' (удвоение). Внутри
+    '...' PowerShell спецсимволы (` $) не интерпретируются, выйти можно ТОЛЬКО незакрытой '."""
+    return text.replace("'", "''")
 
 
 @tool

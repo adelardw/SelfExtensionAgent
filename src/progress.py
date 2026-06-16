@@ -9,23 +9,23 @@
 from __future__ import annotations
 
 NODE_LABELS = {
-    "recall": "🔎 вспоминаю контекст",
-    "goal": "🎯 определяю цель",
-    "reflexion": "🤔 выбираю способ мышления",
-    "clarify_gate": "❓ уточняю детали задачи",
-    "fast_answer": "⚡ быстрый ответ",
-    "reason": "🧠 размышляю",
-    "router": "🧭 выбираю стратегию",
-    "create_skills": "🧬 создаю навык",
-    "sgr_create": "🧪 проверяю созданный навык",
-    "skill_selector": "🧰 подбираю навыки",
-    "capability_research": "🔬 ищу недостающие способности",
-    "decompose": "🗂 раскладываю на подзадачи",
-    "skill_injection": "💉 подключаю навыки",
-    "synthesize": "🧩 собираю ответ",
-    "review": "🏗 сквозной ревью решения",
-    "validation": "✅ финальная валидация",
-    "reflect": "📝 запоминаю",
+    "recall": "🔎 recalling context",
+    "goal": "🎯 setting the goal",
+    "reflexion": "🤔 choosing how to think",
+    "clarify_gate": "❓ clarifying the task",
+    "fast_answer": "⚡ quick answer",
+    "reason": "🧠 reasoning",
+    "router": "🧭 choosing a strategy",
+    "create_skills": "🧬 creating a skill",
+    "sgr_create": "🧪 validating the new skill",
+    "skill_selector": "🧰 selecting skills",
+    "capability_research": "🔬 researching missing capabilities",
+    "decompose": "🗂 breaking into subtasks",
+    "skill_injection": "💉 wiring up skills",
+    "synthesize": "🧩 assembling the answer",
+    "review": "🏗 end-to-end review",
+    "validation": "✅ final validation",
+    "reflect": "📝 remembering",
 }
 
 
@@ -41,27 +41,27 @@ class ProgressView:
         delta = delta or {}
         if node == "reflexion" and delta.get("mode"):
             self.mode = delta["mode"]
-            return f"🤔 режим: {self.mode}"
+            return f"🤔 mode: {self.mode}"
         if node == "decompose":
             subs = delta.get("subtasks") or []
             self.n_steps = len(subs)
             self.step_goals = [s.get("goal", "") for s in subs]
-            return f"🗂 план готов: {self.n_steps} шаг(ов)"
+            return f"🗂 plan ready: {self.n_steps} step(s)"
         if node == "step_executor":
             cur = delta.get("current_step")
-            if cur is None:  # ретрай текущего шага
-                return "🛠 шаг не прошёл проверку — ретрай"
+            if cur is None:  # retry of the current step
+                return "🛠 step failed check — retrying"
             done = min(cur, self.n_steps or cur)
             goal = self.step_goals[cur - 1][:60] if 0 < cur <= len(self.step_goals) else ""
-            return f"🛠 шаг {done}/{self.n_steps or '?'} готов" + (f": {goal}" if goal else "")
+            return f"🛠 step {done}/{self.n_steps or '?'} done" + (f": {goal}" if goal else "")
         if node == "review":
             subs = delta.get("subtasks")
             if subs and len(subs) > self.n_steps:
                 added = len(subs) - self.n_steps
                 self.n_steps = len(subs)
                 self.step_goals = [s.get("goal", "") for s in subs]
-                return f"🏗 ревью нашёл проблемы → +{added} шаг(а) доработки"
-            return "🏗 ревью пройден"
+                return f"🏗 review found issues → +{added} fix step(s)"
+            return "🏗 review passed"
         return NODE_LABELS.get(node)
 
 

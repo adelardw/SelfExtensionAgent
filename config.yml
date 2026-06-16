@@ -31,15 +31,27 @@ agent:
   max_steps_per_run: 8        # глобальный потолок исполнений шага на прогон
   max_run_tokens: 120000      # жёсткий токен-бюджет прогона (≈$0.02) — стоп-кран от runaway
   max_run_seconds: 150        # wall-clock дедлайн прогона (сек) — стоп от медленного heavy
+  step_hard_cut_mult: 2.0     # ВНУТРИ-шаговый обрыв вооружается на ×этого от бюджета: ловит только
+                              # интра-степ взрыв (1 шаг→1М ток), граничные прогоны режет мягкий потолок
+
   max_output_tokens: 8000     # потолок ВЫХОДА одного LLM-вызова: structured-output (decompose/…) не должен обрезаться (LengthFinishReasonError) — thinking-модели тратят output на размышление
   llm_timeout: 60             # потолок одного LLM-вызова (с): 60с = явный хэнг; внутр. дедлайн прогона успевает прерваться до eval-враппера
 intent:
-  min_sim: 0.30               # глоб. порог уверенности intent-роутера (cosine-kNN); калибровано route_eval. Ниже — fallback на регэксп
+  min_sim: 0.30               # глоб. порог уверенности intent-роутера (cosine-kNN); калибровано route_eval. Ниже — None, caller полагается на reflexion (без регэксп-костыля)
   min_sim_per_label:          # PER-LABEL переопределения (тюнинг по confusion-структуре)
     web_grounding: 0.23       # ниже: его промахи почти все «None» (не кросс) → ловим больше grounding без риска перепутать (recall 76→87%)
 semantic_signals:             # анти-галлюцинация БЕЗ регэкспов: paywall — embedding-классификатор (любой язык)
   paywall_threshold: 0.58     # порог cosine к позитивным seed'ам стены подписки (консервативный; калибровать на размеченном наборе)
   paywall_margin: 0.05        # маржа над лучшим НЕГАТИВНЫМ seed'ом (контраст: «сейчас играет»/«бесплатно» ≠ «оформите подписку»)
+  error_threshold: 0.55       # страница-ошибка (404/«не найдена») — контраст с легит-контентом, любой язык
+  error_margin: 0.05
+  media_threshold: 0.55       # «звук реально идёт» (фолбэк для extension-прозы; in-repo даёт структурный флаг)
+  media_margin: 0.05
+safety:                       # детект инъекций/джейлбрейков — ЭМБЕДДИНГ-контраст (не регэксп), любой язык
+  injection_threshold: 0.52   # порог cosine к POS-сидам инъекций (контраст с нормальным контентом)
+  injection_margin: 0.04
+  injection_min_len: 12       # короче — не проверяем (тривиальный вывод не несёт инъекции)
+  collect_injection_corpus: false  # копить размеченный корпус (data/injection_corpus.jsonl) под будущий классификатор
 checkpointer:
   backend: sqlite
   sqlite_path: data/checkpoints.db
@@ -57,10 +69,12 @@ memory:
   max_episodes: 2000
   max_facts: 300
   max_reflections: 200
+  max_recipes: 200              # рецептов на юзера: оставляем самые ценные (победы→использования→свежесть)
 skills:
   base_path: src/skills
   protected:
   - web_search
+  - code
   - file_operations
   - text_file_processor
   - link_parser
@@ -77,6 +91,10 @@ skills:
   - ax_control
   - phone_control
   - browser_control          # действия в браузере агента (browser_see — read-only, без вопросов)
+  - code                     # edit_file/run_bash требуют подтверждения; glob/grep/tree/read — read-only
+  dangerous:                 # необратимые/шелл-тулзы: auto-accept НЕ снимает вопрос, только полный auto
+  - run_bash                 #   (SEC-1: иначе впрыснутый из веб-контента вызов → RCE без чекпойнта).
+  - edit_file                #   Имена ТУЛОВ (не навыков). Дефолт {run_bash, edit_file} зашит в hitl.py.
   autosync: true
   temp_ttl_days: 7           # временные (не принятые в библиотеку) навыки старше TTL чистятся при старте
 mcp:

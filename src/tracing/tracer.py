@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextvars
 import functools
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -39,8 +40,28 @@ class TraceStore:
     def __init__(self, db_path: str = "data/traces.db", keep_spans: int = 20000):
         self.keep_spans = keep_spans
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+        # Соединение ПЕР-ПОТОК + WAL (тот же паттерн, что memory_store, баг ревью CON-1): record()
+        # дёргается на КАЖДОЙ из 19 нод + из фонового reflect-потока. Один shared-conn с commit на
+        # ноду сериализовал бы все параллельные запросы через эксклюзивный лок файла и мог падать
+        # OperationalError из разных потоков. WAL+busy_timeout → конкурентные читатели/писатели без
+        # ручных локов; per-thread conn → нет гонок на одном объекте соединения.
+        self._db_path = db_path
+        self._local = threading.local()
+        self._init_schema()
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn = conn
+        return conn
+
+    def _init_schema(self) -> None:
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS spans (

@@ -1,53 +1,18 @@
 {
-  "weather_check": {
-    "description": "This skill provides current weather information for a specified location. It fetches data from a weather API.\n\n### When to Use\nUse this skill when the user asks for current weather conditions in a spe",
+  "pubchem_query": {
+    "description": "# PubChem Query Skill\n\nНавык для запросов к базе данных PubChem через PUG REST API (публичный, без ключа).\nПозволяет искать соединения, получать их свойства, классификации, ферментативные трансформаци",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-03-09T00:31:29.264335",
-    "updated_at": "2026-03-09T00:31:29.264353",
+    "created_at": "2026-06-16T19:40:18.312715",
+    "updated_at": "2026-06-16T19:40:18.312726",
     "version": 1
   },
-  "uv_package_manager": {
-    "description": "Устанавливает Python-пакеты через `uv` (ультрабыстрый менеджер пакетов, альтернатива `pip`).\n**Когда использовать**:\n- Когда требуется установить пакет в текущее окружение Python.\n- Когда нужна максим",
+  "phone_control": {
+    "description": "# Skill: phone_control (core)\n\nСтруктурное управление Android-телефоном через **ADB** (не скриншоты).\n`uiautomator dump` → XML-дерево экрана; тап по элементу (центр bounds), ввод текста,\nсистемные кла",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-03-09T08:43:25.010848",
-    "updated_at": "2026-03-09T08:43:25.010877",
-    "version": 1,
-    "protected": true
-  },
-  "link_parser": {
-    "description": "This skill parses links provided by the user to extract relevant information, handling large contexts effectively (RAG-like approach). It supports hybrid search methods to ensure accurate and up-to-da",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-03-09T09:00:41.591605",
-    "updated_at": "2026-03-09T09:02:57.367723",
-    "version": 2,
-    "protected": true
-  },
-  "file_organizer": {
-    "description": "This skill helps organize files in a specified directory by moving them into subdirectories based on their file extensions. It is useful for decluttering directories with mixed file types.\n\n**When to ",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-03-09T09:10:36.013416",
-    "updated_at": "2026-03-09T09:10:36.013429",
-    "version": 1
-  },
-  "text_file_processor": {
-    "description": "This skill provides tools for working with text files: reading, writing and searching content.\n\n**When to use:**\n- When user needs to read content from a text file\n- When user needs to write text to a",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-03-09T09:16:26.327602",
-    "updated_at": "2026-03-09T09:16:26.327614",
-    "version": 1,
-    "protected": true
-  },
-  "file_operations": {
-    "description": "Этот навык предоставляет инструменты для выполнения операций с файлами, включая чтение, запись, поиск и удаление текстовых файлов. Он использует стандартные библиотеки Python (`os`, `pathlib`) для раб",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-03-09T09:17:01.340774",
-    "updated_at": "2026-03-09T09:17:01.340788",
+    "created_at": "2026-06-16T19:40:18.313097",
+    "updated_at": "2026-06-16T19:40:18.313099",
     "version": 1,
     "protected": true
   },
@@ -55,53 +20,8 @@
     "description": "# Skill: web_search (core)\n\nНормальный веб-поиск и чтение страниц через stealth-браузер **cloakbrowser**\n(drop-in замена Playwright, проходит антибот-детект). Базовый защищённый навык.\n\n## Когда испол",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-08T23:03:23.007591",
-    "updated_at": "2026-06-08T23:03:23.007599",
-    "version": 1,
-    "protected": true
-  },
-  "device_control": {
-    "description": "# Skill: device_control (core)\n\nДействия с устройством **по запросу из чата** (on-demand, не фоновый мониторинг).\nmacOS, штатные утилиты, без сторонних зависимостей.\n\n## Когда использовать\n- Пользоват",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-08T23:56:58.683457",
-    "updated_at": "2026-06-08T23:56:58.683463",
-    "version": 1,
-    "protected": true
-  },
-  "deep_agent": {
-    "description": "# Skill: deep_agent (core, дополнение)\n\nЗапускает LangChain **DeepAgent** для долгогоризонтных/файловых подзадач:\nвиртуальная ФС + todo-список + спавн суб-агентов — из коробки. Это **дополнение**\nк яд",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-09T00:39:14.640250",
-    "updated_at": "2026-06-09T00:39:14.640257",
-    "version": 1,
-    "protected": true
-  },
-  "app_control": {
-    "description": "# Skill: app_control (core)\n\nСТРУКТУРНОЕ управление приложениями через их родные API (AppleScript) — **без\nкостылей-скриншотов**. macOS. Читает и меняет состояние приложений напрямую.\n\n## Когда исполь",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-09T01:45:48.341477",
-    "updated_at": "2026-06-09T02:26:12.940482",
-    "version": 2,
-    "protected": true
-  },
-  "ax_control": {
-    "description": "# Skill: ax_control (core)\n\nСтруктурное управление ЛЮБЫМИ приложениями через **Accessibility API (AX)** — ОС\nотдаёт дерево UI-элементов (роль/заголовок/значение). Агент читает состояние и\nдействует ПО",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-09T01:55:00.837578",
-    "updated_at": "2026-06-09T01:55:00.837584",
-    "version": 1,
-    "protected": true
-  },
-  "phone_control": {
-    "description": "# Skill: phone_control (core)\n\nСтруктурное управление Android-телефоном через **ADB** (не скриншоты).\n`uiautomator dump` → XML-дерево экрана; тап по элементу (центр bounds), ввод текста,\nсистемные кла",
-    "has_tools": true,
-    "has_system_prompt": true,
-    "created_at": "2026-06-09T01:57:36.586435",
-    "updated_at": "2026-06-09T01:57:36.586441",
+    "created_at": "2026-06-16T19:40:18.313295",
+    "updated_at": "2026-06-16T19:40:18.313296",
     "version": 1,
     "protected": true
   },
@@ -109,65 +29,154 @@
     "description": "Skill to launch macOS applications.",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-09T03:21:41.139871",
-    "updated_at": "2026-06-09T03:21:41.139903",
+    "created_at": "2026-06-16T19:40:18.313443",
+    "updated_at": "2026-06-16T19:40:18.313444",
     "version": 1
   },
-  "generate_pptx": {
-    "description": "Генерирует файл презентации .pptx по философии эволюции кибернетики, используя библиотеку python-pptx напрямую. Сохраняет файл по пути /Users/Shared/evolution_cybernetics_philosophy.pptx. Содержит 10 ",
+  "device_control": {
+    "description": "# Skill: device_control (core)\n\nДействия с устройством **по запросу из чата** (on-demand, не фоновый мониторинг).\nmacOS, штатные утилиты, без сторонних зависимостей.\n\n## Когда использовать\n- Пользоват",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-10T14:12:36.443618",
-    "updated_at": "2026-06-10T14:12:36.443641",
+    "created_at": "2026-06-16T19:40:18.313752",
+    "updated_at": "2026-06-16T19:40:18.313753",
+    "version": 1,
+    "protected": true
+  },
+  "orcid_reader": {
+    "description": "Reads ORCID (Open Researcher and Contributor ID) profile data via the public ORCID API. Used to fetch a person's works/publications list from their ORCID record. Returns publication titles, DOIs, publ",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.313888",
+    "updated_at": "2026-06-16T19:40:18.313889",
+    "version": 1
+  },
+  "zip_extractor": {
+    "description": "Извлекает ZIP-архивы и читает их содержимое. Используется для работы с прикреплёнными ZIP-файлами.",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.314002",
+    "updated_at": "2026-06-16T19:40:18.314002",
+    "version": 1
+  },
+  "text_file_processor": {
+    "description": "This skill provides tools for working with text files: reading, writing and searching content.\n\n**When to use:**\n- When user needs to read content from a text file\n- When user needs to write text to a",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.314120",
+    "updated_at": "2026-06-16T19:40:18.314121",
+    "version": 1,
+    "protected": true
+  },
+  "weather_check": {
+    "description": "This skill provides current weather information for a specified location. It fetches data from a weather API.\n\n### When to Use\nUse this skill when the user asks for current weather conditions in a spe",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.314238",
+    "updated_at": "2026-06-16T19:40:18.314239",
+    "version": 1
+  },
+  "code": {
+    "description": "# Skill: code (core, L2)\n\nОбзор и правка КОДОВОЙ БАЗЫ репозитория. Для задач: исправить баг в коде, отредактировать\nфайлы проекта, найти нужный код, разобраться в репозитории, реализовать фичу, прогна",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.314440",
+    "updated_at": "2026-06-16T19:40:18.314441",
+    "version": 1,
+    "protected": true
+  },
+  "file_operations": {
+    "description": "Этот навык предоставляет инструменты для выполнения операций с файлами, включая чтение, запись, поиск и удаление текстовых файлов. Он использует стандартные библиотеки Python (`os`, `pathlib`) для раб",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.314564",
+    "updated_at": "2026-06-16T19:40:18.314565",
+    "version": 1,
+    "protected": true
+  },
+  "ax_control": {
+    "description": "# Skill: ax_control (core)\n\nСтруктурное управление ЛЮБЫМИ приложениями через **Accessibility API (AX)** — ОС\nотдаёт дерево UI-элементов (роль/заголовок/значение). Агент читает состояние и\nдействует ПО",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.314682",
+    "updated_at": "2026-06-16T19:40:18.314683",
+    "version": 1,
+    "protected": true
+  },
+  "browser_control": {
+    "description": "# Skill: browser_control (core)\n\nПолноценные ДЕЙСТВИЯ в браузере ПОЛЬЗОВАТЕЛЯ через РАСШИРЕНИЕ (его профиль, его логины,\nего вкладки — без перелогина, без чтения паролей/cookies): включить трек/видео,",
+    "has_tools": true,
+    "has_system_prompt": false,
+    "created_at": "2026-06-16T19:40:18.314856",
+    "updated_at": "2026-06-16T19:40:18.314857",
+    "version": 1
+  },
+  "uv_package_manager": {
+    "description": "Устанавливает Python-пакеты через `uv` (ультрабыстрый менеджер пакетов, альтернатива `pip`).\n**Когда использовать**:\n- Когда требуется установить пакет в текущее окружение Python.\n- Когда нужна максим",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.314987",
+    "updated_at": "2026-06-16T19:40:18.314988",
+    "version": 1,
+    "protected": true
+  },
+  "file_organizer": {
+    "description": "This skill helps organize files in a specified directory by moving them into subdirectories based on their file extensions. It is useful for decluttering directories with mixed file types.\n\n**When to ",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.315092",
+    "updated_at": "2026-06-16T19:40:18.315093",
     "version": 1
   },
   "stash": {
     "description": "Стэши — именованные наборы структурированных данных пользователя (бюджет, расходы,\nзадачи, трекеры, аналитика). Рабочий стол агента под рутину: фин-аналитик ведёт\nбюджет, разработчик — список задач.\n\n",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-10T16:21:23.585787",
-    "updated_at": "2026-06-10T16:21:23.585796",
+    "created_at": "2026-06-16T19:40:18.315365",
+    "updated_at": "2026-06-16T19:40:18.315366",
     "version": 1,
     "protected": true
   },
-  "browser_control": {
-    "description": "# Skill: browser_control (core)\n\nПолноценные ДЕЙСТВИЯ в браузере: включить трек, включить видео, найти и запустить\nмузыку/фильм/плейлист, нажать кнопку на сайте, заполнить форму, залогиниться,\nходить ",
-    "has_tools": true,
-    "has_system_prompt": false,
-    "created_at": "2026-06-12T12:51:33.990841",
-    "updated_at": "2026-06-12T12:51:33.990850",
-    "version": 1
-  },
-  "orcid_reader": {
-    "description": "Reads ORCID (Open Researcher and Contributor ID) profile data via the public ORCID API. Used to fetch a person's works/publications list from their ORCID record. Returns publication titles, DOIs, publ",
+  "deep_agent": {
+    "description": "# Skill: deep_agent (core, дополнение)\n\nЗапускает LangChain **DeepAgent** для долгогоризонтных/файловых подзадач:\nвиртуальная ФС + todo-список + спавн суб-агентов — из коробки. Это **дополнение**\nк яд",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-13T16:44:24.937872",
-    "updated_at": "2026-06-13T16:44:24.937905",
-    "version": 1
+    "created_at": "2026-06-16T19:40:18.315477",
+    "updated_at": "2026-06-16T19:40:18.315478",
+    "version": 1,
+    "protected": true
   },
-  "pubchem_query": {
-    "description": "# PubChem Query Skill\n\nНавык для запросов к базе данных PubChem через PUG REST API (публичный, без ключа).\nПозволяет искать соединения, получать их свойства, классификации, ферментативные трансформаци",
+  "app_control": {
+    "description": "# Skill: app_control (core)\n\nСТРУКТУРНОЕ управление приложениями через их родные API (AppleScript) — **без\nкостылей-скриншотов**. macOS. Читает и меняет состояние приложений напрямую.\n\n## Когда исполь",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-14T00:53:47.061650",
-    "updated_at": "2026-06-14T00:56:32.617720",
-    "version": 2
+    "created_at": "2026-06-16T19:40:18.315595",
+    "updated_at": "2026-06-16T19:40:18.315595",
+    "version": 1,
+    "protected": true
   },
-  "zip_extractor": {
-    "description": "Извлекает ZIP-архивы и читает их содержимое. Используется для работы с прикреплёнными ZIP-файлами.",
+  "link_parser": {
+    "description": "This skill parses links provided by the user to extract relevant information, handling large contexts effectively (RAG-like approach). It supports hybrid search methods to ensure accurate and up-to-da",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-14T01:14:53.724846",
-    "updated_at": "2026-06-14T01:14:53.724858",
+    "created_at": "2026-06-16T19:40:18.315719",
+    "updated_at": "2026-06-16T19:40:18.315720",
+    "version": 1,
+    "protected": true
+  },
+  "generate_pptx": {
+    "description": "Генерирует файл презентации .pptx по философии эволюции кибернетики, используя библиотеку python-pptx напрямую. Сохраняет файл по пути /Users/Shared/evolution_cybernetics_philosophy.pptx. Содержит 10 ",
+    "has_tools": true,
+    "has_system_prompt": true,
+    "created_at": "2026-06-16T19:40:18.315843",
+    "updated_at": "2026-06-16T19:40:18.315843",
     "version": 1
   },
   "wikipedia_twitter_citations": {
     "description": "# Skill: Wikipedia Twitter/X Citation Counter\n\n## Purpose\nCounts how many times Twitter/X posts were cited as references on specific English Wikipedia pages, looking at historical revisions.\n\n## When ",
     "has_tools": true,
     "has_system_prompt": true,
-    "created_at": "2026-06-14T02:04:14.870336",
-    "updated_at": "2026-06-14T02:04:14.870345",
+    "created_at": "2026-06-16T19:40:18.315949",
+    "updated_at": "2026-06-16T19:40:18.315950",
     "version": 1
   }
 }

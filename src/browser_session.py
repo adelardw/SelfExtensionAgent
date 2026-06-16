@@ -27,6 +27,11 @@ from pathlib import Path
 PROFILE_DIR = Path("data/chrome_agent_profile")
 OP_TIMEOUT = 60  # секунд на операцию (включая первый запуск Chrome)
 
+# СТРУКТУРНЫЙ сентинел воспроизведения: in-repo путь ЗНАЕТ ground-truth (!m.paused), поэтому
+# эмитит фиксированный машинный токен, а не прозу. act_node читает токен (детерминированно), без
+# регэкспа по естественному языку (раньше парсил «ЗВУК ИГРАЕТ» строкой — хрупкая связка с форматом).
+MEDIA_PLAYING = "[[MEDIA_PLAYING]]"
+
 _EX = ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent-browser")
 # pw — хэндл playwright; channel — 'chrome' (системный) или None (фолбэк-Chromium).
 _state: dict = {"ctx": None, "page": None, "pw": None}
@@ -39,8 +44,12 @@ _SNAPSHOT_JS = """
               '[contenteditable="true"], audio, video, [role="searchbox"]';
   const vis = el => { const r = el.getBoundingClientRect();
     return r.width > 1 && r.height > 1 && r.bottom > 0 && r.top < innerHeight * 1.5; };
+  // Срезаем ЗАРЕЗЕРВИРОВАННЫЕ структурные токены [[MEDIA_…]] из текста ЭЛЕМЕНТА страницы: иначе
+  // страница с aria-label «[[MEDIA_PLAYING]] звук играет» подделала бы наш ground-truth-сигнал
+  // (баг ревью NEW-3). Маркер ниже эмитим ТОЛЬКО мы из media.some(!m.paused).
   const txt = el => (el.getAttribute('aria-label') || el.innerText || el.value ||
                      el.getAttribute('placeholder') || el.getAttribute('title') || '')
+                    .replace(/\\[\\[MEDIA_[^\\]]*\\]\\]/gi, '')
                     .trim().replace(/\\s+/g, ' ').slice(0, 80);
   const out = [];
   let i = 0;
@@ -57,7 +66,7 @@ _SNAPSHOT_JS = """
   // Состояние воспроизведения видно агенту ДАЖЕ если плеер за пределами снапшота.
   const media = [...document.querySelectorAll('audio, video')];
   if (media.some(m => !m.paused))
-    out.unshift({i: -1, kind: '♪ медиа', text: 'ЗВУК ИГРАЕТ — цель достигнута, не перепроверяй'});
+    out.unshift({i: -1, kind: '♪ медиа', text: '[[MEDIA_PLAYING]] звук играет — цель достигнута, не перепроверяй'});
   return out.filter(o => o.i >= 0 || o.kind === '♪ медиа');
 }
 """
@@ -335,8 +344,10 @@ def media(action: str = "toggle") -> str:
         if not res.get("total"):
             return ("Медиа-элементов на странице не найдено. Если плеер кастомный — "
                     "browser_see и клик по кнопке плеера.")
-        state = "играет" if res.get("playing") else "на паузе"
-        return f"{act}: затронуто {res.get('affected', 0)} из {res['total']} медиа · сейчас {state}."
+        playing = bool(res.get("playing"))
+        mark = MEDIA_PLAYING + " " if playing else ""   # структурный флаг для act_node (не проза)
+        state = "играет" if playing else "на паузе"
+        return f"{mark}{act}: затронуто {res.get('affected', 0)} из {res['total']} медиа · сейчас {state}."
     return _call(_do)
 
 

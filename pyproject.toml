@@ -43,7 +43,20 @@ dependencies = [
 ]
 
 [project.scripts]
-self-extension-agent = "main:_cli_entry"
+sea = "src.cli:main_cli"
+self-extension-agent = "src.cli:main_cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Пакет = каталог src (импортируется как `src.*`, как в коде) + корневой модуль main.py
+# (REPL/one-shot). config.yml/.env/data остаются рядом в каталоге проекта (runtime, не в вилке).
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"main.py" = "main.py"
 
 [dependency-groups]
 dev = [

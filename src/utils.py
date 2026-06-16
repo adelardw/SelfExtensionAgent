@@ -1,4 +1,4 @@
-from .tools.skill_creation import SKILLS_DIR
+from .tools.skill_creation import SKILLS_DIR, _skill_base  # _skill_base: L4 project-навыки
 from .schemas import GeneralGraphState
 import importlib
 import json
@@ -107,7 +107,7 @@ def _skill_loadable(skill_name: str) -> tuple[bool, str]:
     `from langchain_core.tools import tool` (name 'tool' is not defined) ещё ДО приёма.
     Возвращает (ok, сообщение).
     """
-    py_file = SKILLS_DIR / skill_name / f"{skill_name}.py"
+    py_file = _skill_base(skill_name) / f"{skill_name}.py"
     if not py_file.exists():
         return False, "нет файла навыка"
     module_name = f"skills_load_check.{skill_name}"
@@ -180,7 +180,7 @@ except Exception as e:
 """
 
 
-def _syscall_sandbox_prefix() -> list[str]:
+def _syscall_sandbox_prefix(no_net: bool = False) -> list[str]:
     """
     Опциональная изоляция syscall-уровня ПОВЕРХ rlimits, если в системе есть
     подходящий инструмент (best-effort, без жёсткой зависимости):
@@ -195,36 +195,43 @@ def _syscall_sandbox_prefix() -> list[str]:
         return []
     import platform as _pf
 
+    # no_net=True → ОТРЕЗАЕМ сеть (анти-эксфильтрация недоверенным навыком: AST разрешает urllib/
+    # socket, и без сети их канал утечки закрыт). Default — сеть ВКЛ (генерируемые навыки часто
+    # ходят в API; иначе режем способность). Флаг AGENT_SKILL_SANDBOX_NO_NET=1 — полный lockdown.
     if _pf.system() == "Linux":
         if shutil.which("bwrap"):
-            # read-only весь корень, изоляция pid/ipc/uts, без новых привилегий;
-            # /tmp как tmpfs для записи. Сеть оставляем (навыки часто ходят в API).
-            return [
+            # read-only весь корень, изоляция pid/ipc/uts, без новых привилегий; /tmp как tmpfs.
+            cmd = [
                 "bwrap", "--ro-bind", "/", "/", "--tmpfs", "/tmp",
                 "--unshare-pid", "--unshare-ipc", "--unshare-uts",
                 "--die-with-parent", "--new-session",
             ]
+            if no_net:
+                cmd.insert(1, "--unshare-net")   # без сетевого неймспейса → нет egress
+            return cmd
         if shutil.which("firejail"):
-            return ["firejail", "--quiet", "--private-tmp", "--noprofile"]
+            return ["firejail", "--quiet", "--private-tmp", "--noprofile"] + (["--net=none"] if no_net else [])
     elif _pf.system() == "Darwin" and os.environ.get("AGENT_SANDBOX_EXEC") == "1":
         if shutil.which("sandbox-exec"):
-            # минимальный профиль: разрешаем чтение/сеть, запрет записи вне /tmp
+            # минимальный профиль: чтение ок, запрет записи вне /tmp, опц. запрет сети.
             prof = ("(version 1)(allow default)(deny file-write*)"
-                    '(allow file-write* (subpath "/private/tmp") (subpath "/tmp"))')
+                    '(allow file-write* (subpath "/private/tmp") (subpath "/tmp"))'
+                    + ("(deny network*)" if no_net else ""))
             return ["sandbox-exec", "-p", prof]
     return []
 
 
 def run_tool_sandboxed(py_file: Path, tool_name: str, test_input: dict,
-                       timeout: int = SMOKE_TEST_TIMEOUT) -> tuple[bool, str]:
+                       timeout: int = SMOKE_TEST_TIMEOUT, no_net: bool = False) -> tuple[bool, str]:
     """
     Запускает tool из файла в ИЗОЛИРОВАННОМ подпроцессе (отдельный python того же
     venv, resource-лимиты CPU/FSIZE/AS, жёсткий wall-таймаут с kill) + опциональная
     syscall-изоляция (bubblewrap/firejail/sandbox-exec, если есть). Сгенерированный
-    код не исполняется в процессе агента. Возвращает (success, result_or_error).
+    код не исполняется в процессе агента. no_net=True → отрезаем сеть (анти-эксфильтрация).
+    Возвращает (success, result_or_error).
     """
     base = [sys.executable, "-c", _SANDBOX_RUNNER, str(py_file), tool_name, json.dumps(test_input)]
-    cmd = _syscall_sandbox_prefix() + base
+    cmd = _syscall_sandbox_prefix(no_net) + base
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + SMOKE_IMPORT_GRACE)
     except FileNotFoundError:
@@ -273,14 +280,17 @@ print("__PYEXEC__" + json.dumps({"ok": ok, "stdout": buf.getvalue()[:4000], "err
 """
 
 
-def run_python_sandboxed(code: str, timeout: int = 12) -> tuple[bool, str]:
-    """Исполняет произвольный Python в ИЗОЛИРОВАННОМ подпроцессе. (ok, stdout|ошибка)."""
+def run_python_sandboxed(code: str, timeout: int = 12, no_net: bool = False) -> tuple[bool, str]:
+    """Исполняет произвольный Python в ИЗОЛИРОВАННОМ подпроцессе. (ok, stdout|ошибка).
+    no_net=True → отрезаем сеть (python_exec по контракту «без сети/ФС» + он самый широкий канал
+    эксфильтрации: всегда доступен, без HITL, код приходит от LLM/инъекции). Эффективно при syscall-
+    песочнице (bwrap/firejail/sandbox-exec); на голом macOS — no-op (только rlimits)."""
     import tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as fh:
         fh.write(code)
         path = fh.name
     base = [sys.executable, "-c", _PYEXEC_RUNNER, path]
-    cmd = _syscall_sandbox_prefix() + base
+    cmd = _syscall_sandbox_prefix(no_net) + base
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except FileNotFoundError:
@@ -308,7 +318,7 @@ def _run_smoke_test(skill_name: str, tool_name: str, test_input: dict) -> tuple[
     Smoke-тест навыка В ПЕСОЧНИЦЕ: подпроцесс + resource-лимиты + таймаут.
     Возвращает (success, result_or_error).
     """
-    py_file = SKILLS_DIR / skill_name / f"{skill_name}.py"
+    py_file = _skill_base(skill_name) / f"{skill_name}.py"
     if not py_file.exists():
         return False, f"Файл {py_file} не найден"
 

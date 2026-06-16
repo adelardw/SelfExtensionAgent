@@ -29,13 +29,17 @@ from .memory.embedder import cosine
 
 
 def _cfg_signals() -> dict:
+    d = {"paywall_threshold": 0.58, "paywall_margin": 0.05,
+         "error_threshold": 0.55, "error_margin": 0.05,
+         "media_threshold": 0.55, "media_margin": 0.05}
     try:
         from omegaconf import OmegaConf
         c = OmegaConf.load("config.yml").get("semantic_signals", {}) or {}
-        return {"paywall_threshold": float(c.get("paywall_threshold", 0.58)),
-                "paywall_margin": float(c.get("paywall_margin", 0.05))}
+        for k in d:
+            d[k] = float(c.get(k, d[k]))
     except Exception:  # noqa: BLE001
-        return {"paywall_threshold": 0.58, "paywall_margin": 0.05}
+        pass
+    return d
 
 
 _SIG_CFG = _cfg_signals()
@@ -57,11 +61,14 @@ _PAYWALL_NEG = [
 ]
 
 
-class _PaywallEmbed:
-    """Контрастивный cosine-kNN детектор стены подписки по мультиязычным seed'ам. Эмбеддер
-    инъектируем (офлайн-тест механики без сети). Seed'ы эмбеддятся лениво и кэшируются на процесс."""
+class _ContrastiveSignal:
+    """Контрастивный cosine-kNN детектор по мультиязычным seed'ам (POS vs NEG). Любой язык,
+    без регэкспов/лексикона. Эмбеддер инъектируем (офлайн-тест механики без сети). Seed'ы
+    эмбеддятся лениво и кэшируются на процесс. Один класс — все сигналы (paywall/error/media)."""
 
-    def __init__(self, embedder=None):
+    def __init__(self, pos_seeds: list, neg_seeds: list, embedder=None):
+        self._pos_seeds = pos_seeds
+        self._neg_seeds = neg_seeds
         self._embedder = embedder
         self._pos_v: Optional[list] = None
         self._neg_v: Optional[list] = None
@@ -89,8 +96,8 @@ class _PaywallEmbed:
         if self._pos_v is not None:
             return
         emb = self._emb()
-        self._pos_v = [v for v in (emb.embed(t) for t in _PAYWALL_POS) if v]
-        self._neg_v = [v for v in (emb.embed(t) for t in _PAYWALL_NEG) if v]
+        self._pos_v = [v for v in (emb.embed(t) for t in self._pos_seeds) if v]
+        self._neg_v = [v for v in (emb.embed(t) for t in self._neg_seeds) if v]
 
     def fires(self, text: str, threshold: float, margin: float) -> bool:
         if not (text or "").strip() or not self.enabled:
@@ -109,15 +116,72 @@ class _PaywallEmbed:
             return False
 
 
-# Синглтон на процесс (кэш seed-эмбеддингов). cosine — из того же эмбеддера, что память/intent.
-_PAYWALL: Optional[_PaywallEmbed] = None
+class _PaywallEmbed(_ContrastiveSignal):
+    """Back-compat обёртка: paywall с захардкоженными мультиязычными сидами."""
+
+    def __init__(self, embedder=None):
+        super().__init__(_PAYWALL_POS, _PAYWALL_NEG, embedder)
 
 
-def _paywall_detector() -> _PaywallEmbed:
+# ── СТРАНИЦА-ОШИБКА (404/не найдена) — внешний контент чужой страницы, любой язык ──
+_ERROR_POS = [
+    "404 not found", "page not found", "страница не найдена", "этой страницы не существует",
+    "ничего не нашлось", "the requested url was not found", "页面未找到", "ページが見つかりません",
+    "página no encontrada", "seite nicht gefunden", "오류 페이지를 찾을 수 없습니다", "الصفحة غير موجودة",
+]
+_ERROR_NEG = [
+    "now playing", "сейчас играет", "search results", "результаты поиска",
+    "video is playing", "статья", "article content", "главная страница сайта", "товары в наличии",
+]
+
+# ── ВОСПРОИЗВЕДЕНИЕ РЕАЛЬНО ИДЁТ (фолбэк для extension-прозы; in-repo путь даёт структурный флаг) ──
+_MEDIA_POS = [
+    "audio is now playing", "звук играет", "video is playing", "сейчас воспроизводится",
+    "playback started", "now playing", "видео воспроизводится", "再生中", "正在播放", "reproduciendo ahora",
+]
+_MEDIA_NEG = [
+    "paused", "на паузе", "press play to start", "нажмите воспроизведение", "play button available",
+    "track listing", "список треков", "добавить в плейлист", "video is paused", "остановлено",
+]
+
+# Синглтоны на процесс (кэш seed-эмбеддингов). cosine — из того же эмбеддера, что память/intent.
+_PAYWALL: Optional[_ContrastiveSignal] = None
+_ERROR: Optional[_ContrastiveSignal] = None
+_MEDIA: Optional[_ContrastiveSignal] = None
+
+
+def _paywall_detector() -> _ContrastiveSignal:
     global _PAYWALL
     if _PAYWALL is None:
-        _PAYWALL = _PaywallEmbed()
+        _PAYWALL = _ContrastiveSignal(_PAYWALL_POS, _PAYWALL_NEG)
     return _PAYWALL
+
+
+def _error_detector() -> _ContrastiveSignal:
+    global _ERROR
+    if _ERROR is None:
+        _ERROR = _ContrastiveSignal(_ERROR_POS, _ERROR_NEG)
+    return _ERROR
+
+
+def _media_detector() -> _ContrastiveSignal:
+    global _MEDIA
+    if _MEDIA is None:
+        _MEDIA = _ContrastiveSignal(_MEDIA_POS, _MEDIA_NEG)
+    return _MEDIA
+
+
+def is_error_page(text: str) -> bool:
+    """Страница-ошибка (404/«не найдена») — embedding-контраст, любой язык. На play-намерении
+    нельзя заявлять воспроизведение, если под плеером страница-ошибка. Без эмбеддера → False."""
+    return _error_detector().fires(text or "", _SIG_CFG["error_threshold"], _SIG_CFG["error_margin"])
+
+
+def is_media_playing(text: str) -> bool:
+    """ФОЛБЭК-детект «звук реально идёт» для extension-прозы (in-repo browser_session даёт точный
+    структурный флаг MEDIA_PLAYING, его проверяют первым). Контраст POS «играет» vs NEG «пауза/
+    список треков» — не путать с листингом. Без эмбеддера → False (act даёт честный статус)."""
+    return _media_detector().fires(text or "", _SIG_CFG["media_threshold"], _SIG_CFG["media_margin"])
 
 
 def is_paywall(text: str) -> bool:

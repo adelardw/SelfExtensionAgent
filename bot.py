@@ -17,6 +17,7 @@ from aiogram.filters.command import Command
 from dotenv import load_dotenv
 from langgraph.checkpoint.sqlite import SqliteSaver
 
+from src import runbudget, run_context
 from src.agent import build_graph, memory_store
 from src.clarify import set_clarifier
 from src.hitl import set_confirmer
@@ -35,6 +36,31 @@ if not API_TOKEN:
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+
+# Allowlist chat_id: бот = РУКИ агента (тулзы/действия). Без allowlist любой, кто нашёл бота, слал бы
+# команды; при глобальном auto-режиме — чужие руки с авто-исполнением (баг ревью). TELEGRAM_ALLOWED_IDS
+# — запятые. Пусто → бот открыт всем, но с ГРОМКИМ предупреждением при старте (личный бот не ломаем).
+_ALLOWED_IDS = {x.strip() for x in (os.getenv("TELEGRAM_ALLOWED_IDS") or "").split(",") if x.strip()}
+if not _ALLOWED_IDS:
+    logger.warning("⚠ TELEGRAM_ALLOWED_IDS не задан — бот отвечает ЛЮБОМУ Telegram-юзеру. "
+                   "Для приватного бота задай TELEGRAM_ALLOWED_IDS=<твой_id>[,<id>…]")
+
+
+def _authorized(uid) -> bool:
+    return (not _ALLOWED_IDS) or (str(uid) in _ALLOWED_IDS)
+
+
+@dp.message.outer_middleware()
+async def _auth_mw(handler, event, data):
+    """Единая точка: неавторизованный chat_id не доходит до агента/тулов."""
+    uid = getattr(getattr(event, "from_user", None), "id", None)
+    if uid is not None and not _authorized(uid):
+        try:
+            await event.answer("⛔ Доступ ограничен. Обратись к владельцу бота.")
+        except Exception:  # noqa: BLE001
+            pass
+        return None
+    return await handler(event, data)
 
 conn = sqlite3.connect("data/checkpoints.db", check_same_thread=False)
 agent_app = build_graph(checkpointer=SqliteSaver(conn))
@@ -238,10 +264,14 @@ async def _process(message: types.Message, query: str) -> None:
     try:
         cfg = {"configurable": {"thread_id": _thread(uid)}, "recursion_limit": 50,
                "callbacks": [tracker]}
-        result = await stream_with_progress(
-            agent_app, {"query": query, "user_id": uid, "chat_history": []},
-            config=cfg, on_label=_on_label,
-        )
+        # aiogram обрабатывает апдейты конкурентно (каждый — своя asyncio-задача); без изоляции
+        # бюджета два юзера сели бы на общий _default и reset() одного стёр бы счётчик другого (2a,
+        # тот же баг, что закрыли в server.py — это второй вход).
+        with run_context.request_scope(f"tg-{uid}-{uuid.uuid4().hex}", uid):
+            result = await stream_with_progress(
+                agent_app, {"query": query, "user_id": uid, "chat_history": []},
+                config=cfg, on_label=_on_label,
+            )
         answer = result.get("final_answer") or "Не смог сформировать ответ."
 
         mode = MODE_EMOJI.get(result.get("mode", ""), result.get("mode", ""))

@@ -3,10 +3,35 @@ import json
 import os
 import importlib.util
 import sys
+import tempfile
+import threading
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from langchain_core.tools import tool
+
+# Атомарная+сериализованная запись реестра навыков: фоновый reflect-поток судит/удаляет навыки
+# (_delete_skill_impl → _save_reg_at) ПАРАЛЛЕЛЬНО с основным (create/sync) → голый write_text давал
+# read-modify-write гонку на одном JSON (тот же класс, что 2c в intent/prompt_store). Lock + temp→
+# fsync→os.replace: читатель видит старый ИЛИ новый ЦЕЛЫЙ файл.
+_REG_LOCK = threading.Lock()
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, indent=2, ensure_ascii=False)
+    with _REG_LOCK:
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
 
 
 def _skills_base() -> Path:
@@ -65,10 +90,79 @@ def _load_registry() -> dict:
 
 def _save_registry(registry: dict):
     _ensure_dirs()
-    REGISTRY_FILE.write_text(
-        json.dumps(registry, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    _atomic_write_json(REGISTRY_FILE, registry)   # лок + atomic (гонка фон-reflect ↔ main)
+
+
+# ── L4: проектный ярус навыков (.sea/skills/) ──────────────────────────────────
+# Навыки трёхъярусны (как память): ГЛОБАЛЬНЫЕ/user (src/skills + registry.json, кросс-проект),
+# ПРОЕКТНЫЕ (агент создал для проекта → .sea/skills/, project-local), ВНЕШНИЕ (SKILL.md).
+# Разделение read/write: загрузчики читают ОБЪЕДИНЁННЫЙ реестр; _load/_save_registry — ТОЛЬКО
+# глобальный (проектные навыки НЕ протекают в global registry). Нет .sea/skills → всё как было.
+def _project_skills_dir() -> Optional[Path]:
+    base = Path(os.getenv("AGENT_PROJECT_ROOT") or Path.cwd()) / ".sea" / "skills"
+    return base if base.is_dir() else None
+
+
+def _skill_base(name: str) -> Path:
+    """Каталог навыка: ПРОЕКТНЫЙ (.sea/skills) приоритетнее ГЛОБАЛЬНОГО (src/skills)."""
+    pj = _project_skills_dir()
+    if pj and (pj / name).is_dir():
+        return pj / name
+    return SKILLS_DIR / name
+
+
+def _merged_registry() -> dict:
+    """Реестр для ЧТЕНИЯ (загрузчики/селектор): глобальный + проектный поверх."""
+    reg = dict(_load_registry())
+    pj = _project_skills_dir()
+    if pj and (pj / "registry.json").exists():
+        try:
+            reg.update(json.loads((pj / "registry.json").read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001
+            pass
+    return reg
+
+
+# ── L4b/c: создание навыков ПО СКОУПУ (project/global) + роутинг реестра ────────
+def _sea_initialized() -> bool:
+    """Проект инициализирован (`sea init` создал .sea/) → дефолт создания навыков = project."""
+    return (Path(os.getenv("AGENT_PROJECT_ROOT") or Path.cwd()) / ".sea").is_dir()
+
+
+def _project_skills_root() -> Path:
+    """Целевой каталог проектных навыков (может ещё не существовать — для СОЗДАНИЯ)."""
+    return Path(os.getenv("AGENT_PROJECT_ROOT") or Path.cwd()) / ".sea" / "skills"
+
+
+def _project_registry_path() -> Path:
+    return _project_skills_root() / "registry.json"
+
+
+def _load_reg_at(path: Path) -> dict:
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _save_reg_at(path: Path, reg: dict) -> None:
+    _atomic_write_json(path, reg)                 # лок + atomic (тот же _REG_LOCK)
+
+
+def _skill_scope(name: str) -> str:
+    """'project' если навык лежит в .sea/skills, иначе 'global'."""
+    pj = _project_skills_dir()
+    return "project" if (pj and (pj / name).is_dir()) else "global"
+
+
+def _registry_path_for(name: str) -> Path:
+    """Реестр, которому ПРИНАДЛЕЖИТ существующий навык (read/delete/mark/update пишут сюда)."""
+    return _project_registry_path() if _skill_scope(name) == "project" else REGISTRY_FILE
+
+
+def _default_scope() -> str:
+    """Дефолт скоупа создаваемого навыка: project в инициализированном проекте, иначе global."""
+    return "project" if _sea_initialized() else "global"
 
 
 def _validate_python(code: str) -> tuple[bool, str]:
@@ -113,17 +207,19 @@ def pop_last_created() -> str:
 
 def mark_temporary(name: str) -> None:
     """Помечает навык временным: создан под текущую задачу, в библиотеку ещё не принят."""
-    registry = _load_registry()
+    path = _registry_path_for(name)  # L4: реестр по скоупу навыка (project/global)
+    registry = _load_reg_at(path)
     if name in registry:
         registry[name]["temporary"] = True
-        _save_registry(registry)
+        _save_reg_at(path, registry)
 
 
 def clear_temporary(name: str) -> None:
     """Принимает навык в библиотеку насовсем (решение retention-судьи)."""
-    registry = _load_registry()
+    path = _registry_path_for(name)
+    registry = _load_reg_at(path)
     if name in registry and registry[name].pop("temporary", None):
-        _save_registry(registry)
+        _save_reg_at(path, registry)
 
 
 
@@ -136,7 +232,7 @@ def list_skills() -> str:
     Returns:
         str: A formatted list of all registered skills.
     """
-    registry = _load_registry()
+    registry = _merged_registry()  # L4: глобальные + проектные
     if not registry:
         return "No skills registered yet."
 
@@ -145,9 +241,10 @@ def list_skills() -> str:
         status = "ready" if meta.get("has_tools") else "description only"
         lock = " 🔒core" if _is_protected(name, registry) else ""
         temp = " 🕒temp" if meta.get("temporary") else ""
+        scope = " 📁project" if _skill_scope(name) == "project" else ""
         imp = " 🦞imported" if meta.get("imported") else ""
         lines.append(
-            f"• {name} [{status}]{lock}{temp}{imp} — {meta['description'][:100]}"
+            f"• {name} [{status}]{lock}{scope}{temp}{imp} — {meta['description'][:100]}"
         )
     return "Available skills:\n" + "\n".join(lines)
 
@@ -164,7 +261,7 @@ def read_skill(name: str) -> str:
     Returns:
         str: The skill's description and tool source code.
     """
-    skill_dir = SKILLS_DIR / name
+    skill_dir = _skill_base(name)  # L4: project-навык приоритетнее global
     parts = [f"=== Skill: {name} ==="]
 
     md_file = skill_dir / f"{name}.md"
@@ -191,6 +288,7 @@ def create_skill(
     description: str,
     tool_code: Optional[str] = None,
     system_prompt: Optional[str] = None,
+    scope: Optional[str] = None,
 ) -> str:
     """
     Create a new skill with description, system prompt, and optionally tool code.
@@ -203,18 +301,25 @@ def create_skill(
             Must be valid Python. Will be validated before saving.
             Can be omitted and added later via update_skill_tools.
         system_prompt: System prompt that will be INJECTED into the execution agent
-            when this skill is active. Should explain HOW to use the tools,
-            typical call patterns, and important constraints.
+            when this skill is active.
+        scope: 'project' — навык живёт в .sea/skills/ (только этот проект); 'global' —
+            в библиотеке пользователя (кросс-проект, src/skills). По умолчанию: project в
+            инициализированном проекте (есть .sea/), иначе global. ПРОЕКТНЫЙ — для штук,
+            нужных ЭТОМУ проекту; GLOBAL — для общеполезных способностей.
 
     Returns:
         str: Confirmation or error message.
     """
     _ensure_dirs()
-    registry = _load_registry()
+    # L4b: скоуп → каталог + реестр. Дефолт project в проекте, иначе global (аддитивно).
+    scope = scope if scope in ("project", "global") else _default_scope()
+    reg_path = _project_registry_path() if scope == "project" else REGISTRY_FILE
+    base_dir = _project_skills_root() if scope == "project" else SKILLS_DIR
+    registry = _load_reg_at(reg_path)
 
     if name in registry:
         return (
-            f"Skill '{name}' already exists. "
+            f"Skill '{name}' already exists (scope: {scope}). "
             f"Use 'read_skill' to inspect it, or 'update_skill_tools' to modify."
         )
 
@@ -226,7 +331,7 @@ def create_skill(
         if not safe:
             return f"Rejected. {sec_msg}"
 
-    skill_dir = SKILLS_DIR / name
+    skill_dir = base_dir / name
     skill_dir.mkdir(parents=True, exist_ok=True)
 
     (skill_dir / f"{name}.md").write_text(description, encoding="utf-8")
@@ -243,14 +348,15 @@ def create_skill(
         "description": description[:200],
         "has_tools": has_tools,
         "has_system_prompt": bool(system_prompt),
+        "scope": scope,                       # L4: ярус навыка
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
         "version": 1,
     }
-    _save_registry(registry)
+    _save_reg_at(reg_path, registry)
     _session_created.append(name)
 
-    result = f"Skill '{name}' created successfully."
+    result = f"Skill '{name}' created successfully (scope: {scope})."
     if has_tools:
         result += " Tools are ready to be loaded."
     else:
@@ -273,7 +379,8 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
     Returns:
         str: Confirmation or error message.
     """
-    registry = _load_registry()
+    _rpath = _registry_path_for(name)  # L4: реестр по скоупу навыка
+    registry = _load_reg_at(_rpath)
     if name not in registry:
         return f"Skill '{name}' does not exist. Create it first with 'create_skill'."
 
@@ -290,7 +397,7 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
     if not safe:
         return f"Rejected. {sec_msg}"
 
-    skill_file = SKILLS_DIR / name / f"{name}.py"
+    skill_file = _skill_base(name) / f"{name}.py"
 
     if append and skill_file.exists():
         existing = skill_file.read_text(encoding="utf-8")
@@ -305,7 +412,7 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
     registry[name]["has_tools"] = True
     registry[name]["updated_at"] = datetime.now().isoformat()
     registry[name]["version"] = registry[name].get("version", 0) + 1
-    _save_registry(registry)
+    _save_reg_at(_rpath, registry)
 
     return f"Tools for skill '{name}' updated (v{registry[name]['version']})."
 
@@ -313,8 +420,9 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
 def _delete_skill_impl(name: str, allow_protected: bool) -> str:
     import shutil
 
-    registry = _load_registry()
-    skill_dir = SKILLS_DIR / name
+    _rpath = _registry_path_for(name)  # L4: реестр по скоупу навыка
+    registry = _load_reg_at(_rpath)
+    skill_dir = _skill_base(name)
 
     if name not in registry and not skill_dir.exists():
         return f"Skill '{name}' not found."
@@ -329,7 +437,8 @@ def _delete_skill_impl(name: str, allow_protected: bool) -> str:
         shutil.rmtree(skill_dir)
 
     registry.pop(name, None)
-    _save_registry(registry)
+    _save_reg_at(_rpath, registry)
+    _MODULE_CACHE.pop(name, None)  # не держим в кэше удалённый навык
 
     return f"Skill '{name}' has been deleted."
 
@@ -355,6 +464,128 @@ def force_delete_skill(name: str) -> str:
     return _delete_skill_impl(name, allow_protected=True)
 
 
+# Кэш загруженных модулей навыков: name -> (mtime, module). Без него
+# get_all_loaded_skill_tools ре-exec'ил бы каждый навык на КАЖДОМ шаге графа —
+# впустую и опасно при import-side-effects. Инвалидация по mtime файла.
+_MODULE_CACHE: dict[str, tuple[float, object]] = {}
+
+
+def _trusted_skill(name: str) -> bool:
+    """Core/protected навыки писал автор продукта — им доверяем (могут законно использовать
+    subprocess/osascript). Сгенерированные/импортированные/orphan — НЕ доверяем: их module-level
+    код гейтим тем же AST-гейтом, что и путь записи, ПЕРЕД exec_module."""
+    if name in PROTECTED_SKILLS:
+        return True
+    return bool(_merged_registry().get(name, {}).get("protected"))
+
+
+def _load_skill_module(name: str, py_file: Path) -> tuple[object | None, str]:
+    """Безопасно загрузить модуль навыка для извлечения @tool-функций.
+
+    Закрывает дыру «exec до HITL»: HITL гейтит ВЫЗОВ тула, но module-level код untrusted-навыка
+    исполняется уже при импорте. Поэтому для недоверенных навыков ПЕРЕД exec_module прогоняем тот
+    же AST-гейт, что и на пути записи (паритет write/exec; orphan и imported код больше не
+    исполняется без проверки). Плюс кэш по mtime — не ре-exec'им на каждом шаге.
+
+    Возвращает (module | None, reason). AST-гейт обходим перефразировкой (как и на write-пути);
+    это паритет, а не песочница.
+    """
+    try:
+        mtime = py_file.stat().st_mtime
+    except OSError as e:  # noqa: BLE001
+        return None, f"stat failed: {e}"
+
+    cached = _MODULE_CACHE.get(name)
+    if cached and cached[0] == mtime:
+        return cached[1], "OK (cached)"
+
+    code = py_file.read_text(encoding="utf-8")
+    is_valid, err = _validate_python(code)
+    if not is_valid:
+        return None, f"invalid code: {err}"
+
+    # Гейт ПЕРЕД exec_module (закрывает «exec до HITL»), три уровня доверия:
+    #   • core/protected — автор продукта, доверяем (subprocess для osascript и т.п.);
+    #   • imported (OpenClaw-обёртка CLI) — своя модель (HITL + allowlist), но module-level
+    #     код всё равно исполнится при импорте → проверяем только уровень модуля;
+    #   • прочее (сгенерированное/orphan на диске) — полный AST-гейт (контракт «чистый stdlib»).
+    if not _trusted_skill(name):
+        meta = _merged_registry().get(name, {})
+        if meta.get("imported"):
+            from ..utils_validation import validate_module_level
+            ok, issues = validate_module_level(code)
+            if not ok:
+                return None, "Module-level gate: " + "; ".join(issues)
+        else:
+            safe, sec_msg = _security_gate(code)
+            if not safe:
+                return None, sec_msg
+
+    module_name = f"skills.{name}"
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    spec = importlib.util.spec_from_file_location(module_name, str(py_file))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:  # noqa: BLE001
+        sys.modules.pop(module_name, None)
+        return None, f"{type(e).__name__}: {e}"
+    _MODULE_CACHE[name] = (mtime, module)
+    return module, "OK"
+
+
+RUNTIME_SANDBOX_TIMEOUT = int(os.getenv("AGENT_SKILL_SANDBOX_TIMEOUT") or 30)
+
+
+def _should_sandbox(name: str, meta: dict) -> bool:
+    """Исполнять ли ВЫЗОВ навыка в рантайме через subprocess-песочницу (а не in-process).
+    Да — для сгенерированного/orphan кода: AST-гейт обходим (urllib/open разрешены), in-process
+    вызов имел бы права процесса агента (читать ~/.ssh/.env). Нет — для core/protected (доверен,
+    его писал автор; device_control нужен полный доступ) и imported (своя allowlist+HITL модель)."""
+    if _trusted_skill(name):
+        return False
+    if meta.get("imported"):
+        return False
+    return True
+
+
+def _sandbox_wrap(tool_obj, skill_name: str, py_file: Path):
+    """Обернуть @tool недоверенного навыка: его ВЫЗОВ идёт в ОТДЕЛЬНОМ подпроцессе
+    (run_tool_sandboxed), а не в процессе агента. Тело тула не исполняется in-process — только
+    метаданные (name/description/schema) берём из модуля (его module-level код прошёл AST-гейт).
+
+    ЧЕСТНЫЕ ГРАНИЦЫ по платформе (важно):
+      • ВСЕГДА: rlimits CPU/mem/FSIZE + wall-kill — против runaway/исчерпания ресурсов;
+      • запрет записи вне /tmp, изоляция ФС-ЧТЕНИЯ (~/.ssh/.env) и сети — ТОЛЬКО при syscall-
+        песочнице (Linux bwrap/firejail; macOS sandbox-exec под AGENT_SANDBOX_EXEC=1). Без них
+        (напр. голый macOS) подпроцесс МОЖЕТ читать файлы и ходить в сеть → эксфильтрация возможна.
+        Полный lockdown сети: AGENT_SKILL_SANDBOX_NO_NET=1.
+    То есть это изоляция ПРОЦЕССА (не in-process), но НЕ полный ФС-сэндбокс на платформе без bwrap/
+    sandbox-exec — сознательный потолок «своя машина владельца» (долг ревью #2)."""
+    from langchain_core.tools import StructuredTool
+    from ..utils import run_tool_sandboxed   # lazy: utils импортирует skill_creation (анти-цикл)
+
+    tname = getattr(tool_obj, "name", skill_name)
+    # AGENT_SKILL_SANDBOX_NO_NET=1 → полный lockdown (без сети): закрывает urllib/socket-эксфильтрацию
+    # недоверенным навыком. Default off — генерируемые навыки часто ходят в API (иначе режем способность).
+    no_net = os.getenv("AGENT_SKILL_SANDBOX_NO_NET") == "1"
+
+    async def _arun(**kwargs):
+        import asyncio
+        ok, result = await asyncio.to_thread(
+            run_tool_sandboxed, py_file, tname, kwargs, RUNTIME_SANDBOX_TIMEOUT, no_net)
+        return result if ok else f"[sandbox] навык '{tname}' не выполнен: {result}"
+
+    return StructuredTool(
+        name=tname,
+        description=getattr(tool_obj, "description", "") or tname,
+        args_schema=getattr(tool_obj, "args_schema", None),
+        coroutine=_arun,
+    )
+
+
 @tool("load_skill_tools")
 def load_skill_tools(name: str) -> str:
     """
@@ -367,45 +598,29 @@ def load_skill_tools(name: str) -> str:
     Returns:
         str: List of loaded tool names or error message.
     """
-    py_file = SKILLS_DIR / name / f"{name}.py"
+    py_file = _skill_base(name) / f"{name}.py"  # L4: project-навык приоритетнее
     if not py_file.exists():
         return f"Skill '{name}' has no tools file. Create tools first."
 
-    code = py_file.read_text(encoding="utf-8")
-    is_valid, err = _validate_python(code)
-    if not is_valid:
-        return f"Cannot load — invalid code: {err}"
+    module, reason = _load_skill_module(name, py_file)
+    if module is None:
+        return f"Cannot load '{name}': {reason}"
 
-    try:
-        module_name = f"skills.{name}"
+    loaded_tools = []
+    for attr_name in dir(module):
+        obj = getattr(module, attr_name)
+        if hasattr(obj, "name") and hasattr(obj, "invoke"):
+            loaded_tools.append(obj.name)
 
-        if module_name in sys.modules:
-            del sys.modules[module_name]
-
-        spec = importlib.util.spec_from_file_location(module_name, str(py_file))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-
-        loaded_tools = []
-        for attr_name in dir(module):
-            obj = getattr(module, attr_name)
-            if hasattr(obj, "name") and hasattr(obj, "invoke"):
-                loaded_tools.append(obj.name)
-
-        if loaded_tools:
-            return (
-                f"Skill '{name}' loaded. Available tools: {', '.join(loaded_tools)}. "
-                f"You can now use these tools."
-            )
-        else:
-            return (
-                f"Skill '{name}' loaded but no @tool functions found. "
-                f"Make sure functions are decorated with @tool."
-            )
-
-    except Exception as e:
-        return f"Failed to load skill '{name}': {type(e).__name__}: {e}"
+    if loaded_tools:
+        return (
+            f"Skill '{name}' loaded. Available tools: {', '.join(loaded_tools)}. "
+            f"You can now use these tools."
+        )
+    return (
+        f"Skill '{name}' loaded but no @tool functions found. "
+        f"Make sure functions are decorated with @tool."
+    )
 
 
 @tool("get_skills_for_prompt")
@@ -417,13 +632,13 @@ def get_skills_for_prompt() -> str:
     Returns:
         str: Combined markdown descriptions of all registered skills.
     """
-    registry = _load_registry()
+    registry = _merged_registry()  # L4: глобальные + проектные
     if not registry:
         return "No skills available."
 
     sections = []
     for name, meta in registry.items():
-        md_file = SKILLS_DIR / name / f"{name}.md"
+        md_file = _skill_base(name) / f"{name}.md"
         if md_file.exists():
             content = md_file.read_text(encoding="utf-8")
             status = "tools ready" if meta.get("has_tools") else "no tools yet"
@@ -444,7 +659,7 @@ def get_relevant_skills_for_prompt(query: str, top: int = TOOLSEARCH_TOP) -> str
     выбор инструментов при росте библиотеки. Reuse канонического ранкера (src.retrieval).
     Если навыков мало (< порога) или нет совпадений — фолбэк на полный список.
     """
-    registry = _load_registry()
+    registry = _merged_registry()  # L4: глобальные + проектные навыки
     if not registry or len(registry) < TOOLSEARCH_THRESHOLD:
         return get_skills_for_prompt.invoke({})  # это @tool, не функция
 
@@ -452,7 +667,7 @@ def get_relevant_skills_for_prompt(query: str, top: int = TOOLSEARCH_TOP) -> str
 
     names, docs, sections = [], [], []
     for name, meta in registry.items():
-        md_file = SKILLS_DIR / name / f"{name}.md"
+        md_file = _skill_base(name) / f"{name}.md"
         if not md_file.exists():
             continue
         content = md_file.read_text(encoding="utf-8")
@@ -477,13 +692,13 @@ def get_skill_runtime_prompts(names: list[str]) -> str:
     """
     parts = []
     for name in names:
-        prompt_file = SKILLS_DIR / name / "prompt.md"
+        prompt_file = _skill_base(name) / "prompt.md"  # L4: проектный приоритетнее
         if prompt_file.exists():
             parts.append(
                 f"[Навык: {name}]\n{prompt_file.read_text(encoding='utf-8')}"
             )
         else:
-            md_file = SKILLS_DIR / name / f"{name}.md"
+            md_file = _skill_base(name) / f"{name}.md"
             if md_file.exists():
                 parts.append(
                     f"[Навык: {name} (описание)]\n{md_file.read_text(encoding='utf-8')}"
@@ -585,7 +800,7 @@ def get_all_loaded_skill_tools(names: Optional[list[str]] = None) -> list:
     names=[...] → ТОЛЬКО указанные скиллы — так в execution попадают лишь
     релевантные инструменты, а не весь реестр (анти-bloat контекста).
     """
-    registry = _load_registry()
+    registry = _merged_registry()  # L4: глобальные + проектные навыки
     all_tools = []
     wanted = set(names) if names is not None else None
 
@@ -595,29 +810,23 @@ def get_all_loaded_skill_tools(names: Optional[list[str]] = None) -> list:
         if not meta.get("has_tools"):
             continue
 
-        py_file = SKILLS_DIR / name / f"{name}.py"
+        py_file = _skill_base(name) / f"{name}.py"
         if not py_file.exists():
             continue
 
-        try:
-            module_name = f"skills.{name}"
-            if module_name in sys.modules:
-                del sys.modules[module_name]
+        module, reason = _load_skill_module(name, py_file)  # гейт-перед-exec + кэш по mtime
+        if module is None:
+            print(f"[SkillManager] Skipped '{name}': {reason}")
+            continue
 
-            spec = importlib.util.spec_from_file_location(module_name, str(py_file))
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[module_name] = module
-            spec.loader.exec_module(module)
+        from ..hitl import needs_confirmation, wrap_with_confirmation
 
-            from ..hitl import needs_confirmation, wrap_with_confirmation
-
-            guard = needs_confirmation(name)
-            for attr_name in dir(module):
-                obj = getattr(module, attr_name)
-                if hasattr(obj, "name") and hasattr(obj, "invoke"):
-                    all_tools.append(wrap_with_confirmation(obj, name) if guard else obj)
-
-        except Exception as e:
-            print(f"[SkillManager] Failed to load '{name}': {e}")
+        guard = needs_confirmation(name)
+        sandbox = _should_sandbox(name, meta)   # недоверенный → вызов в подпроцесс-песочнице (#2)
+        for attr_name in dir(module):
+            obj = getattr(module, attr_name)
+            if hasattr(obj, "name") and hasattr(obj, "invoke"):
+                t = _sandbox_wrap(obj, name, py_file) if sandbox else obj
+                all_tools.append(wrap_with_confirmation(t, name) if guard else t)
 
     return all_tools

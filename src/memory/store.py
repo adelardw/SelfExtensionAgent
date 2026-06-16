@@ -21,6 +21,7 @@ import json
 import math
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -64,13 +65,29 @@ class MemoryStore:
         self._graph_decay = graph_decay
         self._graph_seed_min = graph_seed_min
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._init_schema()
-
+        # Соединение ПЕР-ПОТОК: фоновый reflect-поток пишет факты/рефлексии/рецепты параллельно
+        # с основным потоком (см. agent._post_reflect). Раньше один shared-conn на процесс →
+        # «database is locked» / переплетённые транзакции под нагрузкой (баг ревью 2b). Теперь у
+        # каждого потока своё соединение, а WAL+busy_timeout даёт конкурентное чтение и
+        # сериализацию писателей самим SQLite — без ручных локов и без правок call-site'ов.
+        self._db_path = db_path
+        self._local = threading.local()
         # TurboVec ANN-индекс по эпизодам — строится лениво при первом векторе.
         self._vindex: Optional[VectorIndex] = None
         self._vindex_ready = not (self.embedder.enabled and turbovec_available())
+        self._init_schema()  # на соединении основного потока (создаёт файл+схему до фоновых потоков)
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")     # конкурентные читатели + один писатель
+            conn.execute("PRAGMA busy_timeout=5000")    # ждать блокировку до 5с, а не падать
+            conn.execute("PRAGMA synchronous=NORMAL")   # безопасно при WAL, быстрее
+            self._local.conn = conn
+        return conn
 
     # ── schema ────────────────────────────────────────────────────────
 
@@ -841,13 +858,15 @@ class MemoryStore:
         text = "\n\n".join(blocks) if blocks else "Пока нет релевантной памяти."
         return text, top_score
 
-    def prune(self, max_episodes: int = 2000, max_facts: int = 300, max_reflections: int = 200) -> dict:
+    def prune(self, max_episodes: int = 2000, max_facts: int = 300, max_reflections: int = 200,
+              max_recipes: int = 200) -> dict:
         """
         Защита от переполнения памяти. Эпизоды — оставляем самые свежие; факты —
-        самые важные; выводы — самые свежие. Лишнее удаляем. Возвращает счётчики.
+        самые важные; выводы — самые свежие; рецепты — самые ценные. Повисшие рёбра графа
+        (источник/назначение удалён) чистим. Возвращает счётчики.
         Старые эпизоды «сжаты» в саммари/выводах, поэтому их удаление не теряет смысл.
         """
-        removed = {"episodes": 0, "facts": 0, "reflections": 0}
+        removed = {"episodes": 0, "facts": 0, "reflections": 0, "recipes": 0, "edges": 0}
         cur = self._conn.cursor()
 
         for user in [r["user_id"] for r in cur.execute("SELECT DISTINCT user_id FROM episodes").fetchall()]:
@@ -874,8 +893,36 @@ class MemoryStore:
             )
             removed["reflections"] += cur.rowcount if cur.rowcount > 0 else 0
 
+        # рецепты: оставляем самые ценные на юзера (раньше росли без границ — баг ревью 2e)
+        for user in [r["user_id"] for r in cur.execute("SELECT DISTINCT user_id FROM recipes").fetchall()]:
+            cur.execute(
+                "DELETE FROM recipes WHERE user_id=? AND id NOT IN "
+                "(SELECT id FROM recipes WHERE user_id=? ORDER BY wins DESC, uses DESC, ts DESC LIMIT ?)",
+                (user, user, max_recipes),
+            )
+            removed["recipes"] += cur.rowcount if cur.rowcount > 0 else 0
+
+        # повисшие рёбра графа: узел-источник/назначение удалён выше → ребро мусорное
+        # (раньше memory_edges не чистились → neighbors() со временем замедлялся, баг ревью 2e).
+        # Имена таблиц — литералы из словаря (не пользовательский ввод), инъекции нет.
+        _node_tables = {"episode": "episodes", "fact": "facts", "reflection": "reflections"}
+        before_edges = cur.execute("SELECT COUNT(*) AS c FROM memory_edges").fetchone()["c"]
+        for ntype, table in _node_tables.items():
+            cur.execute(
+                f"DELETE FROM memory_edges WHERE src_type=? AND src_id NOT IN (SELECT id FROM {table})",
+                (ntype,),
+            )
+            cur.execute(
+                f"DELETE FROM memory_edges WHERE dst_type=? AND dst_id NOT IN (SELECT id FROM {table})",
+                (ntype,),
+            )
+        removed["edges"] = before_edges - cur.execute("SELECT COUNT(*) AS c FROM memory_edges").fetchone()["c"]
+
         self._conn.commit()
         return removed
 
     def close(self) -> None:
-        self._conn.close()
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            conn.close()
+            self._local.conn = None

@@ -97,6 +97,7 @@ WORK_LABEL = {
     "manual": "✋ ручной (подтверждать действия)",
     "auto-accept": "🟡 auto-accept (действия подтверждаются автоматически)",
     "auto": "⚡ auto (агент автономен: сам мышление, развилки, действия)",
+    "plan": "📋 plan (только планирует — side-effect действия не исполняются)",
 }
 
 # Слэш-команды с описаниями: автодополнение при вводе «/» (как в qwen-code/claude-code CLI).
@@ -104,7 +105,10 @@ COMMANDS = {
     "/config":   "настройки: модель · режим работы · мышление · гранты",
     "/chats":    "история чатов: /chats — список · /chats N — открыть · /fav · /compress · /rename",
     "/fav":      "избранное: /fav — отметить текущий чат · /fav N — чат из /chats",
-    "/compress": "сжать чат в саммари-индекс (полная история сохраняется): /compress [N]",
+    "/compact":  "сжать контекст сессии → COMPACT.md (репрезентативно, кумулятивно; последний скоуп сохраняется). /compress — алиас",
+    "/compress": "алиас /compact (сжатие контекста)",
+    "/sync":     "перестроить SEA.md из накопленного COMPACT.md (сверка; develop.md — отметка)",
+    "/init":     "инициализировать воркспейс проекта: .sea/ + стартовые SEA.md/MEMORY.md/MCP.md",
     "/auto":     "режим работы: /auto — полный авто · /auto accept · /auto off",
     "/model":    "модель: /model api · /model ollama [имя]",
     "/backend":  "браузер-движок: /backend puppeteer|hybrid|extension (puppeteer ждёт SPA)",
@@ -161,6 +165,11 @@ async def make_checkpointer():
         yield MemorySaver()
 
 
+# Океан-спиннер (бегущая волна) для индикации размышления — регистрируем один раз на процесс.
+from src import cli_art as _cli_art
+_OCEAN_SPINNER = _cli_art.register_ocean_spinner()
+
+
 def banner() -> None:
     from src import hitl
     from src.cli_config import get_cli
@@ -177,12 +186,30 @@ def banner() -> None:
         f"Физический веб: [dim]просто скажи словами — «включи музыку <A>», «открой моё избранное», "
         f"«поставь паузу», «найди фильм <X>», «закажи <еду>» — агент сам выберет сервис и сделает[/]\n"
         f"Команды: [dim]/config /model /auto /chats /new /voice /help /facts /goal /diagnose /traces /improve /usage  ·  exit[/]\n"
-        f"Чаты: [dim]/chats — история и переход · /fav — ★избранное · /compress — сжать в саммари[/]\n"
+        f"Чаты: [dim]/chats — история · /fav — ★избранное · /compact (=/compress) — сжать контекст → COMPACT.md · /sync — перестроить SEA.md[/]\n"
         f"Подтверждения: [dim]отвечай словами — «да» · «да, всегда» (больше не спрашивать) · «да, но …» · «нет, …» · или скажи, как сделать иначе[/]\n"
         f"Файлы: [dim]/attach <файл> — в сессию (tmp, мультимодал)  ·  /kb add|ls|mkdir|find — личная база знаний (граф)[/]\n"
         f"Автозапуск: [dim]uv run main.py \"задача\" [--auto] — one-shot без REPL (для скриптов/cron)[/]"
     )
-    console.print(Panel(body, title="🤖 Self-Extension Agent", border_style="bright_blue", expand=False))
+    from rich.align import Align
+    from rich.console import Group
+    from rich.table import Table
+    from src import cli_art
+    cli_art.shimmer_logo(console, transient=True)  # перелив проигрывается и ГАСНЕТ
+    # ВЫСОТА ПАНЕЛИ = высоте [лого + Ика] (явное требование юзера). expand=True → на всю ширину
+    # терминала + рефлоу. Текст внутри ВЫРОВНЕН ПО ЦЕНТРУ (Align middle), чтобы пустота не висела
+    # снизу, а сидела симметрично сверху/снизу.
+    _H = cli_art.banner_left_height()
+    panel = Panel(Align(body, vertical="middle"), title="🌊 Self-Extension Agent",
+                  border_style="bright_blue", expand=True, height=_H)
+    # Слева — лого НАД Икой (единый блок), СПРАВА — панель той же высоты. Table.grid (expand=True):
+    # левая колонка натуральной ширины (Ика), правая (ratio=1) забирает остаток ширины терминала.
+    left = Group(cli_art.logo_renderable(), "", cli_art.squid_renderable())
+    grid = Table.grid(padding=(0, 4), expand=True)
+    grid.add_column()
+    grid.add_column(ratio=1)
+    grid.add_row(left, panel)
+    console.print(grid)
 
 
 def render_result(result: dict) -> None:
@@ -513,6 +540,70 @@ async def _compress_thread(thread_id: str) -> str | None:
     return summary
 
 
+async def _do_compact(thread_id: str, chat_history: list, auto: bool = False) -> tuple[int, list]:
+    """/compact: сжать сессию в COMPACT.md (репрезентативно, кумулятивно), оставив последний
+    скоуп. Возвращает (новый счётчик контекста, новый chat_history)."""
+    from src import chat_store, compact as _cp
+    from src.agent import llm
+    msgs = chat_store.get_messages(thread_id)
+    if len(msgs) < 2 and len(chat_history) < 2:
+        console.print("[dim]Контекст ещё мал для сжатия.[/]")
+        return _cp.history_tokens(chat_history), chat_history
+    convo = ("\n".join(f"{m['role']}: {m['content'][:800]}" for m in msgs)
+             or "\n".join(f"{m['role']}: {str(m.get('content',''))[:800]}" for m in chat_history))
+    label = "Авто-сжатие контекста (предел 1M)…" if auto else "Сжимаю контекст в COMPACT.md…"
+    try:
+        with console.status(f"[cyan]{label}", spinner="dots"):
+            resp = await llm.ainvoke(_cp.build_compact_messages(convo, _cp.read_compact(), _cp.gather_meta()))
+            summary = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+            n = _cp.append_compact(summary)
+            chat_store.set_summary(thread_id, summary)  # объединено с /compress: саммари-индекс треда
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]Сжатие не удалось: {e}[/]")
+        return _cp.history_tokens(chat_history), chat_history
+    last_scope = chat_history[-_cp._KEEP_LAST_SCOPE:]
+    new_hist = [{"role": "assistant",
+                 "content": f"[COMPACT.md · сжатие #{n} — сжатый контекст сессии; полное в COMPACT.md]"}] + last_scope
+    pfx = "🗜 Авто-сжатие" if auto else "🗜 Контекст сжат"
+    console.print(f"[green]{pfx} → COMPACT.md (#{n})[/] [dim](последний скоуп сохранён · /sync — "
+                  f"перестроить SEA.md из COMPACT.md)[/]\n{summary[:400]}")
+    return _cp.history_tokens(new_hist), new_hist
+
+
+async def _do_sync() -> None:
+    """/sync: перестроить SEA.md из накопленного COMPACT.md (+ свежий скан репо), сверка.
+    develop.md НЕ перезаписываем (курируемый) — дописываем отметку сверки."""
+    import time
+    from src import compact as _cp
+    from src.agent import llm
+    from src.sea_workspace import scan_repo
+    compact_text = _cp.read_compact()
+    if not compact_text.strip():
+        console.print("[dim]COMPACT.md пуст — сначала /compact (сжать контекст), затем /sync.[/]")
+        return
+    sea = Path("SEA.md")
+    current_sea = sea.read_text(encoding="utf-8") if sea.exists() else ""
+    try:
+        with console.status("[cyan]Сверяю и перестраиваю SEA.md из COMPACT.md…", spinner="dots"):
+            resp = await llm.ainvoke(_cp.build_sea_rebuild_messages(compact_text, current_sea, scan_repo()))
+            new_sea = (resp.content if hasattr(resp, "content") else str(resp)).strip()
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]/sync не удался: {e}[/]")
+        return
+    if len(new_sea) < 40:
+        console.print("[dim]/sync: модель вернула пусто — SEA.md не тронут.[/]")
+        return
+    sea.write_text(new_sea + "\n", encoding="utf-8")
+    dev = Path("develop.md")
+    if dev.exists():
+        with dev.open("a", encoding="utf-8") as f:
+            f.write(f"\n## Сверка из COMPACT.md ({time.strftime('%Y-%m-%d %H:%M')})\n\n"
+                    "SEA.md перестроен из накопленного COMPACT.md (/sync). Полный сжатый "
+                    "контекст — в COMPACT.md.\n")
+    console.print("[green]🔄 /sync: SEA.md перестроен из COMPACT.md[/] "
+                  "[dim](develop.md — отметка сверки дописана; COMPACT.md не тронут)[/]")
+
+
 async def cmd_attach(args: list[str], session_id: str) -> None:
     """Приложить файл(ы) к ТЕКУЩЕЙ сессии (tmp, мультимодал — pdf/image/audio/video)."""
     paths = [Path(a).expanduser() for a in args]
@@ -615,7 +706,8 @@ async def cmd_config() -> None:
             from src.semantics import parse_assent
             if parse_assent(raw)[0] is True:
                 set_cli("allow", [])
-                hitl._grants.clear()
+                hitl.clear_grants()
+                hitl._config_grants.clear()
                 console.print("   гранты очищены")
         elif pick == "5":
             await cmd_provider_settings()
@@ -718,6 +810,7 @@ async def main():
         thread_id = str(uuid.uuid4())
         user_id = "local"
         chat_history: list[dict] = []
+        _ctx_tokens = 0  # /compact: кумулятив контекста сессии (текст накоплен в окне) → статус-бар
         chat_list: list[dict] = []  # последний показанный /chats — для выбора по номеру
         banner()
         if chat_store.list_threads(user_id, limit=1):
@@ -758,13 +851,25 @@ async def main():
         # Без complete_while_typing и bottom_toolbar: они оставляли терминал в raw-режиме
         # (Enter эхо-ился как ^M/«M») и давали подвисания. Автодополнение команд — по Tab,
         # плюс серый плейсхолдер-подсказка. Надёжно.
+        def _mode_rprompt():
+            # Статус режима у правого края строки ввода. ЗАКРЫТУЮ рамку вокруг ЖИВОГО ввода в
+            # line-mode сделать нельзя (низ рисуется только после Enter; bottom_toolbar ломал
+            # raw-режим) → для настоящего бокса нужен full-screen TUI (Application/Textual, TODO).
+            from src import hitl as _h
+            m = _h.work_mode()
+            col = {"auto": "ansiyellow", "auto-accept": "ansigreen",
+                   "manual": "ansiblue", "plan": "ansimagenta"}.get(m, "ansigray")
+            return HTML(f'<{col}>▶▶ {m}</{col}>')
+
         session: PromptSession = PromptSession(
             history=FileHistory("data/.repl_history"),
             completer=SlashCompleter(),
             complete_in_thread=True,
+            rprompt=_mode_rprompt,
             placeholder=HTML('<style fg="#666666">задача · «/»+Tab — команды · exit — выход</style>'),
         )
-        prompt_html = HTML("\n<b><ansibrightblue>›</ansibrightblue></b> ")
+        prompt_html = HTML("\n<b><ansibrightcyan>❯</ansibrightcyan></b> ")
+
         tracker = TokenTracker()  # учёт токенов за сессию (через callback)
 
         while True:
@@ -820,21 +925,22 @@ async def main():
                 new = chat_store.toggle_favorite(tid)
                 console.print(f"[yellow]★ избранное: {'включено' if new else 'выключено'}[/]")
                 continue
-            if low == "/compress" or low.startswith("/compress "):
-                parts = query.split()
-                tid = thread_id
-                if len(parts) > 1 and parts[1].isdigit():
-                    idx = int(parts[1]) - 1
-                    if 0 <= idx < len(chat_list):
-                        tid = chat_list[idx]["thread_id"]
-                with console.status("[cyan]Сжимаю чат в саммари…", spinner="dots"):
-                    s = await _compress_thread(tid)
-                if s:
-                    console.print(f"[green]🗜 Чат сжат[/] [dim](полная история сохранена, саммари — индекс):[/]\n{s[:500]}")
-                    if tid == thread_id:  # текущий чат: контекст ужимаем до саммари
-                        chat_history = [{"role": "assistant", "content": f"[сжатая память]: {s}"}]
+            # /compact (он же /compress — ОДНА команда сжатия контекста): COMPACT.md + thread-summary
+            # + ужать несомый контекст, сохранив последний скоуп.
+            if low in ("/compact", "/compress") or low.startswith("/compact ") or low.startswith("/compress "):
+                _ctx_tokens, chat_history = await _do_compact(thread_id, chat_history)
+                continue
+            if low == "/sync":
+                await _do_sync()
+                continue
+            if low in ("/init", "init"):
+                # Bootstrap воркспейса прямо из REPL (паритет с `sea init` из шелла; как /init у claude).
+                from src.sea_workspace import init as _sea_init
+                created = _sea_init()
+                if created:
+                    console.print("[green]✓ Воркспейс инициализирован:[/]\n  " + "\n  ".join(created))
                 else:
-                    console.print("[dim]Слишком короткий чат для сжатия (нужно несколько обменов).[/]")
+                    console.print("[dim]Воркспейс уже инициализирован (ничего не перезаписано).[/]")
                 continue
             if low.startswith("/rename "):
                 chat_store.rename(thread_id, query.split(" ", 1)[1])
@@ -845,10 +951,11 @@ async def main():
                 from src import hitl
                 from src.cli_config import set_cli
                 arg = (query.split()[1:] or ["auto"])[0].lower()
-                m = {"off": "manual", "0": "manual", "выкл": "manual",
-                     "accept": "auto-accept", "on": "auto", "auto": "auto"}.get(arg, "auto")
+                m = {"off": "manual", "0": "manual", "выкл": "manual", "ask": "manual",
+                     "accept": "auto-accept", "edit": "auto-accept", "edit-auto": "auto-accept",
+                     "on": "auto", "auto": "auto", "plan": "plan"}.get(arg, "auto")
                 hitl.set_work_mode(m); set_cli("work_mode", m)
-                console.print(f"{WORK_LABEL[m]} [dim](сохранено · /auto — полный auto, /auto accept — только подтверждения, /auto off — ручной)[/]")
+                console.print(f"{WORK_LABEL[m]} [dim](сохранено · /auto plan — планирование · accept — авто-действия · off — ручной)[/]")
                 continue
             if low.startswith("/attach"):
                 await cmd_attach(query.split()[1:], thread_id); continue
@@ -894,7 +1001,7 @@ async def main():
             pre_in, pre_out, pre_calls = tracker.snapshot()
             try:
                 global _live_status
-                with console.status("[cyan]Думаю…", spinner="dots") as status:
+                with console.status("[cyan]Thinking…", spinner=_OCEAN_SPINNER) as status:
                     _live_status = status  # чтобы HITL/уточнения могли поставить спиннер на паузу
                     full_query = await asyncio.to_thread(_augment_attachments, query)
 
@@ -934,6 +1041,12 @@ async def main():
                 add_alltime(di, do, tracker.calls - pre_calls)
                 console.print(f"[dim]🧮 токены: {_k(di)} in + {_k(do)} out = {_k(di+do)} "
                               f"(~${cost_of(di, do):.4f}) · сессия {_k(tracker.total)} · /usage[/]")
+                # /compact: статус-бар занятости контекста (кумулятив сессии) + авто-сжатие на 1M.
+                from src import compact as _cp
+                _ctx_tokens += _cp.estimate_tokens(query) + _cp.estimate_tokens(answer)
+                console.print(_cp.context_status(_ctx_tokens))
+                if _cp.should_auto_compact(_ctx_tokens):
+                    _ctx_tokens, chat_history = await _do_compact(thread_id, chat_history, auto=True)
             except Exception as e:  # noqa: BLE001
                 console.print(f"[red]пост-обработка: {type(e).__name__}: {e}[/]")
 

@@ -22,7 +22,9 @@ class _Code(BaseModel):
 
 def make_compute_tool() -> StructuredTool:
     def _run(code: str) -> str:
-        ok, out = run_python_sandboxed(code, timeout=12)
+        # no_net=True по контракту тула («без сети/ФС») + B2: python_exec всегда доступен, без HITL,
+        # код от LLM/инъекции → самый широкий канал эксфильтрации. Сеть режем (где есть syscall-sandbox).
+        ok, out = run_python_sandboxed(code, timeout=12, no_net=True)
         return out if ok else f"[ошибка исполнения] {out}"
 
     return StructuredTool.from_function(

@@ -1,0 +1,10 @@
+# Project Memory Index
+
+Курируемая память проекта (индекс). Агент подмешивает релевантные заметки на recall.
+Типизированные заметки агент пишет в data/project_memory/ (type: user|feedback|project|reference)
+и добавляет сюда строку-указатель. Можно вести и вручную.
+
+- [Профиль пользователя](data/project_memory/профиль.md) — кто юзер, его предпочтения
+- [North-star](data/project_memory/north-star.md) — цель проекта
+
+> Чтобы активировать: переименуй в `MEMORY.md`.

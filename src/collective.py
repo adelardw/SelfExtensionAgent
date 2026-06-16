@@ -39,6 +39,19 @@ def profile_text(store: MemoryStore, user_id: str) -> str:
         return ""
 
 
+def _redact_struct(obj):
+    """Рекурсивно редактирует PII в строковых листьях JSON-структуры (план = list[dict]).
+    Числовые литералы не трогаем — сохраняем валидность структуры (а не сериализованной строки)."""
+    from .improve.safety import redact_pii
+    if isinstance(obj, str):
+        return redact_pii(obj)[0]
+    if isinstance(obj, list):
+        return [_redact_struct(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _redact_struct(v) for k, v in obj.items()}
+    return obj
+
+
 def maybe_promote(store: MemoryStore, user_id: str, recipe_id: int) -> bool:
     """Проверенный личный рецепт → общий пул (с отпечатком профиля источника)."""
     r = store.get_recipe(recipe_id)
@@ -51,13 +64,17 @@ def maybe_promote(store: MemoryStore, user_id: str, recipe_id: int) -> bool:
         return False  # запрет на обучение по взлому — и коллективно тоже
     if store.find_recipe(GLOBAL_UID, r["query"], min_sim=0.45):
         return False  # похожий best-practice уже есть — не дублируем (кластер пула шире)
-    # Анти-PII (Thread 2c): текст запроса уходит к ДРУГИМ юзерам как рекомендация → редактируем
-    # перс-данные (email/телефон/карта). Похожесть-матчинг живёт на оставшихся токенах.
+    # Анти-PII (Thread 2c, SEC-4): к ДРУГИМ юзерам пересекают границу не только query, но и PLAN
+    # (goal/done_check шагов эхо-несут специфику задачи) и PROFILE (значения роль-фактов источника).
+    # Редактируем перс-данные (email/телефон/карта) во ВСЁМ, что шарится. Похожесть-матчинг и
+    # форма плана живут на оставшихся токенах (структура JSON сохраняется — редакция точечная).
     from .improve.safety import redact_pii
     safe_query, _n = redact_pii(r["query"])
+    safe_plan = _redact_struct(json.loads(r["plan"] or "[]"))   # редакция строк-листьев плана
+    safe_profile, _nf = redact_pii(profile_text(store, user_id))
     store.add_recipe(GLOBAL_UID, safe_query, json.loads(r["skills"]),
-                     json.loads(r["plan"]), r["mode"] or "deliberate",
-                     profile=profile_text(store, user_id))
+                     safe_plan, r["mode"] or "deliberate",
+                     profile=safe_profile)
     return True
 
 

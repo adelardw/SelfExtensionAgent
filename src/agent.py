@@ -70,6 +70,7 @@ from . import collective
 from . import habits
 from . import interaction
 from . import runbudget
+from . import degradation
 from .hitl import REFUSAL_MARK
 from .memory import (
     MemoryStore, build_embedder, detect_implicit_feedback,
@@ -82,6 +83,8 @@ from .external import get_external_context, format_external_context
 from .mcp_client import suggest_server, get_mcp_tools, discover_mcp, approve_server, try_connect_discovered
 from .subagents import get_subagent_tools
 from .memory_tools import make_memory_tools, clear_scratch
+from .memory import project_memory
+from . import context_files
 from .research import make_deep_research_tool, agentic_research
 from .compute import make_compute_tool
 from .media import make_pdf_vision_tool
@@ -167,7 +170,43 @@ if UNLEASH:
           f"tokens={MAX_RUN_TOKENS} secs={MAX_RUN_SECONDS} iter={STEP_ITER_LIMIT} "
           f"auto_trust_MCP=ON (песочница/dry-run сохранены)")
 
+# Бюджет прогона ПО ТИПУ ЗАДАЧИ. Простой research должен быть тугим (over-research на дешёвой
+# модели = регресс GAIA), но КОД/ДЕЙСТВИЯ (правки файлов, device/browser) реально требуют больше
+# шагов/токенов (read→edit→verify). Поэтому базовый бюджет ×mult ТОЛЬКО когда выбран явно
+# агентный навык. research НЕ выбирает эти навыки (тем более в eval с AGENT_NO_BROWSER=1) →
+# его бюджет НЕИЗМЕНЕН → GAIA не регрессирует by construction.
+AGENTIC_BUDGET_MULT: float = float(os.getenv("AGENT_AGENTIC_BUDGET_MULT")
+                                   or config.agent.get("agentic_budget_mult", 2.0))
+_AGENTIC_SKILL_HINTS = ("code", "device_control", "browser_control", "app_control",
+                        "phone_control", "ax_control")
+
+
+def _run_limits(state) -> tuple[int, float]:
+    """(token_limit, sec_limit) прогона: ×AGENTIC_BUDGET_MULT, если выбран агентный/код-навык."""
+    sel = state.get("selected_skills", []) or []
+    agentic = any(any(h in s for h in _AGENTIC_SKILL_HINTS) for s in sel)
+    mult = AGENTIC_BUDGET_MULT if agentic else 1.0
+    return int(MAX_RUN_TOKENS * mult), MAX_RUN_SECONDS * mult
+
+
+# Множитель ЖЁСТКОГО обрыва ВНУТРИ шага (arm) над мягким (между-нодовым) потолком. Смысл:
+# мягкий потолок (exhausted на 1.0×) ловит ПОСТЕПЕННЫЙ рост между нодами — там прогон режется как
+# раньше. Жёсткий обрыв нужен ТОЛЬКО против интра-степ ВЗРЫВА (один шаг → ~1М токенов, ради чего
+# модуль и написан): чтобы дойти до Nx ВНУТРИ одного шага, шаг должен сам добавить ~(N-1) бюджетов —
+# это подпись взрыва, легитимный шаг столько не берёт. Запас (×2) делает обрыв провабельно
+# НЕЙТРАЛЬНЫМ для граничных прогонов (их по-прежнему режет мягкий потолок, шаг успевает доработать).
+STEP_HARD_CUT_MULT: float = float(os.getenv("AGENT_STEP_HARD_CUT_MULT")
+                                  or config.agent.get("step_hard_cut_mult", 2.0))
+
+
+def _step_hard_limits(state) -> tuple[int, float]:
+    """Лимиты ВООРУЖЕНИЯ шага = бюджет прогона × STEP_HARD_CUT_MULT (ловим взрыв, не граничные)."""
+    tl, sl = _run_limits(state)
+    return int(tl * STEP_HARD_CUT_MULT), sl * STEP_HARD_CUT_MULT
+
+
 RECALL_K: int = config.get("memory", {}).get("recall_k", 5)
+PROJECT_MEMORY_K: int = config.get("memory", {}).get("project_recall_k", 5)  # #2 проектный ярус
 REFLECT_EVERY: int = config.get("memory", {}).get("reflect_every", 5)
 RECALL_BUDGET: int = config.get("memory", {}).get("recall_budget_chars", 1800)
 # Гейт ассоциативной памяти («recall не всегда»): эпизоды/выводы инжектятся, только если
@@ -177,6 +216,7 @@ MEM_CAPS = dict(
     max_episodes=config.get("memory", {}).get("max_episodes", 2000),
     max_facts=config.get("memory", {}).get("max_facts", 300),
     max_reflections=config.get("memory", {}).get("max_reflections", 200),
+    max_recipes=config.get("memory", {}).get("max_recipes", 200),
 )
 
 memory_store = MemoryStore(
@@ -270,7 +310,7 @@ async def recall_node(state: GeneralGraphState) -> dict:
     new_run()  # старт нового трейс-прохода
     clarify.reset_ledger()  # чистый реестр уточнений на этот прогон
     interaction.reset_ledger()  # чистый журнал взаимодействий (HITL-решения и пр.)
-    runbudget.reset()       # обнуляем токен-бюджет прогона
+    runbudget.reset()       # обнуляем токен-бюджет прогона (изолирован по run_id)
     user_id = state.get("user_id") or "default"
     clear_scratch(user_id)  # временный (runtime) ярус памяти живёт только в рамках прогона
     query = state["query"]
@@ -299,6 +339,18 @@ async def recall_node(state: GeneralGraphState) -> dict:
     if profile:
         memory_context = f"{profile}\n\n{memory_context}"
 
+    # Root-convention файлы из корня проекта (как CLAUDE.md): SEA.md/SKILL.md — инструкции,
+    # MEMORY.md — индекс проектной памяти. АДДИТИВНО: нет файлов → пусто → контекст не меняется.
+    try:
+        _instr = context_files.instructions()           # SEA.md (+ SKILL.md)
+        _pm = project_memory.block(query, k=PROJECT_MEMORY_K)  # MEMORY.md индекс + релевантные заметки
+        _proj = "\n\n".join(p for p in (_instr, _pm) if p)
+        if _proj:
+            memory_context = f"{_proj}\n\n{memory_context}"
+    except Exception as e:  # noqa: BLE001
+        if os.getenv("AGENT_DEBUG") == "1":
+            print(f"[ProjectContext] skip: {e}")
+
     # AutoRAG: авто-подмешивание релевантных кусков из ЛИЧНОЙ БЗ юзера + приложенных в
     # ЭТОЙ сессии файлов (если есть). Агент отвечает из документов юзера БЕЗ явного вызова
     # тула; тулы search_knowledge_base/search_attached_files остаются для глубокого поиска.
@@ -313,14 +365,14 @@ async def recall_node(state: GeneralGraphState) -> dict:
     if session_has_files(sess):
         s = search_session_raw(sess, query, k=3)
         if s:
-            s, _ = sanitize_tool_output(s, source="приложенные файлы сессии")
+            s, _ = await asyncio.to_thread(sanitize_tool_output, s, "приложенные файлы сессии")
             kb_bits.append(f"[Файлы, приложенные в этой сессии. {_own}]\n" + s)
     if kb_has_docs(user_id):
         # Авто-впрыск идёт на КАЖДЫЙ запрос → только дешёвый BM25 (use_graph=False).
         # Глубокий LightRAG-граф — за тулом search_knowledge_base: агент сам решает, когда копать.
         s = await search_kb_raw(user_id, query, k=3, use_graph=False)
         if s:
-            s, _ = sanitize_tool_output(s, source="личная база знаний")
+            s, _ = await asyncio.to_thread(sanitize_tool_output, s, "личная база знаний")
             kb_bits.append(f"[Из личной базы знаний пользователя. {_own}]\n" + s)
     if kb_bits:
         memory_context = "\n\n".join(kb_bits) + "\n\n" + memory_context
@@ -423,6 +475,7 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
                                         query=state["query"]),  # similarity-retrieved (kNN маршрутизации)
         }, state["query"])
     except Exception as e:  # noqa: BLE001
+        degradation.note("reflexion_failed", e)  # тихая деградация → виден общий rate в /diagnose
         print(f"[Reflexion] failed, fallback deliberate: {e}")
         return {"mode": "deliberate", "mode_confidence": 0.0,
                 "mode_rationale": "reflexion не распарсился → безопасный фолбэк deliberate"}
@@ -537,7 +590,9 @@ _PHYSICAL_SKILLS = frozenset({
 # Анти-галлюцинация БЕЗ регэкспов (общий модуль): paywall — embedding-классификатор (любой
 # язык), degenerate — структурный счётчик уникальных слов. Ложный отказ «нет доступа» и
 # мета-заглушка теперь флагает финальный LLM-валидатор (validation_node), не список слов.
-from .semantic_signals import is_degenerate as _is_degenerate, is_paywall as _is_paywall
+from .semantic_signals import (is_degenerate as _is_degenerate, is_paywall as _is_paywall,
+                               is_error_page as _is_error_page, is_media_playing as _is_media_playing)
+from .browser_session import MEDIA_PLAYING as _MEDIA_PLAYING
 
 
 def _is_play_intent(query: str, qvec: list | None = None) -> bool:
@@ -749,24 +804,27 @@ async def act_node(state: GeneralGraphState) -> dict:
     if not called or "ESCALATE" in (output or "").upper()[:200]:
         return {"mode": "deliberate"}
 
-    # ЗАЗЕМЛЕНИЕ ВОСПРОИЗВЕДЕНИЯ: на просьбу «включи/поставь/запусти трек/видео/музыку»
-    # успех = РЕАЛЬНЫЙ звук, подтверждённый результатом тула («ЗВУК ИГРАЕТ»/«играет N»),
-    # а не слова модели и не общая заглушка. Иначе — честный статус + последний снапшот.
+    # ЗАЗЕМЛЕНИЕ ВОСПРОИЗВЕДЕНИЯ: на просьбу «включи/запусти трек/видео» успех = РЕАЛЬНЫЙ звук,
+    # подтверждённый структурным флагом браузера (или эмбеддинг-фолбэком), а не слова модели и не
+    # общая заглушка. Иначе — честный статус + последний снапшот.
     play_intent = _is_play_intent(query, _qe)
     tool_msgs = [m for m in msgs if m.__class__.__name__ == "ToolMessage"]
     tool_texts = " ".join(m.content for m in tool_msgs if isinstance(getattr(m, "content", ""), str))
-    # СТРАНИЦА-ОШИБКА: на 404/«не найдена» нельзя заявлять воспроизведение, даже если
-    # isPlaying() обмануло (остаточный media-элемент/pause-кнопка) — это ложный успех
-    # (живой баг: «играет фоном: 404 - Страница не найдена»). Заземление вердикта.
-    _is_error = lambda t: bool(re.search(r"\b404\b|страница не найдена|page not found|"
-                                         r"ничего не нашлось|не найден[ао]", t or "", re.I))
-    _is_playing = lambda t: (("ЗВУК ИГРАЕТ" in t) or bool(re.search(r"играет\s+[1-9]", t))) and not _is_error(t)
+    # ЗАЗЕМЛЕНИЕ ВЕРДИКТА воспроизведения БЕЗ keyword-костылей (feedback-no-keyword-crutches):
+    #   • playing = СТРУКТУРНЫЙ сентинел из in-repo browser_session (ground-truth !m.paused) ИЛИ
+    #     эмбеддинг-фолбэк для extension-прозы (is_media_playing, контраст «играет» vs «пауза»);
+    #   • error  = эмбеддинг is_error_page (404/«не найдена» — внешний контент, любой язык). На
+    #     странице-ошибке нельзя заявлять плей, даже если media-элемент остаточно «играет»
+    #     (живой баг: «играет фоном: 404»).
+    def _is_playing(t: str) -> bool:
+        t = t or ""
+        return (_MEDIA_PLAYING in t or _is_media_playing(t)) and not _is_error_page(t)
     confirmed = _is_playing(tool_texts)
-    # ПОДТВЕРЖДЁННОЕ воспроизведение (LLM уже запустил, снапшот = «ЗВУК ИГРАЕТ») → чистый
-    # детерминированный ответ. Без утечки снапшота в финал и без лишнего вызова финализации.
+    # ПОДТВЕРЖДЁННОЕ воспроизведение → чистый детерминированный ответ. Название трека — из
+    # СТРУКТУРНОГО токена [[MEDIA_TITLE:...]] если источник его дал (не парсим прозу).
     if play_intent and confirmed:
-        m = re.search(r"ИГРАЕТ\s*\(([^)]+)\)", tool_texts)
-        what = f": {m.group(1)}" if m else ""
+        mt = re.search(r"\[\[MEDIA_TITLE:([^\]]+)\]\]", tool_texts)
+        what = f": {mt.group(1).strip()}" if mt else ""
         dom = _service_domain(tool_texts)
         via = f" (через {dom})" if dom else ""
         return {"final_answer": f"Запустил, играет{what}{via}. 🎧 Вкладка в твоём браузере."}
@@ -797,8 +855,8 @@ async def act_node(state: GeneralGraphState) -> dict:
         try:
             res = await browser_bridge.media("play")  # кликает первую кнопку «Воспроизведение»
             if _is_playing(res or ""):
-                m = re.search(r"ИГРАЕТ\s*\(([^)]+)\)", res or "")  # реальное название из mediaSession
-                what = f": {m.group(1)}" if m else ""
+                mt = re.search(r"\[\[MEDIA_TITLE:([^\]]+)\]\]", res or "")  # структурный токен, не проза
+                what = f": {mt.group(1).strip()}" if mt else ""
                 dom = _service_domain(tool_texts + " " + str(res))
                 via = f" (через {dom})" if dom else ""
                 return {"final_answer": f"Запустил, играет фоном{what}{via}. 🎧 Вкладка в твоём браузере."}
@@ -1313,6 +1371,7 @@ async def decompose_node(state: GeneralGraphState) -> dict:
         ]
         reasoning = result.reasoning
     except Exception as e:  # noqa: BLE001
+        degradation.note("decompose_failed", e)
         print(f"[Decompose] structured parse failed ({type(e).__name__}) → один шаг = весь запрос")
         subtasks, reasoning = [], "(декомпозиция не распарсилась, выполняю задачу одним шагом)"
 
@@ -1392,7 +1451,7 @@ def _compress_tools(tools: list, cap: int = TOOL_OUTPUT_CAP) -> list:
         async def _run(__t=t, **kwargs):
             r = await __t.ainvoke(kwargs)
             s = r if isinstance(r, str) else str(r)
-            s, _flag = sanitize_tool_output(s, source=__t.name)  # обезвредить инъекции в выводе
+            s, _flag = await asyncio.to_thread(sanitize_tool_output, s, __t.name)  # анти-инъекция (в потоке: embed не блокирует loop)
             return s if len(s) <= cap else s[:cap] + f"\n…(обрезано, всего {len(s)} симв.)"
         wrapped.append(StructuredTool(
             name=t.name, description=t.description, args_schema=t.args_schema, coroutine=_run,
@@ -1474,7 +1533,7 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                 except Exception as e:  # noqa: BLE001
                     out = f"(ошибка инструмента: {type(e).__name__}: {e})"
             s = out if isinstance(out, str) else str(out)
-            s, _flag = sanitize_tool_output(s, source=tc.get("name", "инструмент"))  # анти-инъекция
+            s, _flag = await asyncio.to_thread(sanitize_tool_output, s, tc.get("name", "инструмент"))  # анти-инъекция (в потоке)
             msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
         rounds += 1
         _mask_old_tool_msgs(msgs)  # свернуть старые наблюдения (анти-квадратичность шага)
@@ -1586,6 +1645,9 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # (drill-back), а не только получать авто-впрыск. Привязаны к user_id прогона.
     uid = state.get("user_id") or "default"
     tools.extend(make_memory_tools(memory_store, uid))
+    # #2 Проектная память: агент может сам сохранить заметку проекта (профиль/фидбек/цель/ссылку)
+    # в MEMORY.md — переживает сессии, подмешивается на recall следующих прогонов.
+    tools.append(project_memory.make_project_memory_tool())
     # База знаний юзера: поиск по ЕГО документам (если БЗ не пуста — иначе анти-bloat).
     if kb_has_docs(uid):
         tools.append(make_kb_tool(uid))
@@ -1685,8 +1747,14 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # сам ограничен по времени → даём ему БОЛЬШЕ (полный multi-hop: 3-4 под-вопроса),
     # обычным шагам — STEP_DEADLINE_CAP (анти-монополия). Wall-clock всё равно общий потолок.
     _cap = RESEARCH_STEP_DEADLINE if _is_web else STEP_DEADLINE_CAP
-    step_deadline = min(_cap, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
+    step_deadline = min(_cap, max(15.0, _run_limits(state)[1] - runbudget.elapsed()))
     msgs: list = []
+    # ЖЁСТКИЙ обрыв ВНУТРИ шага против интра-степ ВЗРЫВА (живой баг: один research-шаг → ~1М
+    # токенов). Вооружаем НЕ на 1.0× бюджета, а на ×STEP_HARD_CUT_MULT (см. _step_hard_limits):
+    # граничный прогон, чей последний шаг лишь чуть переваливает за бюджет, доработает шаг и будет
+    # срезан МЯГКИМ между-нодовым потолком (как в бейзлайне, без потери качества) — arm сорвёт
+    # ТОЛЬКО шаг, раздувшийся на целый бюджет внутри себя (подпись взрыва). disarm в finally.
+    runbudget.arm(*_step_hard_limits(state))
     try:
         if (kind == "compose" or not tools) and not _is_web:
             output, msgs = await _exec_compose(system, step["goal"], step_deadline)
@@ -1699,8 +1767,14 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         refused = any(REFUSAL_MARK in (getattr(m, "content", "") or "") for m in msgs)
     except asyncio.TimeoutError:
         output = "(шаг прерван по таймауту прогона — собираю ответ из уже сделанного)"
+    except runbudget.BudgetExceeded:
+        degradation.note("step_budget_exceeded")
+        output = "(шаг прерван: бюджет прогона исчерпан внутри шага — собираю ответ из сделанного)"
     except Exception as e:  # noqa: BLE001 — GraphRecursionError и пр.: мягкая деградация шага
+        degradation.note("step_aborted", e)
         output = f"(шаг прерван: {type(e).__name__} ({kind}) — превышен лимит/ошибка исполнения)"
+    finally:
+        runbudget.disarm()
 
     # ЗАЗЕМЛЕНИЕ ДЕЙСТВИЯ: валидатор видит, какие инструменты РЕАЛЬНО вызывались в шаге.
     # «Открываю почту» текстом без вызова open_url — не действие (вскрыто живым прогоном:
@@ -1717,6 +1791,7 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         })
         passed, note = outcome.passed, outcome.note
     except Exception as e:  # noqa: BLE001
+        degradation.note("step_validation_skipped", e)  # принимаем шаг вслепую — это деградация
         passed, note = True, f"(валидация шага пропущена: {e})"
 
     # Отказ человека (HITL) — это НЕ провал агента: не ретраим шаг (повтор бессмыслен
@@ -1858,7 +1933,7 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # Структурный сигнал «прогон оборван/незавершён» — судье для флага false_completion (ловит
     # ложь о завершении семантически, любой язык, вместо русско-центричного регэкспа в synthesize).
     _subs = state.get("subtasks", []) or []
-    _cut = runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS)
+    _cut = runbudget.exhausted(*_run_limits(state))
     incomplete = _cut or any(s.get("status") not in ("done", "blocked") for s in _subs)
 
     payload = {
@@ -2176,6 +2251,13 @@ async def reflect_node(state: GeneralGraphState) -> dict:
         except Exception as e:  # noqa: BLE001
             if dbg:
                 print(f"[Reflect-bg] auto-improve failed: {e}")
+        # Соединение этого эфемерного reflect-потока закрываем явно (per-thread conn): иначе оно
+        # висит до смерти потока/GC — лёгкий churn под нагрузкой. close() трогает ТОЛЬКО conn
+        # текущего потока (thread-local), основной поток не затрагивает.
+        try:
+            memory_store.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     threading.Thread(target=_post_reflect, daemon=True).start()
     return {}
@@ -2227,9 +2309,10 @@ def route_after_sgr_create(state: GeneralGraphState) -> str:
 def route_after_step(state: GeneralGraphState) -> str:
     """Шаговый цикл: остались подшаги (или идёт ретрай) → step_executor, иначе → synthesize.
     Глобальный предохранитель: исчерпан бюджет шагов на прогон → принудительно synthesize."""
-    if state.get("steps_executed", 0) >= MAX_STEPS_PER_RUN or runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
+    _tl, _sl = _run_limits(state)
+    if state.get("steps_executed", 0) >= MAX_STEPS_PER_RUN or runbudget.exhausted(_tl, _sl):
         print(f"[Budget] стоп: шаги={state.get('steps_executed', 0)}/{MAX_STEPS_PER_RUN}, "
-              f"токены={runbudget.used()}/{MAX_RUN_TOKENS}, {runbudget.elapsed():.0f}с — собираю что есть")
+              f"токены={runbudget.used()}/{_tl}, {runbudget.elapsed():.0f}с — собираю что есть")
         return "synthesize"
     if state.get("current_step", 0) < len(state.get("subtasks", [])):
         return "step_executor"
@@ -2256,7 +2339,7 @@ def route_after_synthesize(state: GeneralGraphState) -> str:
     Остальное идёт сразу на финальную валидацию."""
     # Бюджет/время исчерпаны → пропускаем дорогой deep-ревью, сразу валидация.
     if _earned_review(state) and state.get("revision_rounds", 0) < MAX_REVISIONS \
-            and not runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
+            and not runbudget.exhausted(*_run_limits(state)):
         return "review"
     return "validation"
 
@@ -2264,7 +2347,7 @@ def route_after_synthesize(state: GeneralGraphState) -> str:
 def route_after_review(state: GeneralGraphState) -> str:
     """Ревью добавил fix-подшаги → обратно в шаговый цикл; чисто/бюджет исчерпан → валидация."""
     if state.get("steps_executed", 0) < MAX_STEPS_PER_RUN and \
-            not runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS) and \
+            not runbudget.exhausted(*_run_limits(state)) and \
             state.get("current_step", 0) < len(state.get("subtasks", [])):
         return "step_executor"
     return "validation"
@@ -2281,7 +2364,7 @@ def route_after_validation(state: GeneralGraphState) -> str:
     invalid = not state.get("validation_passed", True)
     conf = state.get("confidence", 1.0)
     # Бюджет/время исчерпаны → не перезапускаем весь пайплайн (ретрай дороже всего), принимаем как есть.
-    if runbudget.exhausted(MAX_RUN_TOKENS, MAX_RUN_SECONDS):
+    if runbudget.exhausted(*_run_limits(state)):
         return "reflect"
     # Веб-research уже верифицировал факты ВНУТРИ (план→поиск→проверка) и НЕ ретраился
     # по-шагово — полный ретрай его лишь жжёт бюджет (eval ловил 4× исполнения/140с) ради

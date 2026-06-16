@@ -186,6 +186,7 @@ async def run(n: int = 8, offset: int = 0, jsonl: str | None = None) -> None:
                 mode = r.get("mode", "?")
             except Exception as e:  # noqa: BLE001
                 ans, mode = f"[err {type(e).__name__}]", "error"
+            secs = time.monotonic() - t0
             final = _extract_final(ans)
             ok = gaia_score(final, t["a"])
             correct += ok
@@ -195,11 +196,15 @@ async def run(n: int = 8, offset: int = 0, jsonl: str | None = None) -> None:
             cost = cost_of(tr.input, tr.output)
             tot_cost += cost
             tag = "📎" if t.get("file") else "  "
-            print(f"[{gidx}]{tag}L{lvl}{'✅' if ok else '❌'} gold={t['a'][:25]!r} финал={final[:25]!r} {round(time.monotonic()-t0)}с ${cost:.4f}",
+            print(f"[{gidx}]{tag}L{lvl}{'✅' if ok else '❌'} gold={t['a'][:25]!r} финал={final[:25]!r} {round(secs)}с ${cost:.4f}",
                   flush=True)
             if jf:  # ИНКРЕМЕНТАЛЬНО (до перехода к след. задаче) — переживёт нативный краш
+                # sec/in/out/cached — время ответа и токены (цель: сохранить тайминги и прочее);
+                # cached = входные токены из авто-prefix-cache (K3-телеметрия).
                 jf.write(json.dumps({"idx": gidx, "level": lvl, "ok": bool(ok), "gold": t["a"],
-                                     "final": final[:200], "mode": mode, "cost": cost}, ensure_ascii=False) + "\n")
+                                     "final": final[:200], "mode": mode, "cost": cost,
+                                     "sec": round(secs, 1), "in": tr.input, "out": tr.output,
+                                     "cached": tr.cached}, ensure_ascii=False) + "\n")
                 jf.flush()
     finally:
         if jf:

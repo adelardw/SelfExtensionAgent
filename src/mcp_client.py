@@ -34,8 +34,41 @@ CATALOG: dict[str, dict] = {
 }
 
 
+_registry_loaded = False
+
+
+def _load_user_registry() -> None:
+    """Подмешать пользовательский реестр MCP из корневого MCP.md (как SKILL.md, yml-поля).
+    Серверы юзера → доверенные (он сам внёс) + в CATALOG для «сам найди». Идемпотентно/ленивo;
+    работает одинаково для CLI и десктопа (оба идут через этот модуль). Нет MCP.md → no-op."""
+    global _registry_loaded
+    if _registry_loaded:
+        return
+    _registry_loaded = True
+    try:
+        from .context_files import mcp_servers
+        for s in mcp_servers():
+            name = str(s["name"])
+            if s.get("url"):
+                spec = {"transport": s.get("transport", "streamable_http"), "url": s["url"]}
+            else:
+                spec = {"command": s.get("command", "uvx"),
+                        "args": list(s.get("args", [])), "transport": "stdio"}
+            kws = [str(k).lower() for k in (s.get("keywords") or [])]
+            CATALOG[name] = {"spec": spec, "keywords": kws, "desc": s.get("description", "")}
+            # ДОВЕРИЕ — ТОЛЬКО по ЯВНОМУ `trusted: true` (раньше дефолт True). Агент работает в
+            # ПРОИЗВОЛЬНОМ cwd (навык code, «проанализируй этот репо»): склонированный недоверенный
+            # репозиторий с MCP.md иначе авто-запускал бы uvx/remote чужой код, минуя HITL/UNLEASH
+            # (баг ревью NEW-1). В каталог сервер попадает (агент видит), но БЕЗ авто-доверия.
+            if s.get("trusted", False) is True:
+                TRUSTED_SERVERS[name] = spec
+    except Exception as e:  # noqa: BLE001
+        print(f"[mcp] MCP.md реестр не загрузился: {e}")
+
+
 def suggest_server(query: str) -> Optional[str]:
     """Подобрать сервер из каталога под запрос по ключевым словам (агент «находит» MCP)."""
+    _load_user_registry()
     q = query.lower()
     best, score = None, 0
     for name, meta in CATALOG.items():
@@ -57,6 +90,7 @@ async def get_mcp_tools(servers: Optional[list[str]] = None) -> list:
     """
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
+    _load_user_registry()  # подмешать серверы из MCP.md (если есть) до выбора
     names = servers or list(TRUSTED_SERVERS)
     cfg = {n: TRUSTED_SERVERS[n] for n in names if n in TRUSTED_SERVERS}
     if not cfg:

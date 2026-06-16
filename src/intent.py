@@ -10,11 +10,13 @@
 - web_grounding    — нужны СВЕЖИЕ внешние факты (где купить/цена/адрес/лучшие/новости/как оформить)
 - physical_browser — действие в браузере юзера (открыть сайт/войти/корзина/клик)
 - play_media       — воспроизвести музыку/видео/фильм
+- media_control    — управление плеером (пауза/стоп/громкость) — отделён от play, чтобы «пауза» не запускала плей
 - self_contained   — ответ из знаний/рассуждения (мат/объяснение/код/приветствие)
 
 Cold-start: курируемые мультиязычные примеры (RU+EN). Эмбеддинги seed'а кэшируются в
 data/intent_codebook.json (вычисляются 1 раз). Деградация: эмбеддингов нет / кодбук пуст /
-низкая уверенность → классификатор возвращает None → caller берёт регэксп-fallback.
+низкая уверенность → классификатор возвращает None → caller полагается на grounding-оценку reflexion
+(НАМЕРЕННО без регэксп-костыля, см. classify() и feedback-no-keyword-crutches).
 
 Hot-path: классификация переиспользует УЖЕ посчитанный в recall эмбеддинг запроса
 (state['query_emb']) → ноль лишних сетевых вызовов.
@@ -24,9 +26,15 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Optional
+
+# Сериализует запись кодбука: add_exemplar зовётся из ПАРАЛЛЕЛЬНЫХ фоновых reflect-потоков
+# (см. agent._post_reflect) → без этого гонка била intent_codebook.json (баг ревью 2c).
+_SAVE_LOCK = threading.Lock()
 
 from .memory.embedder import build_embedder, cosine
 
@@ -202,10 +210,23 @@ class IntentRouter:
         return out
 
     def _save(self) -> None:
+        # Атомарно: запись во временный файл рядом + os.replace (атомарный rename на одном FS).
+        # Читатель видит либо старый, либо новый ЦЕЛЫЙ файл — не полузаписанный JSON.
         try:
             CODEBOOK_FILE.parent.mkdir(parents=True, exist_ok=True)
             payload = {"model": self._model_name() if self.enabled else "", "entries": self._entries}
-            CODEBOOK_FILE.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            data = json.dumps(payload, ensure_ascii=False)
+            with _SAVE_LOCK:
+                fd, tmp = tempfile.mkstemp(dir=str(CODEBOOK_FILE.parent), suffix=".tmp")
+                try:
+                    with os.fdopen(fd, "w", encoding="utf-8") as f:
+                        f.write(data)
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(tmp, CODEBOOK_FILE)
+                except BaseException:
+                    os.unlink(tmp) if os.path.exists(tmp) else None
+                    raise
         except Exception:  # noqa: BLE001
             pass
 
@@ -213,7 +234,11 @@ class IntentRouter:
     def classify(self, text: str, qvec: Optional[list] = None) -> Optional[dict]:
         """
         Возвращает {'label','score','scores':{label:max_sim}} или None (нельзя классифицировать:
-        нет эмбеддингов / пустой кодбук / низкая уверенность → caller берёт регэксп-fallback).
+        нет эмбеддингов / пустой кодбук / низкая уверенность). При None РЕШАЕТ caller — намеренно
+        БЕЗ регэксп-костыля (feedback «no-keyword-crutches»): живые потребители (_needs_web_grounding,
+        _wants_physical_browser, _is_play_intent) возвращают False и полагаются на grounding-оценку
+        самой reflexion. Т.е. нет эмбеддера → не «другая логика на регэкспах», а мягкая деградация к
+        суждению reflexion (плюс громкий сигнал от эмбеддера при отсутствии ключа, см. embedder.py).
         qvec — предвычисленный эмбеддинг запроса (из recall) — переиспользуем, не эмбеддим заново.
         """
         if not self.enabled:
@@ -237,7 +262,7 @@ class IntentRouter:
         best = max(per_label, key=per_label.get)
         thr = MIN_SIM_PER_LABEL.get(best, MIN_SIM)  # per-label порог (web_grounding ниже)
         if per_label[best] < thr:
-            return None  # не уверен → fallback
+            return None  # не уверен → None (caller решает; для grounding — оценка reflexion, не регэксп)
         return {"label": best, "score": per_label[best], "scores": per_label}
 
     # ── grow from feedback loop ──────────────────────────────────────

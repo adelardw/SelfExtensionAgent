@@ -111,3 +111,64 @@ def validate_skill_code(code: str) -> tuple[bool, list[str]]:
     # дедуп с сохранением порядка
     issues = list(dict.fromkeys(auditor.issues))
     return not issues, issues
+
+
+class _ModuleLevelAuditor(_Auditor):
+    """Как _Auditor, но ловит опасные ВЫЗОВЫ только на уровне модуля (исполняются при импорте,
+    ДО HITL). Тела функций/классов НЕ инспектирует — их код выполнится лишь при вызове тула,
+    а он под HITL (+ allowlist-обёрткой у импортированных навыков). Сам импорт не баним: опасен
+    не `import subprocess`, а его вызов при загрузке модуля."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # алиасы модулей, которые НЕЛЬЗЯ вызывать при импорте вообще (любой их вызов на
+        # уровне модуля = сайд-эффект до HITL): subprocess/ctypes/pty.
+        self.danger_modules: set[str] = set()
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            root = alias.name.split(".")[0]
+            if root in BANNED_ATTRS or root in BANNED_IMPORTS:
+                local = alias.asname or root
+                self.module_aliases[local] = root  # только алиасы, без issue
+                if root in BANNED_IMPORTS:
+                    self.danger_modules.add(local)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        root = (node.module or "").split(".")[0]
+        if root in BANNED_ATTRS:
+            for alias in node.names:
+                if alias.name in BANNED_ATTRS[root]:
+                    self.banned_names[alias.asname or alias.name] = f"{root}.{alias.name}"
+
+    def visit_Call(self, node: ast.Call) -> None:
+        func = node.func
+        if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) \
+                and func.value.id in self.danger_modules:
+            mod = self.module_aliases.get(func.value.id, func.value.id)
+            self.issues.append(
+                f"строка {node.lineno}: вызов '{mod}.{func.attr}' на уровне модуля "
+                f"исполнится при импорте (до HITL) — запрещён"
+            )
+        super().visit_Call(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        pass  # не спускаемся в тело — оно исполнится только при вызове (под HITL)
+
+    visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
+    visit_ClassDef = visit_FunctionDef          # type: ignore[assignment]
+
+
+def validate_module_level(code: str) -> tuple[bool, list[str]]:
+    """AST-гейт уровня МОДУЛЯ: запрещает опасные сайд-эффекты при ИМПОРТЕ (exec до HITL), но
+    допускает subprocess и т.п. внутри тел функций. Для импортированных навыков (OpenClaw-обёртки
+    CLI), у которых своя модель защиты — HITL + runtime-allowlist бинарей."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, [f"SyntaxError на строке {e.lineno}: {e.msg}"]
+
+    auditor = _ModuleLevelAuditor()
+    auditor.visit(tree)
+    issues = list(dict.fromkeys(auditor.issues))
+    return not issues, issues

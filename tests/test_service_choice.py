@@ -145,7 +145,10 @@ def test_act_confirmed_play_mentions_service(monkeypatch):
         return "Открыл поиск.", [ai]
 
     async def _fake_media(action="toggle"):
-        return "play: действий 1; ♪ ЗВУК ИГРАЕТ (Believer — Imagine Dragons) · https://music.yandex.ru/album/1"
+        # структурный контракт (как теперь эмитит browser_session): сентинел + токен названия,
+        # а не проза «ЗВУК ИГРАЕТ (...)» — act_node читает их детерминированно, без регэкспа по NL.
+        return ("[[MEDIA_PLAYING]] play: действий 1; ♪ звук играет "
+                "[[MEDIA_TITLE:Believer — Imagine Dragons]] · https://music.yandex.ru/album/1")
 
     monkeypatch.setattr(A, "_exec_direct", _fake_direct)
     monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: ["browser_control"])

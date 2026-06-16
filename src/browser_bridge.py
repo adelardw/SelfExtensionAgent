@@ -81,7 +81,18 @@ def _log(line: str) -> None:
 # поверх промпт-правила. ──
 import re as _re
 
-_user_domains: list[str] = []
+# Домены, явно названные юзером — per-request, но НЕ contextvar: set_user_domains зовётся в
+# recall_node, а safe_url — в ДРУГОЙ ноде (act/step). contextvar, выставленный В НОДЕ, не виден
+# сёстрам-нодам (проверено: тот самый −9pp). Поэтому общий dict по run_id (run_id берём из
+# run_context — он выставлен на ГРАНИЦЕ запроса и наследуется вниз надёжно). Изоляция мульти-
+# клиента + видимость между нодами одного прогона. Чистка по выходе из request_scope.
+from . import run_context as _rc
+_domains_by_run: dict[str, list] = {}
+_rc.register_cleanup(lambda rid: _domains_by_run.pop(rid, None))
+
+
+def _cur_domains_key() -> str:
+    return _rc.current_run_id() or "_default"
 
 
 def _domains_in(text: str) -> list[str]:
@@ -96,8 +107,7 @@ def _domains_in(text: str) -> list[str]:
 
 def set_user_domains(query: str) -> None:
     """Запомнить домены, явно названные пользователем в текущем запросе (для анти-тайпсквоттинга)."""
-    global _user_domains
-    _user_domains = _domains_in(query)
+    _domains_by_run[_cur_domains_key()] = _domains_in(query)
 
 
 def _edit_distance(a: str, b: str) -> int:
@@ -116,16 +126,17 @@ def safe_url(url: str) -> str:
     """Защита от тайпсквоттинга: если домен открываемого URL — близкий-но-ДРУГОЙ к тому, что
     ЯВНО назвал пользователь (расстояние 1-2), заменить на ТОЧНЫЙ пользовательский домен.
     Точное совпадение и совсем другие домены не трогаем."""
-    if not _user_domains or not url:
+    doms = _domains_by_run.get(_cur_domains_key(), [])
+    if not doms or not url:
         return url
     m = _re.match(r"(https?://)?([^/]+)(.*)", url.strip(), _re.I)
     if not m:
         return url
     scheme, host, rest = m.group(1) or "https://", m.group(2).lower(), m.group(3)
     bare = host.split("@")[-1].split(":")[0]
-    if bare in _user_domains:
+    if bare in doms:
         return url  # точно как просил юзер
-    for ud in _user_domains:
+    for ud in doms:
         d = _edit_distance(bare, ud)
         if 1 <= d <= 2:  # тайпсквоттинг пользовательского домена
             _log(f"⚠ анти-тайпсквоттинг: {bare} → {ud} (юзер назвал {ud})")

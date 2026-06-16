@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pkill -9 -f \"gaia_resilient|gaia_runner\")",
+      "Bash(rm -f data/eval/gaia_measure.jsonl)",
+      "Bash(python3 -m pytest tests/test_injection_defense.py tests/test_optimization_policy.py -q)"
+    ]
+  }
+}

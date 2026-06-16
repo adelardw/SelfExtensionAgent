@@ -14,10 +14,36 @@ Few-shots — самый дешёвый канал генерализации: �
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import threading
 import time
 from pathlib import Path
 
 PARAMS_FILE = Path("data/params.json")
+
+# Сериализует запись стора: add_fewshot/add_user_fewshot зовутся из ФОНОВЫХ reflect-потоков
+# (_post_reflect) параллельно по запросам + per-user backward-воркер. Раньше голый write_text без
+# лока/atomic → гонка read-modify-write, а полузаписанный файл _load глотал в {} → МОЛЧА обнулял ВСЕ
+# выученные параметры/few-shots (тот же класс, что 2c в intent.py). Lock + temp→fsync→os.replace.
+_SAVE_LOCK = threading.Lock()
+
+
+def _atomic_write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, indent=2, ensure_ascii=False)
+    with _SAVE_LOCK:
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)             # атомарный rename: читатель видит старый ИЛИ новый ЦЕЛЫЙ файл
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
 
 MAX_FEWSHOTS = 8  # потолок примеров на ноду (анти-переполнение)
 
@@ -32,8 +58,7 @@ def _load() -> dict:
 
 
 def _save(data: dict) -> None:
-    PARAMS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PARAMS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write_json(PARAMS_FILE, data)      # лок + atomic (см. _atomic_write_json)
 
 
 # ── prompts (override) ───────────────────────────────────────────────
@@ -72,15 +97,18 @@ def list_overrides() -> dict:
 
 # ── few-shots (forward-харвест удачных примеров) ─────────────────────
 
-def add_fewshot(role: str, query: str, answer: str, score: float) -> None:
-    """Добавляет удачный пример к ноде; держит топ-MAX_FEWSHOTS по score."""
+def add_fewshot(role: str, query: str, answer: str, score: float, kind: str = "example") -> None:
+    """Добавляет удачный пример к ноде; держит топ-MAX_FEWSHOTS по score. kind='example' —
+    пара запрос→ответ/режим (forward-харвест); kind='lesson' — урок-проза из backward (рендерится
+    ОТДЕЛЬНО, не как «Хороший ответ», чтобы не путать классификатор — долг ревью B6)."""
     data = _load()
     node = data.setdefault(role, {})
     shots = node.get("fewshots", [])
     # дедуп по началу запроса
     qkey = query.strip()[:60].lower()
     shots = [s for s in shots if s["query"].strip()[:60].lower() != qkey]
-    shots.append({"query": query[:400], "answer": answer[:600], "score": round(score, 3), "ts": time.time()})
+    shots.append({"query": query[:400], "answer": answer[:600], "score": round(score, 3),
+                  "ts": time.time(), "kind": kind})
     shots.sort(key=lambda s: (s["score"], s["ts"]), reverse=True)
     node["fewshots"] = shots[:MAX_FEWSHOTS]
     _save(data)
@@ -110,21 +138,23 @@ def _load_users() -> dict:
 
 
 def _save_users(data: dict) -> None:
-    USER_FEWSHOTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    USER_FEWSHOTS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    _atomic_write_json(USER_FEWSHOTS_FILE, data)   # лок + atomic (тот же _SAVE_LOCK)
 
 
-def add_user_fewshot(user_id: str, role: str, query: str, answer: str, score: float) -> None:
-    """Удачный пример, привязанный к пользователю (приоритетнее глобальных при инъекции)."""
+def add_user_fewshot(user_id: str, role: str, query: str, answer: str, score: float,
+                     kind: str = "example") -> None:
+    """Удачный пример/урок, привязанный к пользователю (приоритетнее глобальных при инъекции).
+    kind='lesson' (backward-урок) рендерится отдельным блоком, не как mode-метка (B6)."""
     if not user_id:
-        return add_fewshot(role, query, answer, score)
+        return add_fewshot(role, query, answer, score, kind)
     data = _load_users()
     user = data.setdefault(user_id, {"_ts": 0.0})
     user["_ts"] = time.time()  # для LRU
     shots = user.get(role, [])
     qkey = query.strip()[:60].lower()
     shots = [s for s in shots if s["query"].strip()[:60].lower() != qkey]
-    shots.append({"query": query[:400], "answer": answer[:600], "score": round(score, 3), "ts": time.time()})
+    shots.append({"query": query[:400], "answer": answer[:600], "score": round(score, 3),
+                  "ts": time.time(), "kind": kind})
     shots.sort(key=lambda s: (s["score"], s["ts"]), reverse=True)
     user[role] = shots[:MAX_FEWSHOTS]
     # LRU-вытеснение, чтобы стор не рос бесконечно (важно для сервера с многими юзерами)
@@ -202,7 +232,17 @@ def format_fewshots(role: str, k: int = 3, user_id: str = "", query: str = "") -
     _add(base, k)                                                          # baseline — гарантированный пол
     if not shots:
         return "Примеров пока нет."
-    return "\n\n".join(f"Пример {i+1}:\nЗапрос: {s['query']}\nХороший ответ: {s['answer']}" for i, s in enumerate(shots))
+
+    # B6: уроки-проза (backward) рендерятся ОТДЕЛЬНЫМ блоком, НЕ как «Хороший ответ: <режим>» —
+    # иначе классификатор маршрутизации видел бы в слоте ответа то метку (deliberate), то абзац.
+    examples = [s for s in shots if s.get("kind") != "lesson"]
+    lessons = [s for s in shots if s.get("kind") == "lesson"]
+    blocks = [f"Пример {i+1}:\nЗапрос: {s['query']}\nХороший ответ: {s['answer']}"
+              for i, s in enumerate(examples)]
+    if lessons:
+        blocks.append("Уроки (чего избегать на похожих запросах):\n" +
+                      "\n".join(f"- При «{s['query']}»: {s['answer']}" for s in lessons))
+    return "\n\n".join(blocks)
 
 
 # ── tool descriptions ────────────────────────────────────────────────

@@ -9,9 +9,11 @@ web_search — нормальный веб-поиск и чтение стран
 Graceful: если cloakbrowser/Chromium недоступны — падает на urllib-фолбэк,
 а не роняет навык.
 """
+import ipaddress
 import json
 import os
 import re
+import socket
 import time
 import urllib.parse
 import urllib.request
@@ -19,6 +21,44 @@ from concurrent.futures import ThreadPoolExecutor
 from langchain_core.tools import tool
 
 _BROWSE_HARD_TIMEOUT = 35  # сек: жёсткий потолок одного браузерного чтения (анти-зависание)
+
+# SSRF-денилист для LLM-управляемых URL (browse/read_url). У персонального агента есть доступ к
+# локальной сети владельца, а URL может прийти от модели под инъекцией из веб-контента → fetch
+# к loopback/link-local/RFC1918/cloud-metadata (169.254.169.254) недопустим. search_web сюда НЕ
+# попадает: он ходит на operator-config SEARXNG_URL/DuckDuckGo, не на LLM-указанный хост.
+_METADATA_HOSTS = {"metadata.google.internal", "metadata"}
+
+
+def _is_private_ip(ip_str: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return (ip.is_private or ip.is_loopback or ip.is_link_local
+            or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def _ssrf_blocked(url: str) -> bool:
+    """True → URL ведёт на внутренний/приватный адрес и должен быть отклонён. Блокируем литералы
+    приватных IP И имена, резолвящиеся в приватный диапазон. Остаточный TOCTOU (ребайнд между
+    проверкой и fetch) — приемлемый риск на on-device масштабе; полная защита = пиннинг IP."""
+    try:
+        host = (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
+    except ValueError:
+        return True
+    if not host:
+        return True
+    if host in _METADATA_HOSTS or host == "localhost" or host.endswith(".localhost"):
+        return True
+    if _is_private_ip(host):
+        return True
+    try:
+        for info in socket.getaddrinfo(host, None):
+            if _is_private_ip(info[4][0]):
+                return True
+    except (socket.gaierror, OSError, UnicodeError):
+        return False  # не резолвится — пусть fetch сам провалится, не наша забота
+    return False
 
 
 def _run_bounded(fn, *args, timeout):
@@ -426,6 +466,8 @@ def browse(url: str, find: str = "") -> str:
     """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+    if _ssrf_blocked(url):
+        return f"Отклонено: {url} ведёт на внутренний/приватный адрес (SSRF-защита)."
     try:
         title, text = _page_text(url)
         if not text:
@@ -452,6 +494,8 @@ def read_url(url: str, max_chars: int = 4000) -> str:
     """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+    if _ssrf_blocked(url):
+        return f"Отклонено: {url} ведёт на внутренний/приватный адрес (SSRF-защита)."
     try:
         if _CLOAK:
             browser = launch(headless=True)

@@ -1,8 +1,9 @@
 """
 FastAPI-сервер: единый вход для всех клиентов (ПК, телефон, Telegram).
 
-Запуск:  uvicorn src.server:app --host 0.0.0.0 --port 8000
-         (или python -m src.server)
+Запуск:  python -m src.server   (бэкенд на 127.0.0.1:8000 — loopback по умолчанию)
+         LAN-доступ (телефон на том же Wi-Fi) — ОСОЗНАННО: AGENT_BIND_HOST=0.0.0.0
+         (тогда нужен auth перед эндпойнтами — сейчас их нет).
 
 Эндпоинты:
   POST /chat            — основной диалог с агентом
@@ -28,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 
-from . import browser_bridge, chat_store, clarify, cli_config, hitl, knowledge_base, llm, media
+from . import browser_bridge, chat_store, clarify, cli_config, hitl, knowledge_base, llm, media, runbudget, run_context
 from .agent import build_graph, memory_store, rebuild_llms
 from .improve import graph_backward
 from .tracing import diagnose, trace_store
@@ -95,10 +96,11 @@ async def _build_graph_async() -> None:
             """Чат ИЗ попапа расширения → тот же граф, тред 'extension'."""
             try:
                 hist = chat_store.get_messages("extension", last=_HISTORY_LIMIT)
-                r = await _graph.ainvoke(
-                    {"query": text, "user_id": "local", "session_id": "extension",
-                     "chat_history": hist + [{"role": "user", "content": text}]},
-                    config={"configurable": {"thread_id": "extension"}, "recursion_limit": 50})
+                with run_context.request_scope(f"ext-{uuid.uuid4().hex}", "local"):  # изоляция per-request
+                    r = await _graph.ainvoke(
+                        {"query": text, "user_id": "local", "session_id": "extension",
+                         "chat_history": hist + [{"role": "user", "content": text}]},
+                        config={"configurable": {"thread_id": "extension"}, "recursion_limit": 50})
                 ans = r.get("final_answer", "") or "(пустой ответ)"
                 chat_store.record_turn("extension", "local", text, ans)
                 return ans
@@ -201,13 +203,13 @@ class RespondIn(BaseModel):
 
 # Узлы графа → понятные шаги для GUI (видимый ход исполнения).
 _PROGRESS = {
-    "recall": "Вспоминаю контекст", "goal": "Ставлю цель", "reflexion": "Выбираю подход",
-    "act": "Действую", "reason": "Рассуждаю", "fast_answer": "Отвечаю", "clarify_gate": "Уточняю",
-    "router": "Маршрутизирую", "create_skills": "Создаю навык", "sgr_create": "Проверяю навык",
-    "skill_selector": "Подбираю навыки", "capability_research": "Ищу способ / MCP",
-    "decompose": "Разбиваю на шаги", "skill_injection": "Готовлю инструменты",
-    "step_executor": "Выполняю шаг", "synthesize": "Собираю ответ", "review": "Глубокий ревью",
-    "validation": "Проверяю", "reflect": "Запоминаю",
+    "recall": "Recalling context", "goal": "Setting the goal", "reflexion": "Choosing the approach",
+    "act": "Acting", "reason": "Reasoning", "fast_answer": "Answering", "clarify_gate": "Clarifying",
+    "router": "Routing", "create_skills": "Creating a skill", "sgr_create": "Validating the skill",
+    "skill_selector": "Selecting skills", "capability_research": "Finding capability / MCP",
+    "decompose": "Breaking into steps", "skill_injection": "Wiring up tools",
+    "step_executor": "Executing a step", "synthesize": "Assembling the answer", "review": "Deep review",
+    "validation": "Validating", "reflect": "Remembering",
 }
 
 
@@ -228,20 +230,21 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                 print(f"[chat] attachment_context failed: {e}")
         history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
         state: dict = {}
-        async for chunk in _graph.astream(
-            {"query": query, "user_id": inp.user_id, "session_id": tid,
-             "force_mode": cli_config.get_cli("force_mode") or "",
-             "chat_history": history + [{"role": "user", "content": inp.query}]},
-            config={"configurable": {"thread_id": tid}, "recursion_limit": 50},
-            stream_mode="updates",
-        ):
-            for node, delta in (chunk or {}).items():
-                lbl = _PROGRESS.get(node, node)
-                run["progress"] = lbl
-                if lbl not in run["steps"]:
-                    run["steps"].append(lbl)
-                if isinstance(delta, dict):
-                    state.update(delta)
+        with run_context.request_scope(f"chat-{uuid.uuid4().hex}", inp.user_id):  # изоляция per-request
+            async for chunk in _graph.astream(
+                {"query": query, "user_id": inp.user_id, "session_id": tid,
+                 "force_mode": cli_config.get_cli("force_mode") or "",
+                 "chat_history": history + [{"role": "user", "content": inp.query}]},
+                config={"configurable": {"thread_id": tid}, "recursion_limit": 50},
+                stream_mode="updates",
+            ):
+                for node, delta in (chunk or {}).items():
+                    lbl = _PROGRESS.get(node, node)
+                    run["progress"] = lbl
+                    if lbl not in run["steps"]:
+                        run["steps"].append(lbl)
+                    if isinstance(delta, dict):
+                        state.update(delta)
         answer = state.get("final_answer", "")
         chat_store.record_turn(tid, inp.user_id, inp.query, answer)
         t = chat_store.get_thread(tid)
@@ -416,9 +419,16 @@ def traces(hours: float = 24.0) -> list[dict]:
 
 
 def main() -> None:
+    import os
+
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Локальное приложение: бэкенд слушает LOOPBACK по умолчанию (как desktop.py:HOST=127.0.0.1).
+    # 0.0.0.0 без auth на недоверенной сети = любой в LAN управляет агентом как владелец
+    # (auto-accept + руки/память/ключ). LAN-доступ (телефон на том же Wi-Fi) — ОСОЗНАННЫЙ opt-in
+    # через AGENT_BIND_HOST=0.0.0.0 (и тогда добавляй auth перед эндпойнтами). Bind-находка ревью.
+    host = os.getenv("AGENT_BIND_HOST", "127.0.0.1")
+    uvicorn.run(app, host=host, port=8000)
 
 
 if __name__ == "__main__":

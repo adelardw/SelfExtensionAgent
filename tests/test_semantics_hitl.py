@@ -16,10 +16,13 @@ def _fresh(monkeypatch):
     async def _no_llm(text, action):
         return None  # офлайн: всегда фолбэк-лексикон
     monkeypatch.setattr(semantics, "_llm_parse", _no_llm)
-    monkeypatch.setattr(hitl, "_grants", set())
+    monkeypatch.setattr(hitl, "_user_grants", {})       # чистые сессионные гранты (per-user)
+    monkeypatch.setattr(hitl, "_config_grants", set())
+    monkeypatch.setattr(hitl, "_work_mode", {})
     hitl.set_work_mode("manual")
     # гранты в тестах не персистим в реальный config.local.yml
-    monkeypatch.setattr(hitl, "grant", lambda key, persist=True: hitl._grants.add(key))
+    monkeypatch.setattr(hitl, "grant",
+                        lambda key, persist=True, user_id=None: hitl._user_grants.setdefault("", set()).add(key))
     yield
     hitl.set_confirmer(None)
 
@@ -100,7 +103,7 @@ def test_always_grants_for_session():
     w = _wrapped()
     assert asyncio.run(w.coroutine(url="a")).startswith("OK")
     assert asyncio.run(w.coroutine(url="b")).startswith("OK")  # грант — второй раз молча
-    assert len(asked) == 1 and "device_control.open_url" in hitl._grants
+    assert len(asked) == 1 and hitl.is_granted("device_control.open_url")
 
 
 def test_auto_mode_skips_all():
