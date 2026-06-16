@@ -198,9 +198,12 @@ def main() -> int:
             tx = x + w - 6; anchor = "end"
         else:
             tx = x + w / 2; anchor = "middle"
-        for ln in lines:
+        for idx, ln in enumerate(lines):
+            # первая строка многострочного блока — жирный заголовок
+            title = (idx == 0 and not is_text and len(lines) > 1)
+            b = ' font-weight="bold"' if (bold or title) else ""
             body.append(f'<text x="{tx:.0f}" y="{ty:.0f}" font-size="{fs}" fill="#1a1a1a" '
-                        f'text-anchor="{anchor}"{bold}>{escape(ln)}</text>')
+                        f'text-anchor="{anchor}"{b}>{escape(ln)}</text>')
             ty += lh
 
     # сборка: маркеры-стрелки по цвету ребра

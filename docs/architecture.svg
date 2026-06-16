@@ -1,79 +1,162 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1260" height="2368" viewBox="0 0 1260 2368" font-family="Helvetica,Arial,sans-serif">
-<defs><marker id="a_4a4a6a" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#4a4a6a"/></marker><marker id="a_8a8fb8" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#8a8fb8"/></marker></defs>
-<rect width="1260" height="2368" fill="#ffffff"/>
-<path d="M 900.0,114.0 L 900.0,191.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 900.0,245.0 L 900.0,319.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 585.2,629.0 L 434.8,703.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 640.0,885.0 L 640.0,959.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 380.0,1141.0 L 380.0,1215.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 380.0,1269.0 L 380.0,1343.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 380.0,1397.0 L 380.0,1471.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 380.0,1525.0 L 380.0,1599.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 1187.5,629.0 L 1188.8,629.5 Q 1190.0,630.0 1190.0,631.3 L 1190.0,1998.0 Q 1190.0,2010.0 1178.0,2010.0 L 470.0,2010.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 1206.8,501.0 L 1208.4,501.5 Q 1210.0,502.0 1210.0,503.7 L 1210.0,2126.0 Q 1210.0,2138.0 1198.0,2138.0 L 990.0,2138.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 900.0,2165.0 L 900.0,2242.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 900.0,373.0 L 900.0,447.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 810.0,368.2 L 470.0,451.8" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 946.4,373.0 L 1073.6,447.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 810.0,474.0 L 470.0,474.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 900.0,501.0 L 900.0,2111.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 470.0,489.6 L 1030.0,586.4" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 434.8,501.0 L 585.2,575.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 380.0,501.0 L 380.0,703.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 434.8,757.0 L 585.2,831.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 380.0,757.0 L 380.0,1087.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 550.0,986.0 L 82.0,986.0 Q 70.0,986.0 70.0,974.0 L 70.0,742.0 Q 70.0,730.0 82.0,730.0 L 290.0,730.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 550.0,986.0 L 547.5,986.0 Q 545.0,986.0 545.0,983.5 L 545.0,860.5 Q 545.0,858.0 547.5,858.0 L 550.0,858.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 585.2,1013.0 L 434.8,1087.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 290.0,1613.5 L 261.9,1609.6 Q 250.0,1608.0 250.0,1620.0 L 250.0,1632.0 Q 250.0,1644.0 261.9,1642.4 L 290.0,1638.5" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 434.8,1781.0 L 585.2,1855.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 380.0,1781.0 L 380.0,1983.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 550.0,1882.0 L 110.0,1882.0 Q 98.0,1882.0 98.0,1870.0 L 98.0,1638.0 Q 98.0,1626.0 110.0,1626.0 L 290.0,1626.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 585.2,1909.0 L 434.8,1983.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 290.0,2010.0 L 138.0,2010.0 Q 126.0,2010.0 126.0,1998.0 L 126.0,742.0 Q 126.0,730.0 138.0,730.0 L 290.0,730.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<path d="M 470.0,2032.2 L 810.0,2115.8" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
-<text x="48" y="42" font-size="17" fill="#1a1a1a" text-anchor="start" font-weight="bold">self-extension-agent — forward-граф LangGraph (реальный граф нод)</text>
-<ellipse cx="900" cy="90" rx="75" ry="24" fill="#E6E6FA" stroke="#9370DB" stroke-width="1.5"/>
-<text x="900" y="96" font-size="15" fill="#1a1a1a" text-anchor="middle" font-weight="bold">__start__</text>
-<rect x="810" y="191" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="900" y="224" font-size="15" fill="#1a1a1a" text-anchor="middle">recall</text>
-<rect x="810" y="319" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="900" y="352" font-size="15" fill="#1a1a1a" text-anchor="middle">reflexion</text>
-<rect x="810" y="447" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="900" y="480" font-size="15" fill="#1a1a1a" text-anchor="middle">act</text>
-<rect x="290" y="447" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="480" font-size="15" fill="#1a1a1a" text-anchor="middle">goal</text>
-<rect x="1030" y="447" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="1120" y="480" font-size="15" fill="#1a1a1a" text-anchor="middle">fast_answer</text>
-<rect x="550" y="575" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="640" y="608" font-size="15" fill="#1a1a1a" text-anchor="middle">clarify_gate</text>
-<rect x="1030" y="575" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="1120" y="608" font-size="15" fill="#1a1a1a" text-anchor="middle">reason</text>
-<rect x="290" y="703" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="736" font-size="15" fill="#1a1a1a" text-anchor="middle">router</text>
-<rect x="550" y="831" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="640" y="864" font-size="15" fill="#1a1a1a" text-anchor="middle">create_skills</text>
-<rect x="550" y="959" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="640" y="992" font-size="15" fill="#1a1a1a" text-anchor="middle">sgr_create</text>
-<rect x="290" y="1087" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="1120" font-size="15" fill="#1a1a1a" text-anchor="middle">skill_selector</text>
-<rect x="275" y="1215" width="210" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="1248" font-size="15" fill="#1a1a1a" text-anchor="middle">capability_research</text>
-<rect x="290" y="1343" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="1376" font-size="15" fill="#1a1a1a" text-anchor="middle">decompose</text>
-<rect x="290" y="1471" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="1504" font-size="15" fill="#1a1a1a" text-anchor="middle">skill_injection</text>
-<rect x="290" y="1599" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="1632" font-size="15" fill="#1a1a1a" text-anchor="middle">step_executor</text>
-<rect x="290" y="1727" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="1760" font-size="15" fill="#1a1a1a" text-anchor="middle">synthesize</text>
-<rect x="550" y="1855" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="640" y="1888" font-size="15" fill="#1a1a1a" text-anchor="middle">review</text>
-<rect x="290" y="1983" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="380" y="2016" font-size="15" fill="#1a1a1a" text-anchor="middle">validation</text>
-<rect x="810" y="2111" width="180" height="54" rx="9" fill="#ECECFF" stroke="#9370DB" stroke-width="1.5"/>
-<text x="900" y="2144" font-size="15" fill="#1a1a1a" text-anchor="middle">reflect</text>
-<ellipse cx="900" cy="2266" rx="75" ry="24" fill="#E6E6FA" stroke="#9370DB" stroke-width="1.5"/>
-<text x="900" y="2272" font-size="15" fill="#1a1a1a" text-anchor="middle" font-weight="bold">__end__</text>
-<text x="48" y="2319" font-size="13" fill="#1a1a1a" text-anchor="start">── сплошная: фиксированный переход (add_edge)        ┄┄ пунктир: условный переход (add_conditional_edges)        ⟲ self: ретрай шага</text>
+<svg xmlns="http://www.w3.org/2000/svg" width="2585" height="5558" viewBox="0 0 2585 5558" font-family="Helvetica,Arial,sans-serif">
+<defs><marker id="a_4a4a6a" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#4a4a6a"/></marker><marker id="a_8a8fb8" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#8a8fb8"/></marker><filter id="nodeshadow" x="-10%" y="-10%" width="125%" height="130%"><feDropShadow dx="0" dy="2.5" stdDeviation="3.5" flood-color="#3a3a5a" flood-opacity="0.30"/></filter></defs>
+<rect width="2585" height="5558" fill="#ffffff"/>
+<path d="M 854.1,243.0 L 1470.0,414.9" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1198.8,243.0 L 1501.3,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1543.6,243.0 L 1557.3,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1888.3,243.0 L 1613.3,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 2233.1,243.0 L 1650.0,413.7" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1560.0,472.0 L 1560.0,660.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1560.0,800.0 L 1560.0,950.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 889.7,1670.0 L 610.3,1820.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1020.0,2250.0 L 1020.0,2400.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 480.0,2830.0 L 480.0,2980.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 480.0,3120.0 L 480.0,3270.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 480.0,3410.0 L 480.0,3560.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 480.0,3700.0 L 480.0,3850.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 2270.0,1624.6 L 2608.1,1668.5 Q 2620.0,1670.0 2620.0,1682.0 L 2620.0,4778.0 Q 2620.0,4790.0 2608.0,4790.0 L 670.0,4790.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 2270.0,1338.9 L 2528.1,1378.2 Q 2540.0,1380.0 2540.0,1392.0 L 2540.0,5068.0 Q 2540.0,5080.0 2528.0,5080.0 L 1750.0,5080.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1560.0,5150.0 L 1560.0,5338.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1560.0,1090.0 L 1560.0,1240.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 1370.0,1071.0 L 670.0,1259.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 1685.5,1090.0 L 1954.5,1240.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 1370.0,1310.0 L 670.0,1310.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 1560.0,1380.0 L 1560.0,5010.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 670.0,1344.4 L 1890.0,1565.6" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 610.3,1380.0 L 889.7,1530.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 480.0,1380.0 L 480.0,1820.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 610.3,1960.0 L 889.7,2110.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 480.0,1960.0 L 480.0,2690.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 830.0,2470.0 L 102.0,2470.0 Q 90.0,2470.0 90.0,2458.0 L 90.0,1902.0 Q 90.0,1890.0 102.0,1890.0 L 290.0,1890.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 830.0,2470.0 L 820.0,2470.0 Q 810.0,2470.0 810.0,2460.0 L 810.0,2190.0 Q 810.0,2180.0 820.0,2180.0 L 830.0,2180.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 889.7,2540.0 L 610.3,2690.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 290.0,3888.2 L 276.8,3886.0 Q 265.0,3884.0 265.0,3896.0 L 265.0,3944.0 Q 265.0,3956.0 276.8,3954.0 L 290.0,3951.8" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 610.3,4280.0 L 889.7,4430.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 480.0,4280.0 L 480.0,4720.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 830.0,4500.0 L 162.0,4500.0 Q 150.0,4500.0 150.0,4488.0 L 150.0,3932.0 Q 150.0,3920.0 162.0,3920.0 L 290.0,3920.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 889.7,4570.0 L 610.3,4720.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 290.0,4790.0 L 222.0,4790.0 Q 210.0,4790.0 210.0,4778.0 L 210.0,1902.0 Q 210.0,1890.0 222.0,1890.0 L 290.0,1890.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<path d="M 670.0,4841.0 L 1370.0,5029.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
+<text x="68" y="56" font-size="22" fill="#1a1a1a" text-anchor="start" font-weight="bold">self-extension-agent — forward-граф LangGraph (каждая нода = что и как происходит)</text>
+<text x="68" y="141" font-size="15" fill="#1a1a1a" text-anchor="start" font-weight="bold">ENTRYPOINTS (app-слой) — вызывают граф (общий граф + память)</text>
+<rect x="535" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="700" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">REPL</text>
+<text x="700" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">main.py</text>
+<rect x="955" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1120" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Telegram</text>
+<text x="1120" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">bot.py</text>
+<rect x="1375" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1540" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Desktop / Web GUI</text>
+<text x="1540" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">desktop.py · React+Vite</text>
+<rect x="1795" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1960" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Chrome extension</text>
+<text x="1960" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">агент в твоём браузере</text>
+<rect x="2215" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="2380" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">FastAPI server</text>
+<text x="2380" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">server.py · /chat · /run · astream</text>
+<ellipse cx="1560" cy="440" rx="90" ry="32" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1560" y="446" font-size="16" fill="#1a1a1a" text-anchor="middle" font-weight="bold">__start__</text>
+<rect x="1370" y="660" width="380" height="140" rx="10" fill="#E1D5E7" stroke="#9673A6" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1560" y="690" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">recall</text>
+<text x="1560" y="704" font-size="12" fill="#1a1a1a" text-anchor="middle">память (эпизоды / факты / выводы / цели)</text>
+<text x="1560" y="720" font-size="12" fill="#1a1a1a" text-anchor="middle">+ implicit feedback + external ctx + AutoRAG</text>
+<text x="1560" y="734" font-size="12" fill="#1a1a1a" text-anchor="middle">(БЗ юзера + файлы сессии, BM25 + sanitize).</text>
+<text x="1560" y="750" font-size="12" fill="#1a1a1a" text-anchor="middle">УСЛОВНЫЙ и ГИБКИЙ (recall_gate): И факты, И</text>
+<text x="1560" y="764" font-size="12" fill="#1a1a1a" text-anchor="middle">ассоциативная память ПО РЕЛЕВАНТНОСТИ · GraphRAG-lite</text>
+<text x="1560" y="780" font-size="12" fill="#1a1a1a" text-anchor="middle">запрос эмбеддится ОДИН раз → роутер переиспользует</text>
+<rect x="1370" y="950" width="380" height="140" rx="10" fill="#FFE6CC" stroke="#D79B00" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1560" y="969" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflexion</text>
+<text x="1560" y="985" font-size="13" fill="#1a1a1a" text-anchor="middle">Self-Reflexion ВЫБОР режима мышления по анализу</text>
+<text x="1560" y="1001" font-size="13" fill="#1a1a1a" text-anchor="middle">задачи · + априор бандита (Beta/Thompson по</text>
+<text x="1560" y="1017" font-size="13" fill="#1a1a1a" text-anchor="middle">эпизодам</text>
+<text x="1560" y="1033" font-size="13" fill="#1a1a1a" text-anchor="middle">юзера, видит неудачи) + few-shots</text>
+<text x="1560" y="1049" font-size="13" fill="#1a1a1a" text-anchor="middle">+ intent-роутер L2 (embedding-kNN, любой язык).</text>
+<text x="1560" y="1065" font-size="13" fill="#1a1a1a" text-anchor="middle">высокая неоднозначность → clarify · heavy НЕ</text>
+<text x="1560" y="1081" font-size="13" fill="#1a1a1a" text-anchor="middle">предсказывается — ЗАРАБАТЫВАЕТСЯ рантайм-evidence</text>
+<rect x="1370" y="1240" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1560" y="1291" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">act</text>
+<text x="1560" y="1307" font-size="13" fill="#1a1a1a" text-anchor="middle">System 1 с руками: ОДНО прямое действие</text>
+<text x="1560" y="1323" font-size="13" fill="#1a1a1a" text-anchor="middle">1–2 инструментами (BM25-подбор навыка, HITL).</text>
+<text x="1560" y="1339" font-size="13" fill="#1a1a1a" text-anchor="middle">ноль вызовов / ESCALATE → goal (путь deliberate)</text>
+<rect x="290" y="1240" width="380" height="140" rx="10" fill="#B0E3E6" stroke="#0E8088" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="1299" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">goal</text>
+<text x="480" y="1315" font-size="13" fill="#1a1a1a" text-anchor="middle">целеполагание: цель + «стоящая» цель +</text>
+<text x="480" y="1331" font-size="13" fill="#1a1a1a" text-anchor="middle">rubric, держится в контексте всех нод</text>
+<rect x="1890" y="1240" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="2080" y="1299" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">fast_answer</text>
+<text x="2080" y="1315" font-size="13" fill="#1a1a1a" text-anchor="middle">прямой ответ (System 1 / System 2), без тулов;</text>
+<text x="2080" y="1331" font-size="13" fill="#1a1a1a" text-anchor="middle">ветка clarify тоже отвечает здесь</text>
+<rect x="830" y="1530" width="380" height="140" rx="10" fill="#FFE6CC" stroke="#D79B00" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1020" y="1573" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">clarify_gate</text>
+<text x="1020" y="1589" font-size="13" fill="#1a1a1a" text-anchor="middle">батч точных уточнений (маркеры где набор конечен,</text>
+<text x="1020" y="1605" font-size="13" fill="#1a1a1a" text-anchor="middle">открытые где нет). ответы → реестр уточнений</text>
+<text x="1020" y="1621" font-size="13" fill="#1a1a1a" text-anchor="middle">прогона (дедуп, переиспользуют</text>
+<text x="1020" y="1637" font-size="13" fill="#1a1a1a" text-anchor="middle">decompose / step / synthesize)</text>
+<rect x="1890" y="1530" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="2080" y="1589" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reason</text>
+<text x="2080" y="1605" font-size="13" fill="#1a1a1a" text-anchor="middle">System 2: глубокое пошаговое рассуждение,</text>
+<text x="2080" y="1621" font-size="13" fill="#1a1a1a" text-anchor="middle">без тулов → проходит финальную validation</text>
+<rect x="290" y="1820" width="380" height="140" rx="10" fill="#FFE6CC" stroke="#D79B00" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="1871" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">router</text>
+<text x="480" y="1887" font-size="13" fill="#1a1a1a" text-anchor="middle">ветка пути deliberate: создать навык</text>
+<text x="480" y="1903" font-size="13" fill="#1a1a1a" text-anchor="middle">(create_skills) или взять готовые</text>
+<text x="480" y="1919" font-size="13" fill="#1a1a1a" text-anchor="middle">(skill_selector)</text>
+<rect x="830" y="2110" width="380" height="140" rx="10" fill="#DAE8FC" stroke="#6C8EBF" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1020" y="2169" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">create_skills</text>
+<text x="1020" y="2185" font-size="13" fill="#1a1a1a" text-anchor="middle">ReAct строит новый навык (код) под пробел</text>
+<text x="1020" y="2201" font-size="13" fill="#1a1a1a" text-anchor="middle">в способностях → в библиотеку навыков</text>
+<rect x="830" y="2400" width="380" height="140" rx="10" fill="#DAE8FC" stroke="#6C8EBF" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1020" y="2459" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">sgr_create</text>
+<text x="1020" y="2475" font-size="13" fill="#1a1a1a" text-anchor="middle">SGR-ревью + smoke-тест нового навыка →</text>
+<text x="1020" y="2491" font-size="13" fill="#1a1a1a" text-anchor="middle">загрузка (L1 self-improvement) или назад в router</text>
+<rect x="290" y="2690" width="380" height="140" rx="10" fill="#DAE8FC" stroke="#6C8EBF" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="2749" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">skill_selector</text>
+<text x="480" y="2765" font-size="13" fill="#1a1a1a" text-anchor="middle">BM25-подбор релевантных навыков под запрос.</text>
+<text x="480" y="2781" font-size="13" fill="#1a1a1a" text-anchor="middle">АМОРТИЗАЦИЯ: при ПАТТЕРНЕ — БЕЗ LLM-вызова</text>
+<rect x="290" y="2980" width="380" height="140" rx="10" fill="#DAE8FC" stroke="#6C8EBF" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="3031" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">capability_research</text>
+<text x="480" y="3047" font-size="13" fill="#1a1a1a" text-anchor="middle">разведка способностей; на пробеле — найти и</text>
+<text x="480" y="3063" font-size="13" fill="#1a1a1a" text-anchor="middle">подключить MCP (реестр + доверенный каталог,</text>
+<text x="480" y="3079" font-size="13" fill="#1a1a1a" text-anchor="middle">HITL)</text>
+<rect x="290" y="3270" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="3329" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">decompose</text>
+<text x="480" y="3345" font-size="13" fill="#1a1a1a" text-anchor="middle">план задачи по шагам → skill_injection.</text>
+<text x="480" y="3361" font-size="13" fill="#1a1a1a" text-anchor="middle">при sim ≥ 0.7 → БЕЗ LLM (план прямо из паттерна)</text>
+<rect x="290" y="3560" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="3619" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">skill_injection</text>
+<text x="480" y="3635" font-size="13" fill="#1a1a1a" text-anchor="middle">инъекция выбранных навыков / тулов</text>
+<text x="480" y="3651" font-size="13" fill="#1a1a1a" text-anchor="middle">в набор инструментов исполнителя шагов</text>
+<rect x="290" y="3850" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="3877" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">step_executor</text>
+<text x="480" y="3893" font-size="13" fill="#1a1a1a" text-anchor="middle">исполнение + валидация ПО ПУНКТАМ (⟲ ретрай /</text>
+<text x="480" y="3909" font-size="13" fill="#1a1a1a" text-anchor="middle">шаг).</text>
+<text x="480" y="3925" font-size="13" fill="#1a1a1a" text-anchor="middle">валидатор видит РЕАЛЬНО вызванные тулы</text>
+<text x="480" y="3941" font-size="13" fill="#1a1a1a" text-anchor="middle">(текст ≠ действие) · маскинг контекста внутри</text>
+<text x="480" y="3957" font-size="13" fill="#1a1a1a" text-anchor="middle">шага ·</text>
+<text x="480" y="3973" font-size="13" fill="#1a1a1a" text-anchor="middle">догон ask_user на развилке</text>
+<rect x="290" y="4140" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="4207" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">synthesize</text>
+<text x="480" y="4223" font-size="13" fill="#1a1a1a" text-anchor="middle">сборка финального решения из шагов</text>
+<rect x="830" y="4430" width="380" height="140" rx="10" fill="#FFF2CC" stroke="#D6B656" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1020" y="4481" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">review</text>
+<text x="1020" y="4497" font-size="13" fill="#1a1a1a" text-anchor="middle">только HEAVY: сквозной ревью собранного решения</text>
+<text x="1020" y="4513" font-size="13" fill="#1a1a1a" text-anchor="middle">DEEP-моделью · проблемы → fix-подшаги</text>
+<text x="1020" y="4529" font-size="13" fill="#1a1a1a" text-anchor="middle">(→ step_executor) · чисто → validation</text>
+<rect x="290" y="4720" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="480" y="4779" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">validation</text>
+<text x="480" y="4795" font-size="13" fill="#1a1a1a" text-anchor="middle">заземление + проверка по rubric</text>
+<text x="480" y="4811" font-size="13" fill="#1a1a1a" text-anchor="middle">(детерминированный анти-галлюцинационный пол)</text>
+<rect x="1370" y="5010" width="380" height="140" rx="10" fill="#FFF2CC" stroke="#D6B656" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1560" y="5029" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflect</text>
+<text x="1560" y="5045" font-size="13" fill="#1a1a1a" text-anchor="middle">запись эпизода (+ журнал взаимодействий), harvest</text>
+<text x="1560" y="5061" font-size="13" fill="#1a1a1a" text-anchor="middle">сигнала (HITL / clarify → факты профиля),</text>
+<text x="1560" y="5077" font-size="13" fill="#1a1a1a" text-anchor="middle">компиляция</text>
+<text x="1560" y="5093" font-size="13" fill="#1a1a1a" text-anchor="middle">ПАТТЕРНА (+win/lose) → коллективный пул, детекция</text>
+<text x="1560" y="5109" font-size="13" fill="#1a1a1a" text-anchor="middle">привычки, извлечение фактов (+рёбра), саммари,</text>
+<text x="1560" y="5125" font-size="13" fill="#1a1a1a" text-anchor="middle">prune,</text>
+<text x="1560" y="5141" font-size="13" fill="#1a1a1a" text-anchor="middle">трекинг деградации, авто self-learning</text>
+<ellipse cx="1560" cy="5370" rx="90" ry="32" fill="#F8CECC" stroke="#B85450" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1560" y="5376" font-size="16" fill="#1a1a1a" text-anchor="middle" font-weight="bold">__end__</text>
+<text x="68" y="5473" font-size="15" fill="#1a1a1a" text-anchor="start">── сплошная: фиксированный переход (add_edge)        ┄┄ пунктир: условный (add_conditional_edges)        ⟲ self: ретрай шага / следующий шаг</text>
+<text x="68" y="5491" font-size="15" fill="#1a1a1a" text-anchor="start">цвета — серый: entrypoints · фиолетовый: память · оранжевый: роутинг/clarify · бирюзовый: цель · зелёный: мышление/исполнение · синий: навыки · жёлтый: ревью/самообучение</text>
 </svg>

@@ -1,74 +1,97 @@
 <mxfile host="app.diagrams.net" agent="self-extension-agent">
   <diagram name="agent-graph" id="agent-graph">
-    <mxGraphModel dx="1600" dy="1100" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1300" pageHeight="2400" math="0" shadow="0">
+    <mxGraphModel dx="1600" dy="1100" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="3900" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="title" value="self-extension-agent — LangGraph forward graph (the real node graph)" style="text;html=1;fontSize=17;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="40" y="18" width="1180" height="34" as="geometry" />
+        <mxCell id="title" value="self-extension-agent — LangGraph forward graph (every node = what happens &amp; how)" style="text;html=1;fontSize=22;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="24" width="2100" height="44" as="geometry" />
         </mxCell>
-        <mxCell id="__start__" value="__start__" style="ellipse;whiteSpace=wrap;html=1;fillColor=#E6E6FA;strokeColor=#9370DB;fontSize=15;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="825" y="66" width="150" height="48" as="geometry" />
+        <mxCell id="ephdr" value="ENTRYPOINTS (app layer) — invoke the graph (shared graph + memory)" style="text;html=1;fontSize=15;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="122" width="2100" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="recall" value="recall" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="810" y="191" width="180" height="54" as="geometry" />
+        <mxCell id="ep0" value="REPL&#10;main.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="535" y="157" width="330" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="reflexion" value="reflexion" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="810" y="319" width="180" height="54" as="geometry" />
+        <mxCell id="ep_e0" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep0" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep1" value="Telegram&#10;bot.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="955" y="157" width="330" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="act" value="act" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="810" y="447" width="180" height="54" as="geometry" />
+        <mxCell id="ep_e1" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep1" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep2" value="Desktop / Web GUI&#10;desktop.py · React+Vite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1375" y="157" width="330" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="goal" value="goal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="447" width="180" height="54" as="geometry" />
+        <mxCell id="ep_e2" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep2" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep3" value="Chrome extension&#10;agent in your browser" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="1795" y="157" width="330" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="fast_answer" value="fast_answer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="1030" y="447" width="180" height="54" as="geometry" />
+        <mxCell id="ep_e3" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep3" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="ep4" value="FastAPI server&#10;server.py · /chat · /run · astream" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
+          <mxGeometry x="2215" y="157" width="330" height="86" as="geometry" />
         </mxCell>
-        <mxCell id="clarify_gate" value="clarify_gate" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="550" y="575" width="180" height="54" as="geometry" />
+        <mxCell id="ep_e4" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep4" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="__start__" value="__start__" style="ellipse;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=16;fontStyle=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="408" width="180" height="64" as="geometry" />
         </mxCell>
-        <mxCell id="reason" value="reason" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="1030" y="575" width="180" height="54" as="geometry" />
+        <mxCell id="recall" value="recall&#10;memory (episodes / facts / conclusions / goals)&#10;+ implicit feedback + external ctx + AutoRAG&#10;(user KB + session files, BM25 + sanitize).&#10;CONDITIONAL &amp; FLEXIBLE (recall_gate): facts AND&#10;associative memory BY RELEVANCE · GraphRAG-lite ·&#10;query embedded ONCE → router reuses it" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E1D5E7;strokeColor=#9673A6;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="660" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="router" value="router" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="703" width="180" height="54" as="geometry" />
+        <mxCell id="reflexion" value="reflexion&#10;Self-Reflexion CHOICE of the thinking mode from&#10;task analysis · + bandit prior (Beta/Thompson over&#10;the user&#x27;s episodes, sees failures) + few-shots&#10;+ intent router L2 (embedding-kNN, any language).&#10;high ambiguity → clarify · heavy is NOT predicted —&#10;it is EARNED by runtime evidence" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="950" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="create_skills" value="create_skills" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="550" y="831" width="180" height="54" as="geometry" />
+        <mxCell id="act" value="act&#10;System 1 with hands: ONE direct action with&#10;1–2 tools (BM25 skill pick, HITL kept).&#10;zero tool calls / ESCALATE → goal (deliberate path)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="1240" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="sgr_create" value="sgr_create" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="550" y="959" width="180" height="54" as="geometry" />
+        <mxCell id="goal" value="goal&#10;goal-setting: aim + a &#x27;worthwhile&#x27; goal +&#10;rubric, kept in context for all nodes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#B0E3E6;strokeColor=#0E8088;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="1240" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="skill_selector" value="skill_selector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="1087" width="180" height="54" as="geometry" />
+        <mxCell id="fast_answer" value="fast_answer&#10;direct answer (System 1 / System 2), no tools;&#10;the clarify branch also resolves here" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1890" y="1240" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="capability_research" value="capability_research" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="275" y="1215" width="210" height="54" as="geometry" />
+        <mxCell id="clarify_gate" value="clarify_gate&#10;batch of precise clarifications (markers where the&#10;set is finite, open otherwise). answers → the run&#x27;s&#10;clarification registry (dedup, reused by&#10;decompose / step / synthesize)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="830" y="1530" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="decompose" value="decompose" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="1343" width="180" height="54" as="geometry" />
+        <mxCell id="reason" value="reason&#10;System 2: deep step-by-step reasoning,&#10;no tools → goes through final validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1890" y="1530" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="skill_injection" value="skill_injection" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="1471" width="180" height="54" as="geometry" />
+        <mxCell id="router" value="router&#10;route the deliberate path: build a new skill&#10;(create_skills) or pick existing ones (skill_selector)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE6CC;strokeColor=#D79B00;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="1820" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="step_executor" value="step_executor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="1599" width="180" height="54" as="geometry" />
+        <mxCell id="create_skills" value="create_skills&#10;ReAct builds a new skill (code) for a&#10;capability gap → into the skill library" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="830" y="2110" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="synthesize" value="synthesize" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="1727" width="180" height="54" as="geometry" />
+        <mxCell id="sgr_create" value="sgr_create&#10;SGR review + smoke test of the new skill →&#10;load it (L1 self-improvement) or back to router" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="830" y="2400" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="review" value="review" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="550" y="1855" width="180" height="54" as="geometry" />
+        <mxCell id="skill_selector" value="skill_selector&#10;BM25 retrieval of relevant skills for the query.&#10;AMORTIZATION: with a PATTERN runs with NO LLM call" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="2690" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="validation" value="validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="290" y="1983" width="180" height="54" as="geometry" />
+        <mxCell id="capability_research" value="capability_research&#10;research capabilities; on a gap discover &amp; connect&#10;an MCP server (registry + trusted catalog, HITL)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#6C8EBF;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="2980" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="reflect" value="reflect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ECECFF;strokeColor=#9370DB;fontSize=15;" vertex="1" parent="1">
-          <mxGeometry x="810" y="2111" width="180" height="54" as="geometry" />
+        <mxCell id="decompose" value="decompose&#10;plan the task into steps → skill_injection.&#10;at sim ≥ 0.7 → NO LLM (plan straight from a pattern)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="3270" width="380" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="__end__" value="__end__" style="ellipse;whiteSpace=wrap;html=1;fillColor=#E6E6FA;strokeColor=#9370DB;fontSize=15;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="825" y="2242" width="150" height="48" as="geometry" />
+        <mxCell id="skill_injection" value="skill_injection&#10;inject the selected skills / tools into&#10;the step executor&#x27;s toolset" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="3560" width="380" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="step_executor" value="step_executor&#10;execute + validate PER ITEM (⟲ retry / next step).&#10;the validator sees the ACTUALLY-called tools&#10;(text ≠ action) · within-step context masking ·&#10;ask_user catch-up at a fork" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="3850" width="380" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="synthesize" value="synthesize&#10;assemble the final solution from the steps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="4140" width="380" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="review" value="review&#10;HEAVY only: end-to-end review of the assembled&#10;solution by the DEEP model · problems → fix&#10;sub-steps (→ step_executor) · clean → validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="830" y="4430" width="380" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="validation" value="validation&#10;grounding + rubric check of the answer&#10;(deterministic anti-hallucination floor)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="290" y="4720" width="380" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="reflect" value="reflect&#10;write the episode (+ interaction journal), harvest&#10;signal (HITL / clarify → profile facts), compile the&#10;PATTERN (+win/lose) → collective pool, detect a&#10;habit, extract facts (+edges), summary, prune,&#10;degradation tracking, auto self-learning" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF2CC;strokeColor=#D6B656;fontSize=13;verticalAlign=middle;shadow=1;arcSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1370" y="5010" width="380" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="__end__" value="__end__" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F8CECC;strokeColor=#B85450;fontSize=16;fontStyle=1;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="5338" width="180" height="64" as="geometry" />
         </mxCell>
         <mxCell id="e0" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="__start__" target="recall">
           <mxGeometry relative="1" as="geometry"></mxGeometry>
@@ -95,10 +118,10 @@
           <mxGeometry relative="1" as="geometry"></mxGeometry>
         </mxCell>
         <mxCell id="e8" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="reason" target="validation">
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1190" y="630"/><mxPoint x="1190" y="2010"/></Array></mxGeometry>
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="2620" y="1670"/><mxPoint x="2620" y="4790"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e9" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="fast_answer" target="reflect">
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1210" y="502"/><mxPoint x="1210" y="2138"/></Array></mxGeometry>
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="2540" y="1380"/><mxPoint x="2540" y="5080"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e10" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="reflect" target="__end__">
           <mxGeometry relative="1" as="geometry"></mxGeometry>
@@ -134,16 +157,16 @@
           <mxGeometry relative="1" as="geometry"></mxGeometry>
         </mxCell>
         <mxCell id="e21" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="sgr_create" target="router">
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="70" y="986"/><mxPoint x="70" y="730"/></Array></mxGeometry>
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="90" y="2470"/><mxPoint x="90" y="1890"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e22" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="sgr_create" target="create_skills">
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="545" y="986"/><mxPoint x="545" y="858"/></Array></mxGeometry>
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="810" y="2470"/><mxPoint x="810" y="2180"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e23" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="sgr_create" target="skill_selector">
           <mxGeometry relative="1" as="geometry"></mxGeometry>
         </mxCell>
         <mxCell id="e24" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="step_executor" target="step_executor">
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="250" y="1608"/><mxPoint x="250" y="1644"/></Array></mxGeometry>
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="265" y="3884"/><mxPoint x="265" y="3956"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e25" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="synthesize" target="review">
           <mxGeometry relative="1" as="geometry"></mxGeometry>
@@ -152,19 +175,19 @@
           <mxGeometry relative="1" as="geometry"></mxGeometry>
         </mxCell>
         <mxCell id="e27" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="review" target="step_executor">
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="98" y="1882"/><mxPoint x="98" y="1626"/></Array></mxGeometry>
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="150" y="4500"/><mxPoint x="150" y="3920"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e28" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="review" target="validation">
           <mxGeometry relative="1" as="geometry"></mxGeometry>
         </mxCell>
         <mxCell id="e29" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="validation" target="router">
-          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="126" y="2010"/><mxPoint x="126" y="730"/></Array></mxGeometry>
+          <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="210" y="4790"/><mxPoint x="210" y="1890"/></Array></mxGeometry>
         </mxCell>
         <mxCell id="e30" style="html=1;endArrow=block;rounded=1;strokeColor=#8a8fb8;dashed=1;" edge="1" parent="1" source="validation" target="reflect">
           <mxGeometry relative="1" as="geometry"></mxGeometry>
         </mxCell>
-        <mxCell id="legend" value="── сплошная: фиксированный переход (add_edge)        ┄┄ пунктир: условный переход (add_conditional_edges)        ⟲ self: ретрай шага" style="text;html=1;fontSize=13;align=left;verticalAlign=middle;fillColor=#ffffff;strokeColor=#cccccc;" vertex="1" parent="1">
-          <mxGeometry x="40" y="2300" width="1180" height="28" as="geometry" />
+        <mxCell id="legend" value="── solid: fixed transition (add_edge)        ┄┄ dashed: conditional (add_conditional_edges)        ⟲ self-loop: step retry / next step&#10;colours — gray: entrypoints · purple: memory · orange: routing/clarify · teal: goal · green: thinking/execution · blue: skills/capabilities · yellow: review/self-learning" style="text;html=1;fontSize=15;align=left;verticalAlign=top;fillColor=#ffffff;strokeColor=#cccccc;" vertex="1" parent="1">
+          <mxGeometry x="60" y="5454" width="2100" height="64" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
