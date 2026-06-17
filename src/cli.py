@@ -70,8 +70,15 @@ def main_cli() -> None:
         else:
             print("sea init — уже инициализировано (ничего не перезаписано).")
         return
+    # ЕДИНСТВЕННЫЙ интерактивный интерфейс — full-screen TUI (Textual): `sea` без аргументов
+    # ИЛИ `sea --tui`/`tui`. Старый line-mode REPL УДАЛЁН (TUI его полностью заменил).
+    if first in ("--tui", "tui") or not first:
+        from .tui import run_tui
+        run_tui()
+        return
 
-    # Тяжёлый путь (REPL или one-shot): импортируем агента ЛЕНИВО — только теперь.
+    # Тяжёлый путь — ТОЛЬКО one-shot `sea "задача"` [--auto] (для скриптов/cron, без интерактива).
+    # Импортируем агента ЛЕНИВО — только теперь.
     # ВАЖНО: грузим ЖИВОЙ main.py из каталога проекта (cwd), а не устаревшую КОПИЮ, которую
     # editable-install кладёт в site-packages (main.py — root-модуль → копируется как обычный
     # файл, НЕ editable; из-за этого `sea` грузил старый баннер и не видел /init — баг ревью).

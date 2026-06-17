@@ -15,13 +15,22 @@
 """
 from __future__ import annotations
 
-import contextvars
 import inspect
 import re
 from typing import Awaitable, Callable, Optional, Union
 
-# Ledger одного прогона. contextvar → разные запросы (в т.ч. на сервере) изолированы.
-_ledger: contextvars.ContextVar[Optional[list]] = contextvars.ContextVar("clarify_ledger", default=None)
+# Ledger одного прогона — ОБЩИЙ dict по run_id (run_id с ГРАНИЦЫ запроса, run_context). Раньше был
+# contextvar, выставляемый в recall_node — но set-в-ноде НЕ виден сёстрам-нодам/ретраям (−9pp-капкан):
+# на ретрае step_executor ledger лениво создавался ПУСТЫМ → дедуп не видел прошлый ответ → clarify
+# ПЕРЕСПРАШИВАЛ на каждом «step failed — retrying» (баг ревью). dict по run_id виден на ВСЕХ нодах/
+# ретраях прогона; изоляция мульти-клиента — по ключу; без run_scope работает общий "_default".
+from . import run_context as _rc
+_ledgers: dict[str, list] = {}
+_rc.register_cleanup(lambda rid: _ledgers.pop(rid, None))
+
+
+def _key() -> str:
+    return _rc.current_run_id() or "_default"
 
 # Канал к человеку: (items) -> list[str] ответов (или None/[] если не отвечает).
 # items: [{"question", "options": [...], "why"}]
@@ -36,15 +45,16 @@ def set_clarifier(fn: Optional[Clarifier]) -> None:
 
 
 def reset_ledger() -> None:
-    """Новый прогон — чистый ledger (зовётся в recall_node)."""
-    _ledger.set([])
+    """Новый прогон — чистый ledger (зовётся в recall_node). Ключ — run_id с границы запроса."""
+    _ledgers[_key()] = []
 
 
 def ledger() -> list:
-    cur = _ledger.get()
+    k = _key()
+    cur = _ledgers.get(k)
     if cur is None:
         cur = []
-        _ledger.set(cur)
+        _ledgers[k] = cur
     return cur
 
 

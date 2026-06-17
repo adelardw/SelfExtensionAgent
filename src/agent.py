@@ -86,7 +86,7 @@ from .memory_tools import make_memory_tools, clear_scratch
 from .memory import project_memory
 from . import context_files
 from .research import make_deep_research_tool, agentic_research
-from .compute import make_compute_tool
+from .compute import make_compute_tool, make_datetime_tool
 from .media import make_pdf_vision_tool
 from .knowledge_base import (
     make_kb_tool, kb_has_docs, search_kb_raw,
@@ -1659,6 +1659,9 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # Вычислительный слой: точные расчёты/агрегация над найденными данными (LLM-арифметика
     # ненадёжна). Доступен всегда — вычисления универсальны для любой задачи.
     tools.append(make_compute_tool())
+    # Часы: точные текущие дата/время в любом часовом поясе. Без него модель на «сколько времени»
+    # уходила в веб и советовала сайты-часы (120с, ноль пользы). Универсален → доступен всегда.
+    tools.append(make_datetime_tool())
     # Vision-чтение фигур в PDF — ТОЛЬКО когда в задаче реально есть PDF (анти-bloat
     # контекста: не вешать на каждый шаг тул, который без файла бесполезен).
     _ctx = (state.get("query", "") + " " + state.get("memory_context", "")).lower()

@@ -19,11 +19,38 @@ SEA_LOGO = r"""███████╗███████╗ █████�
 
 # Squid Girl (Ika Musume) теперь рендерится из РЕАЛЬНОЙ картинки в ANSI (assets_ika.ans,
 # см. squid_renderable) — ручной box-арт убран (выходил «страшным»).
+_SQUID_CACHE = None  # кэш Ика-renderable (баннер ре-рендерится на каждый тик анимации лого)
 
 # Палитра перелива: синий → циан → серебро → металлик-серый → обратно (для shimmer).
 _SHIMMER = ["#1e6fff", "#2a93ff", "#38c6ff", "#7fe3ff", "#bfe9f5",
             "#cbd5e1", "#9aa7b8", "#7c899c", "#9aa7b8", "#cbd5e1",
             "#bfe9f5", "#7fe3ff", "#38c6ff", "#2a93ff"]
+
+
+def shimmer_color(phase: int) -> str:
+    """Цвет из палитры перелива по фазе (бесконечный синий↔металлик-серый) — для статуса think."""
+    return _SHIMMER[phase % len(_SHIMMER)]
+
+
+# Анимированная «точечная фигурка» рядом с текстом размышления (брайль — морфится по точкам).
+THINK_DOTS = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+
+def think_dot(phase: int) -> str:
+    return THINK_DOTS[phase % len(THINK_DOTS)]
+
+
+# Большой набор «думательных» текстовок (gerund) — морская/общая тема, как у CLI-агентов.
+THINKING_WORDS = (
+    "Thinking", "Spelunking", "Waveling", "Pondering", "Brewing", "Conjuring", "Noodling",
+    "Percolating", "Marinating", "Surfing", "Diving", "Fathoming", "Tidewalking", "Churning",
+    "Drifting", "Navigating", "Plumbing", "Wrangling", "Cogitating", "Ruminating", "Scheming",
+    "Untangling", "Foraging", "Synthesizing", "Distilling", "Voyaging", "Trawling", "Beachcombing",
+    "Snorkeling", "Whirlpooling", "Mulling", "Brainstorming", "Crystallizing", "Incubating",
+    "Deliberating", "Calibrating", "Wayfinding", "Tinkering", "Pathfinding", "Sleuthing",
+    "Concocting", "Riffing", "Excavating", "Decoding", "Charting", "Reckoning", "Pondersurfing",
+    "Bubbling", "Swirling", "Coalescing",
+)
 
 
 def _grad_line(line: str, phase: int, palette=_SHIMMER):
@@ -39,12 +66,13 @@ def _grad_line(line: str, phase: int, palette=_SHIMMER):
     return t
 
 
-def logo_renderable():
-    """Статичный SEA-лого (финальный градиент) как rich-renderable — для раскладки в колонке."""
+def logo_renderable(phase: int = 0):
+    """SEA-лого как rich-renderable. phase сдвигает градиент → анимация перелива в баннере
+    (TUI дёргает с растущей фазой). phase=0 — статичный градиент."""
     from rich.console import Group
 
     lines = SEA_LOGO.splitlines()
-    return Group(*[_grad_line(ln, r) for r, ln in enumerate(lines)])
+    return Group(*[_grad_line(ln, phase + r) for r, ln in enumerate(lines)])
 
 
 def shimmer_logo(console, cycles: int = 2, fps: int = 18, transient: bool = False) -> None:
@@ -78,11 +106,15 @@ def squid_renderable():
 
     from rich.text import Text
 
+    global _SQUID_CACHE
+    if _SQUID_CACHE is not None:
+        return _SQUID_CACHE
     p = Path(__file__).parent / "assets_ika.ans"
     try:
-        return Text.from_ansi(p.read_text(encoding="utf-8"))
+        _SQUID_CACHE = Text.from_ansi(p.read_text(encoding="utf-8"))
     except Exception:  # noqa: BLE001
-        return Text("～ Ika ～\n from the\n deep blue\n sea ♪", style="#38c6ff")
+        _SQUID_CACHE = Text("～ Ika ～\n from the\n deep blue\n sea ♪", style="#38c6ff")
+    return _SQUID_CACHE
 
 
 def squid_height() -> int:

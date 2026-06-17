@@ -135,6 +135,63 @@ def scan_repo(base: Path | None = None) -> str:
                 f"{type(e).__name__}). Опиши проект и правила вручную.\n")
 
 
+def gather_repo_digest(base: Path | None = None, max_files: int = 40) -> str:
+    """Дайджест репозитория для LLM-обзора: README + манифесты целиком (усечённо) + докстринги/
+    первые строки исходников по подпапкам. Детерминированно, без исполнения. Это «глаза» для
+    /init: даёт модели реальную семантику проекта (назначение модулей), а не только список папок."""
+    base = base or root()
+    parts: list[str] = [scan_repo(base), ""]
+    # README + ключевые манифесты — целиком (с потолком), они несут назначение проекта.
+    for name in ("README.md", "README.rst", "pyproject.toml", "package.json", "Dockerfile"):
+        p = base / name
+        if p.is_file():
+            try:
+                txt = p.read_text(encoding="utf-8", errors="replace")[:4000]
+                parts += [f"### {name}", "```", txt, "```", ""]
+            except Exception:  # noqa: BLE001
+                pass
+    # Докстринги/головы исходников — что делает каждый модуль (дёшево и информативно).
+    parts.append("### Модули (докстринг / первые строки)")
+    seen = 0
+    for dirpath, dirnames, filenames in os.walk(base):
+        dirnames[:] = [d for d in dirnames
+                       if d not in _IGNORE_DIRS and not d.startswith(".") and not d.endswith(".egg-info")]
+        for fn in sorted(filenames):
+            if Path(fn).suffix.lower() not in _LANG or seen >= max_files:
+                continue
+            fp = Path(dirpath) / fn
+            try:
+                head = fp.read_text(encoding="utf-8", errors="replace")[:600].strip()
+            except Exception:  # noqa: BLE001
+                continue
+            rel = fp.relative_to(base)
+            # первый «осмысленный» кусок: docstring/комментарий-шапка или первые строки
+            snippet = " ".join(head.splitlines()[:6])[:240]
+            parts.append(f"- `{rel}` — {snippet}")
+            seen += 1
+        if seen >= max_files:
+            break
+    return "\n".join(parts)
+
+
+def build_overview_messages(digest: str, existing: str = "") -> list:
+    """Сообщения для LLM: написать РЕАЛЬНЫЙ обзор проекта в SEA.md (назначение, архитектура,
+    ключевые модули, как запускать/тестировать, конвенции) на основе дайджеста репозитория."""
+    from langchain_core.messages import HumanMessage, SystemMessage
+    sys = (
+        "Ты пишешь файл SEA.md — постоянные инструкции проекта для CLI-агента (аналог CLAUDE.md). "
+        "На основе дайджеста репозитория составь СОДЕРЖАТЕЛЬНЫЙ обзор на русском, БЕЗ воды и без "
+        "выдумок (опирайся только на дайджест). Разделы: '# <имя проекта>' с 1-2 фразами назначения; "
+        "## Архитектура (как устроено, основные потоки); ## Ключевые модули (по папкам/файлам — что "
+        "за что отвечает); ## Запуск и тесты (команды); ## Конвенции (стиль, что нельзя трогать — если "
+        "видно из кода). Markdown, по делу, 40-120 строк. Не дублируй сырой список файлов."
+    )
+    human = "Дайджест репозитория:\n\n" + digest[:16000]
+    if existing.strip():
+        human += "\n\nТекущий SEA.md (учти ручные правила внизу, не потеряй их):\n" + existing[:3000]
+    return [SystemMessage(content=sys), HumanMessage(content=human)]
+
+
 def root() -> Path:
     return Path(os.getenv("AGENT_PROJECT_ROOT") or Path.cwd())
 
