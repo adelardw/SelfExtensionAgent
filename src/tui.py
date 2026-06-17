@@ -539,8 +539,12 @@ class SeaTUI(App):
         ci = self._cur_tracker.input if self._cur_tracker else 0
         co = self._cur_tracker.output if self._cur_tracker else 0
         li, lo = self._tok_in + ci, self._tok_out + co
+        # «вызов в полёте»: started>calls → модель СЕЙЧАС отвечает (токены придут пачкой на завершении,
+        # поэтому 0 tok при идущем вызове — норма, не простой). Точка-пульс показывает живость.
+        inflight = (self._cur_tracker.started - self._cur_tracker.calls) if self._cur_tracker else 0
+        flight = "  [#88c0d0]⟳ calling model…[/]" if inflight > 0 else ""
         self._status(f"[{color}]{dot} {self._think_word}…[/]{nl}  [dim]{secs}s · 🧮 ↓{li} ↑{lo} "
-                     f"({li + lo} tok)[/]")
+                     f"({li + lo} tok)[/]{flight}")
 
     def _on_node_label(self, lbl: str) -> None:
         # Что агент делает сейчас: в статус (анимация) И трейлом в ленту (видно «размышления»/шаги).

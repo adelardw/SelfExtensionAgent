@@ -28,10 +28,19 @@ class TokenTracker(BaseCallbackHandler):
         self.input = 0
         self.output = 0
         self.calls = 0
+        self.started = 0   # сколько LLM-вызовов НАЧАТО (для индикатора «вызов в полёте»: started>calls)
         # K3: видимость авто-prefix-cache. DeepSeek/Gemini/OpenAI-совместимые отдают долю
         # входных токенов, прочитанных из кэша (prompt_tokens_details.cached_tokens). Без
         # этого нельзя измерить эффект стабилизации префикса — диагностика была слепой.
         self.cached = 0
+
+    # on_..._start фиксируют НАЧАЛО вызова → UI видит, что модель сейчас работает, ещё до того,
+    # как придут токены (они считаются только на on_llm_end, пачкой по завершении вызова).
+    def on_chat_model_start(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        self.started += 1
+
+    def on_llm_start(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+        self.started += 1
 
     def on_llm_end(self, response, **kwargs) -> None:  # noqa: ANN001
         self.calls += 1
