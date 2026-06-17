@@ -20,15 +20,21 @@ import sys
 _USAGE = """sea — self-extension-agent (CLI)
 
 Использование:
-  sea                     запустить интерактивный REPL (диалог в терминале)
-  sea "<задача>"          выполнить одну задачу и выйти (one-shot)
-  sea --auto "<задача>"   one-shot без подтверждений (автономно)
-  sea init                создать .sea/ (история, лог решений) + стартовые SEA.md/MEMORY.md/MCP.md
-  sea --version, -V       показать версию
-  sea --help, -h          показать эту справку
+  sea                       запустить полноэкранный TUI (диалог в терминале)
+  sea "<задача>"            выполнить одну задачу и выйти (one-shot)
+  sea --auto "<задача>"     one-shot без подтверждений (автономно)
+  sea init                  создать .sea/ + стартовые SEA.md/MEMORY.md/MCP.md
 
-В REPL доступны слэш-команды: /model /facts /goal /usage /diagnose /kb /chats и др.
-Команда работает из каталога проекта (рядом должны быть config.yml и .env с ключом провайдера)."""
+Настройка (пишется в ~/.config/sea/config.local.yml — работает во ВСЕХ проектах):
+  sea key <API_KEY>         задать ключ провайдера
+  sea provider openrouter|ollama [base_url]   выбрать провайдера
+  sea config                показать текущую конфигурацию (провайдер, ключ, пути)
+
+  sea --version, -V         версия      ·      sea --help, -h      справка
+
+Установлен ПАКЕТОМ (uv tool / uv pip) — работает в любом каталоге: базовые модели берутся из
+пакетного config.yml; cwd-config.yml (если есть) переопределяет его. Ключ: env (.env) → `sea key`.
+В TUI те же настройки: /key <KEY> · /provider <name> [base_url] · /model · /config."""
 
 
 def _version() -> str:
@@ -69,6 +75,49 @@ def main_cli() -> None:
             print("sea init — создано:\n  " + "\n  ".join(created))
         else:
             print("sea init — уже инициализировано (ничего не перезаписано).")
+        return
+    # Настройка ИЗ CLI (без импорта агента) — пишется в ГЛОБАЛЬНЫЙ ~/.config/sea/config.local.yml,
+    # поэтому работает во всех проектах. Базовые модели остаются из пакетного config.yml.
+    if first in ("key", "login"):
+        from .cli_config import set_cli
+        from . import config_paths
+        # Ключ как АРГУМЕНТ виден в `ps aux` и истории шелла (~/.zsh_history). Безопаснее — без
+        # аргумента: спросим скрытым вводом (getpass, без эха, не в истории). `-` тоже → stdin.
+        if len(args) >= 2 and args[1] != "-":
+            print("⚠ ключ передан аргументом — он попадёт в историю шелла и `ps`. Безопаснее: "
+                  "`sea key` (скрытый ввод) или env OPEN_ROUTER_API_KEY.")
+            key = args[1].strip()
+        else:
+            import getpass
+            key = getpass.getpass("API key (ввод скрыт): ").strip()
+        if not key:
+            print("Пусто — ключ не сохранён.")
+            raise SystemExit(2)
+        set_cli("api_key", key)
+        print(f"✓ API-ключ сохранён → {config_paths.global_local_path()} (0600)")
+        return
+    if first == "provider":
+        from .cli_config import set_cli
+        from . import config_paths
+        if len(args) < 2 or args[1] not in ("openrouter", "ollama"):
+            print("Использование: sea provider openrouter|ollama [base_url]")
+            raise SystemExit(2)
+        set_cli("provider", args[1])
+        if len(args) > 2:
+            set_cli("base_url", args[2].strip())
+        print(f"✓ Провайдер: {args[1]}" + (f" · base_url: {args[2]}" if len(args) > 2 else "")
+              + f"  → {config_paths.global_local_path()}")
+        return
+    if first == "config":
+        from .cli_config import get_cli
+        from . import config_paths
+        print("sea config:")
+        print(f"  base config : {config_paths.base_config_path()}")
+        print(f"  user config : {config_paths.global_local_path()}")
+        print(f"  provider    : {get_cli('provider') or 'openrouter (default)'}")
+        print(f"  base_url    : {get_cli('base_url') or '(default)'}")
+        has_env = bool(__import__('os').getenv('OPEN_ROUTER_API_KEY') or __import__('os').getenv('OPENAI_API_KEY'))
+        print(f"  api key     : {'env (.env)' if has_env else ('set (user config)' if get_cli('api_key') else 'NOT SET — run: sea key <KEY>')}")
         return
     # ЕДИНСТВЕННЫЙ интерактивный интерфейс — full-screen TUI (Textual): `sea` без аргументов
     # ИЛИ `sea --tui`/`tui`. Старый line-mode REPL УДАЛЁН (TUI его полностью заменил).

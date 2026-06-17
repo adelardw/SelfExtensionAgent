@@ -27,7 +27,7 @@ from textual.widgets import Input, Label, RichLog, Static
 # Слэш-команды — для ghost-подсказок (автодополнение при вводе «/») в поле ввода.
 _COMMANDS = ["/help", "/clear", "/new", "/init", "/auto", "/model", "/chats", "/fav", "/facts",
              "/goal", "/usage", "/traces", "/diagnose", "/improve", "/attach", "/voice", "/kb",
-             "/compact", "/sync", "/token", "exit"]
+             "/compact", "/sync", "/token", "/key", "/provider", "/config", "exit"]
 
 
 def _banner(phase: int = 0) -> Table:
@@ -606,6 +606,14 @@ class SeaTUI(App):
         from src import hitl
         self.graph = graph
         self._status(f"ready · mode: {hitl.work_mode()}")
+        # Первый запуск без ключа (новый проект, установлен пакетом) — мягкая подсказка, не падаем.
+        try:
+            from src.llm import api_key
+            if not api_key():
+                self._log("[#d08770]⚠ No API key set.[/] Run [bold]/key <API_KEY>[/] (saved globally, "
+                          "works in every project) · [bold]/provider openrouter|ollama[/] to switch.")
+        except Exception:  # noqa: BLE001
+            pass
         self._start_bridge()  # поднять мост браузерного расширения (как старый REPL)
 
     def _start_bridge(self) -> None:
@@ -693,7 +701,9 @@ class SeaTUI(App):
             return
         self.query_one("#prompt", Input).value = ""
         # История ввода (↑/↓): добавляем отправленное (без подряд-дублей), курсор — в конец.
-        if not self._input_history or self._input_history[-1] != text:
+        # БЕЗОПАСНОСТЬ: команды с секретом (/key <API_KEY>) в историю НЕ кладём — иначе ↑ показал бы ключ.
+        _secret = text.lower().startswith(("/key", "/login"))
+        if not _secret and (not self._input_history or self._input_history[-1] != text):
             self._input_history.append(text)
         self._hist_idx = len(self._input_history)
         self._dismiss_welcome()  # первая отправка → убрать приветственный баннер (лого+Ика+инструкции)
@@ -776,6 +786,40 @@ class SeaTUI(App):
                 set_cli("provider", "openrouter")
             rebuild_llms()
             self._log(f"[#5b6472]Model: {active_summary()}[/]")
+        elif cmd == "/key":
+            # Ключ провайдера → ГЛОБАЛЬНЫЙ ~/.config/sea/config.local.yml (работает во всех проектах).
+            from src.cli_config import set_cli
+            from src.agent import rebuild_llms
+            if not args:
+                self._log("[#bf616a]Usage:[/] /key <API_KEY>")
+            else:
+                set_cli("api_key", args[0].strip())
+                rebuild_llms()
+                self._log("[#5b6472]✓ API key saved (user config) — works in every project.[/]")
+        elif cmd == "/provider":
+            from src.cli_config import set_cli
+            from src.llm import active_summary, set_provider
+            from src.agent import rebuild_llms
+            name = args[0] if args and args[0] in ("openrouter", "ollama") else None
+            if not name:
+                self._log("[#bf616a]Usage:[/] /provider openrouter|ollama [base_url]")
+            else:
+                set_provider(name, None)
+                set_cli("provider", name)
+                if len(args) > 1:
+                    set_cli("base_url", args[1].strip())
+                rebuild_llms()
+                self._log(f"[#5b6472]✓ Provider: {name}[/] · {active_summary()}")
+        elif cmd == "/config":
+            from src import config_paths
+            from src.cli_config import get_cli
+            from src.llm import active_summary, api_key_source
+            self._log("\n[bold #38c6ff]config[/]\n"
+                      f"provider : {get_cli('provider') or 'openrouter (default)'}\n"
+                      f"models   : {active_summary()}\n"
+                      f"api key  : {api_key_source()}\n"
+                      f"base cfg : {config_paths.base_config_path()}\n"
+                      f"user cfg : {config_paths.global_local_path()}")
         elif cmd == "/chats":
             from src import chat_store
             sub = args[0].lower() if args else ""

@@ -33,9 +33,12 @@ def test_no_output_hint():
 
 
 def test_tool_builds_and_runs():
+    import asyncio
     t = make_compute_tool()
     assert t.name == "python_exec"
-    res = t.invoke({"code": "print(sum(range(101)))"})
+    # тул теперь async (coroutine) — гейт python_exec умеет await HITL при недоверенном контенте.
+    # Без taint (чистый прогон) выполняется напрямую.
+    res = asyncio.run(t.ainvoke({"code": "print(sum(range(101)))"}))
     assert res.strip() == "5050"
 
 

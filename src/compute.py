@@ -21,14 +21,33 @@ class _Code(BaseModel):
 
 
 def make_compute_tool() -> StructuredTool:
-    def _run(code: str) -> str:
-        # no_net=True по контракту тула («без сети/ФС») + B2: python_exec всегда доступен, без HITL,
-        # код от LLM/инъекции → самый широкий канал эксфильтрации. Сеть режем (где есть syscall-sandbox).
-        ok, out = run_python_sandboxed(code, timeout=12, no_net=True)
+    async def _run(code: str) -> str:
+        import asyncio
+
+        from . import hitl, run_context
+        # ГЕЙТ: если в прогон попал НЕДОВЕРЕННЫЙ внешний контент (веб/документ/чужой репо/MCP), а
+        # песочница на macOS по умолчанию rlimits-only — инжектнутый из контента python_exec мог бы
+        # читать ФС и слать наружу. Требуем HITL-подтверждение. Полный auto (явный opt-in) — пропускает.
+        if run_context.external_content_seen() and not hitl.full_auto():
+            try:
+                approved, _note, kind = await hitl.confirm_rich(
+                    "python_exec ПОСЛЕ недоверенного внешнего контента (веб/док/репо) в этом прогоне — "
+                    f"возможна инъекция. Код:\n{code[:300]}")
+            except Exception:  # noqa: BLE001
+                approved, kind = True, "deny"  # сбой канала → не ломаем (защищает песочница)
+            # БЛОКИРУЕМ только когда ЧЕЛОВЕК реально отказал (kind != 'deny'). 'deny' = нет канала
+            # (headless: one-shot/eval/сервер-без-HITL) → НЕ ломаем функциональность: эксфильтрацию
+            # уже режет sandbox-exec (deny network/ФС-запись). Иначе GAIA/`sea "task"` падали бы.
+            if not approved and kind != "deny":
+                return (f"{hitl.REFUSAL_MARK}: python_exec не подтверждён (в прогоне был недоверенный "
+                        "внешний контент). Не повторяй — заверши и сообщи пользователю.")
+        # no_net=True по контракту тула («без сети/ФС»). run_python_sandboxed — блокирующий
+        # подпроцесс → в поток, чтобы не вешать event-loop.
+        ok, out = await asyncio.to_thread(run_python_sandboxed, code, 12, True)
         return out if ok else f"[ошибка исполнения] {out}"
 
     return StructuredTool.from_function(
-        func=_run, name="python_exec", args_schema=_Code,
+        coroutine=_run, name="python_exec", args_schema=_Code,
         description="Execute Python for EXACT computation (statistics, aggregation, filtering, "
                     "arithmetic with big numbers, parsing) over facts you've gathered. LLM math is "
                     "unreliable — use this for any non-trivial calculation. print() your result. "

@@ -33,6 +33,25 @@ def register_cleanup(fn: Callable[[str], None]) -> None:
     _cleanups.append(fn)
 
 
+# ── TAINT: в прогон попал НЕДОВЕРЕННЫЙ внешний контент (веб/документ/чужой репо/MCP) ──────────
+# Нужен для гейта python_exec: инжектнутый из такого контента вызов на macOS (rlimits-only) мог бы
+# читать ФС и слать наружу → требуем HITL-подтверждение (кроме полного auto). Скоуп — по run_id.
+_tainted: dict[str, bool] = {}
+
+
+def mark_external_content() -> None:
+    """Пометить текущий прогон: обработан недоверенный внешний контент."""
+    _tainted[current_run_id() or "_default"] = True
+
+
+def external_content_seen() -> bool:
+    """Был ли в прогоне недоверенный внешний контент (веб/док/репо/MCP)."""
+    return _tainted.get(current_run_id() or "_default", False)
+
+
+register_cleanup(lambda rid: _tainted.pop(rid, None))
+
+
 @contextmanager
 def request_scope(run_id: str, user_id: str = ""):
     """Изолировать запрос по run_id (+ user_id). Оборачивать вызов графа на границе сервера/бота."""

@@ -17,7 +17,11 @@ load_dotenv()  # ключи доступны и при прямом исполь
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
 
-_cfg = OmegaConf.load("config.yml")
+# config.yml через резолвер: cwd-файл (project override) ИЛИ ПАКЕТНЫЙ дефолт — иначе установленный
+# `sea` в чужом каталоге падал FileNotFoundError при импорте (грузил "config.yml" из cwd). Дефолтные
+# модели «остаются» — они в пакетном config.yml.
+from .config_paths import base_config_path
+_cfg = OmegaConf.load(str(base_config_path()))
 _active: str | None = None  # кэш активного провайдера за сессию
 _override: dict = {"provider": None, "model": None}  # рантайм-выбор из CLI (/model)
 

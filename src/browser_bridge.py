@@ -175,7 +175,9 @@ async def _handler(ws):
         hello = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
     except Exception:  # noqa: BLE001
         return
-    if hello.get("token") != token():
+    # Сравнение токена — constant-time (secrets.compare_digest), не «!=» (тайминг). На loopback
+    # эксплуатировать почти нереально, но это дешёвый best-practice (и без падения на None).
+    if not secrets.compare_digest(str(hello.get("token") or ""), token()):
         _log("handshake: ОТКЛОНЁН (неверный токен)")
         await ws.close(code=4001, reason="bad token")
         return

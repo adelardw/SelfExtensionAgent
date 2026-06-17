@@ -185,8 +185,9 @@ def _syscall_sandbox_prefix(no_net: bool = False) -> list[str]:
     Опциональная изоляция syscall-уровня ПОВЕРХ rlimits, если в системе есть
     подходящий инструмент (best-effort, без жёсткой зависимости):
       • Linux: bubblewrap (bwrap) — read-only / namespaces, либо firejail;
-      • macOS: sandbox-exec с профилем (deprecated, но рабочий) — отключён по
-        умолчанию, т.к. ломает часть импортов; включается AGENT_SANDBOX_EXEC=1.
+      • macOS: sandbox-exec с профилем (deprecated, но рабочий) — ВКЛЮЧЁН по умолчанию
+        (запись только в $TMPDIR + опц. deny network); выключить — AGENT_SANDBOX_EXEC=0
+        (если ломает редкий импорт, пишущий кэш вне tmp).
     Управление: AGENT_SYSCALL_SANDBOX=0 — выключить совсем; =1/auto (default) — авто.
     Возвращает prefix-команду (или пусто → только rlimits).
     """
@@ -211,11 +212,15 @@ def _syscall_sandbox_prefix(no_net: bool = False) -> list[str]:
             return cmd
         if shutil.which("firejail"):
             return ["firejail", "--quiet", "--private-tmp", "--noprofile"] + (["--net=none"] if no_net else [])
-    elif _pf.system() == "Darwin" and os.environ.get("AGENT_SANDBOX_EXEC") == "1":
+    elif _pf.system() == "Darwin" and os.environ.get("AGENT_SANDBOX_EXEC", "1") != "0":
         if shutil.which("sandbox-exec"):
-            # минимальный профиль: чтение ок, запрет записи вне /tmp, опц. запрет сети.
+            # ВКЛ по умолчанию (opt-out AGENT_SANDBOX_EXEC=0). Профиль: чтение ок, запрет записи вне
+            # tmp (+$TMPDIR — туда пишут кэши некоторых либ на импорте), опц. запрет сети. Так
+            # ФАКТИЧЕСКОЕ поведение python_exec совпадает с КОНТРАКТОМ «без сети/ФС».
+            tmp = os.environ.get("TMPDIR", "").rstrip("/")
+            tmp_rule = f'(subpath "{tmp}")' if tmp else ""
             prof = ("(version 1)(allow default)(deny file-write*)"
-                    '(allow file-write* (subpath "/private/tmp") (subpath "/tmp"))'
+                    f'(allow file-write* (subpath "/private/tmp") (subpath "/tmp") {tmp_rule})'
                     + ("(deny network*)" if no_net else ""))
             return ["sandbox-exec", "-p", prof]
     return []

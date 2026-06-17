@@ -17,8 +17,18 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
-BASE = Path("config.yml")
-LOCAL = Path("config.local.yml")
+from . import config_paths
+
+# BASE — cwd config.yml ИЛИ пакетный дефолт (резолвер): установленный `sea` (uv tool / uv pip)
+# работает в ЛЮБОМ каталоге, а не только в репо. Базовые модели — в пакетном config.yml.
+BASE = config_paths.base_config_path()
+
+# LOCAL (CLI-настройки: api_key, провайдер, base_url, гранты): cwd `config.local.yml` если есть
+# (проектный override, как раньше) ИНАЧЕ ГЛОБАЛЬНЫЙ ~/.config/sea/config.local.yml. Поэтому в новом
+# проекте `sea key`/`/key` пишет в глобальный → ключ работает во ВСЕХ проектах. Модульные BASE/LOCAL
+# монкейпатчатся в тестах — load_merged/set_cli ходят именно через них.
+_proj = config_paths.project_local_path()
+LOCAL = _proj if _proj.exists() else config_paths.global_local_path()
 
 # config.local.yml хранит api_key и HITL-гранты. Запись делаем атомарно (temp+fsync+os.replace)
 # под локом: иначе конкурентный set_cli (CLI + фоновый персист гранта) мог оставить полу-записанный
@@ -47,9 +57,10 @@ def _atomic_save(cfg, path: Path) -> None:
 
 
 def load_merged():
-    """config.yml + config.local.yml поверх (local выигрывает)."""
-    base = OmegaConf.load(BASE) if BASE.exists() else OmegaConf.create({})
-    if LOCAL.exists():
+    """base (cwd config.yml | пакетный дефолт) + LOCAL поверх (cwd-проектный или глобальный). Поздний
+    выигрывает. Битый local не ломает запуск."""
+    base = OmegaConf.load(BASE) if Path(BASE).exists() else OmegaConf.create({})
+    if Path(LOCAL).exists():
         try:
             return OmegaConf.merge(base, OmegaConf.load(LOCAL))
         except Exception:  # noqa: BLE001 — битый local не должен ломать запуск
@@ -63,8 +74,12 @@ def get_cli(key: str, default: Any = None) -> Any:
 
 
 def set_cli(key: str, value: Any) -> None:
-    """Персист изменения из CLI: пишется ТОЛЬКО в config.local.yml (cli.<key>). Атомарно+под локом."""
-    with _SAVE_LOCK:  # вся read-modify-write — одна критсекция (lost-update недопустим для api_key/грантов)
-        local = OmegaConf.load(LOCAL) if LOCAL.exists() else OmegaConf.create({})
+    """Персист изменения из CLI в LOCAL (cli.<key>): cwd config.local.yml в проекте, иначе глобальный
+    ~/.config/sea/config.local.yml (ключ/провайдер — на все проекты). Атомарно + под локом (RMW)."""
+    path = Path(LOCAL)
+    if path == config_paths.global_local_path():
+        config_paths.ensure_user_dir()  # каталог глобального конфига → 0700 (в нём api_key)
+    with _SAVE_LOCK:
+        local = OmegaConf.load(path) if path.exists() else OmegaConf.create({})
         OmegaConf.update(local, f"cli.{key}", value, merge=True)
-        _atomic_save(local, LOCAL)
+        _atomic_save(local, path)

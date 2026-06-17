@@ -65,6 +65,14 @@ from .structured_outputs import (
 from . import bandit
 from . import browser_bridge
 from . import clarify
+from . import run_context
+
+# Тулзы БЕЗ внешнего недоверенного контента (внутренние/детерминированные) — НЕ ставят taint.
+# Всё остальное (web/research/link/browser/KB/session/repo-read/MCP/pdf) → taint → гейт python_exec.
+_INTERNAL_SAFE_TOOLS = {
+    "python_exec", "current_datetime", "ask_user", "search_memory", "recall_history",
+    "note_to_self", "remember_project", "stash_view", "stash_aggregate",
+}
 from . import intent
 from . import collective
 from . import habits
@@ -468,7 +476,10 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     mem_for_prompt = state.get("memory_context", "Память пуста.")
     if BANDIT_PRIOR:
         try:
-            prior = bandit.mode_prior(memory_store, state.get("user_id") or "default", state["query"])
+            # bandit читает ЭПИЗОДЫ (Beta/Thompson-прайор по похожим прогонам) → ключ ДОЛЖЕН совпадать
+            # с тем, по которому эпизоды ПИШУТСЯ (reflect: _mem_scope=thread). Реальный user_id давал
+            # бы пустой прайор (read-key ≠ write-key). Эпизоды тред-скоуп — прайор по истории ЭТОГО чата.
+            prior = bandit.mode_prior(memory_store, _mem_scope(state), state["query"])
             if prior:
                 mem_for_prompt = f"{prior}\n\n{mem_for_prompt}"
         except Exception as e:  # noqa: BLE001
@@ -1460,6 +1471,8 @@ def _compress_tools(tools: list, cap: int = TOOL_OUTPUT_CAP) -> list:
             r = await __t.ainvoke(kwargs)
             s = r if isinstance(r, str) else str(r)
             s, _flag = await asyncio.to_thread(sanitize_tool_output, s, __t.name)  # анти-инъекция (в потоке: embed не блокирует loop)
+            if __t.name not in _INTERNAL_SAFE_TOOLS:  # внешний контент → taint (гейт python_exec)
+                run_context.mark_external_content()
             return s if len(s) <= cap else s[:cap] + f"\n…(обрезано, всего {len(s)} симв.)"
         wrapped.append(StructuredTool(
             name=t.name, description=t.description, args_schema=t.args_schema, coroutine=_run,
@@ -1542,6 +1555,8 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                     out = f"(ошибка инструмента: {type(e).__name__}: {e})"
             s = out if isinstance(out, str) else str(out)
             s, _flag = await asyncio.to_thread(sanitize_tool_output, s, tc.get("name", "инструмент"))  # анти-инъекция (в потоке)
+            if tc.get("name") not in _INTERNAL_SAFE_TOOLS:  # внешний контент → taint (гейт python_exec)
+                run_context.mark_external_content()
             msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
         rounds += 1
         _mask_old_tool_msgs(msgs)  # свернуть старые наблюдения (анти-квадратичность шага)
@@ -2032,7 +2047,12 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     извлекает устойчивые факты о пользователе и периодически синтезирует выводы.
     Терминальная нода — выполняется только на успешном завершении (не на ретраях).
     """
-    user_id = _mem_scope(state)  # эпизоды/факты пишем в память ЧАТА (thread) — изоляция между чатами
+    user_id = _mem_scope(state)  # эпизоды/факты/рефлексии/summary — память ЧАТА (thread): изоляция
+    # АМОРТИЗАЦИЯ (few-shots/рецепты/коллектив/intent-корпус) — per-USER, КРОСС-сессионно: иначе
+    # тред-скоуп рассинхронит с READ (reflexion/skill_selector читают по реальному user_id) → артефакты
+    # пишутся, но не находятся → агент холодный каждый чат (мёртвый −13%/78→98%). Юзер просил изолировать
+    # КОНТЕКСТ задачи (факты/цель), а не «забыть, как эффективно решать».
+    learn_uid = state.get("user_id") or "default"
     query = state["query"]
     answer = state.get("final_answer", "")
     confidence = state.get("confidence", 0.0)
@@ -2085,7 +2105,7 @@ async def reflect_node(state: GeneralGraphState) -> dict:
         try:
             if not eval_mode:
                 add_fewshot("step_execution", query, answer, confidence)        # глобальный
-            add_user_fewshot(user_id, "step_execution", query, answer, confidence)  # персональный
+            add_user_fewshot(learn_uid, "step_execution", query, answer, confidence)  # персональный (per-USER, кросс-чат)
         except Exception:  # noqa: BLE001
             pass
 
@@ -2097,7 +2117,7 @@ async def reflect_node(state: GeneralGraphState) -> dict:
             score = confidence if confidence > 0 else 0.5
             if not eval_mode:
                 add_fewshot("reflexion", query, mode, score)
-            add_user_fewshot(user_id, "reflexion", query, mode, score)
+            add_user_fewshot(learn_uid, "reflexion", query, mode, score)  # per-USER, кросс-чат
         except Exception:  # noqa: BLE001
             pass
 
@@ -2119,7 +2139,7 @@ async def reflect_node(state: GeneralGraphState) -> dict:
             # (2) КОРПУС для будущего contrastive-обучения: позитивы И негативы (reward 0/1),
             # только для валидируемых режимов (есть реальная оценка). Не влияет на live-роутинг.
             if validated:
-                intent.log_route_example(query, _route_label, 1 if outcome == "ok" else 0, user_id)
+                intent.log_route_example(query, _route_label, 1 if outcome == "ok" else 0, learn_uid)
         except Exception:  # noqa: BLE001
             pass
 
@@ -2137,11 +2157,11 @@ async def reflect_node(state: GeneralGraphState) -> dict:
             # (с отпечатком профиля: «похожим людям — похожее поведение»). В eval — нет
             # (анти-оверфит: бенч-задачи не должны становиться рекомендациями для всех).
             if outcome == "ok" and not eval_mode and collective.maybe_promote(
-                    memory_store, user_id, state["recipe_id"]):
+                    memory_store, learn_uid, state["recipe_id"]):
                 print(f"[Collective] рецепт #{state['recipe_id']} промоутнут в общий пул")
         if (mode in ("deliberate", "heavy") and outcome == "ok" and confidence >= LOW_CONF
                 and not reacted_negative and state.get("subtasks")):
-            rid = memory_store.add_recipe(user_id, query, state.get("selected_skills", []),
+            rid = memory_store.add_recipe(learn_uid, query, state.get("selected_skills", []),
                                           state.get("subtasks", []), mode)
             if rid:
                 print(f"[Recipe] прогон скомпилирован в рецепт #{rid}")
@@ -2259,8 +2279,11 @@ async def reflect_node(state: GeneralGraphState) -> dict:
                     print(f"[Reflect-bg] maintenance failed: {e}")
         declining = trend["trend"] == "declining"
         try:
-            maybe_auto_improve(memory_store, degrading=declining)            # глобальный backward
-            maybe_improve_user(memory_store, user_id, degrading=declining)  # PER-USER backward (сердце)
+            maybe_auto_improve(memory_store, degrading=declining)               # глобальный backward
+            # PER-USER backward (сердце) — по РЕАЛЬНОМУ user_id: его lesson-few-shots ЧИТАЮТСЯ
+            # reflexion'ом по реальному user (learn_uid). thread-ключ писал бы lessons в мёртвый ключ.
+            # В GAIA learn_uid==thread==gaia_N → читает свои эпизоды и пишет свои few-shots (бенч цел).
+            maybe_improve_user(memory_store, learn_uid, degrading=declining)
         except Exception as e:  # noqa: BLE001
             if dbg:
                 print(f"[Reflect-bg] auto-improve failed: {e}")

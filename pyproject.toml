@@ -58,6 +58,9 @@ packages = ["src"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "main.py" = "main.py"
+# config.yml кладётся в КОРЕНЬ wheel (= site-packages) как ПАКЕТНЫЙ ДЕФОЛТ: установленный `sea`
+# работает в любом каталоге без cwd-config.yml (config_paths.base_config_path). Базовые модели — тут.
+"config.yml" = "config.yml"
 
 [dependency-groups]
 dev = [
