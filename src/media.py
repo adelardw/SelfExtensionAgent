@@ -63,6 +63,28 @@ def _pdf_opendataloader(path: Path, max_chars: int) -> str:
     return (out if isinstance(out, str) else str(out))[:max_chars]
 
 
+_STOPWORDS = frozenset(
+    ("и в на по не что это как с а но или для из у о от к до же бы то так уже все был быть "
+     "the and of to a in is it for on with that as at by be or from this are was an").split()
+)
+
+
+def _looks_like_language(text: str, min_tokens: int = 80, min_ratio: float = 0.02) -> bool:
+    """Похож ли извлечённый текст на естественный язык. Ловит PDF со СЛОМАННОЙ кодировкой
+    шрифта (нет ToUnicode CMap): глифы мапятся на ВАЛИДНЫЕ, но ЧУЖИЕ codepoint'ы — текст
+    состоит из настоящих букв, но не образует ни одного реального слова. Детектор «мусорных
+    символов» такое НЕ ловит (буквы валидны). Сигнал — доля частотных стоп-слов: прозаичный
+    русский/английский даёт >5%, скрэмбл ~0%. Числовые таблицы/код судить нельзя (мало слов-
+    токенов) → при <min_tokens возвращаем True (не трогаем). Регэксп — токенизация, не интент."""
+    import re
+
+    toks = re.findall(r"[^\W\d_]{2,}", (text or "").lower(), re.UNICODE)
+    if len(toks) < min_tokens:
+        return True
+    hits = sum(1 for w in toks if w in _STOPWORDS)
+    return hits / len(toks) >= min_ratio
+
+
 def read_pdf(path: Path, max_chars: int = 12000) -> str:
     """
     PDF → текст тиерами (по убыванию точности таблиц, с фолбэком на надёжность):
@@ -70,23 +92,37 @@ def read_pdf(path: Path, max_chars: int = 12000) -> str:
       2. opendataloader — #1 точность (таблицы/LaTeX), но требует Java — только если включён
          AGENT_PDF_POWER=1 и Java есть;
       3. pymupdf — простой надёжный baseline.
+    Если текстовый слой битый (шрифт без ToUnicode → буквы-кракозябры, не язык) — фолбэк на
+    ВИЗУАЛЬНОЕ чтение (рендер страниц + vision-OCR), которое шрифт обходит.
     """
     import os
 
+    tiers = []
     if os.getenv("AGENT_PDF_POWER") == "1":
+        tiers.append(_pdf_opendataloader)
+    tiers += [_pdf_liteparse, _pdf_pymupdf]  # liteparse точнее по таблицам, pymupdf — надёжный baseline
+
+    best = ""  # первый НЕпустой текст на случай «все тиры битые» (отдадим как есть)
+    for fn in tiers:
         try:
-            t = _pdf_opendataloader(path, max_chars)
-            if t.strip():
-                return t
-        except Exception:  # noqa: BLE001 — нет Java/ошибка → следующий тир
+            t = fn(path, max_chars)
+        except BaseException:  # noqa: BLE001 — pyo3 PanicException liteparse (нет libpdfium) = BaseException
+            continue
+        if not (t and t.strip()):
+            continue
+        if _looks_like_language(t):
+            return t[:max_chars]  # первый ЧИТАЕМЫЙ тир — отдаём (один тир мог переврать шрифт, другой — нет)
+        best = best or t
+    # ни один текстовый тир не читаем (битый шрифт во ВСЕХ: глифы→чужие codepoint'ы) → визуальное чтение
+    if best:
+        try:
+            vis = read_pdf_visual(path, transcribe=True, max_pages=12)
+            if vis.strip() and _looks_like_language(vis):
+                return ("[текстовый слой PDF нечитаем (шрифт без ToUnicode) — прочитано "
+                        "визуально, рендер+OCR]\n" + vis)[:max_chars]
+        except Exception:  # noqa: BLE001 — vision недоступен → отдаём что было
             pass
-    try:
-        t = _pdf_liteparse(path, max_chars)
-        if t.strip():
-            return t
-    except Exception:  # noqa: BLE001
-        pass
-    return _pdf_pymupdf(path, max_chars)
+    return best[:max_chars]
 
 
 def read_excel(path: Path, max_chars: int = 12000) -> str:
@@ -219,11 +255,15 @@ def describe_image(path: str | Path, question: str = "") -> str:
     return resp.content if hasattr(resp, "content") else str(resp)
 
 
-def read_pdf_visual(path: str | Path, question: str = "", max_pages: int = 5) -> str:
+def read_pdf_visual(path: str | Path, question: str = "", max_pages: int = 5,
+                    transcribe: bool = False) -> str:
     """
     VISION-чтение PDF: рендер страниц в картинки → описание ФИГУР/графиков/диаграмм через
     vision. Закрывает пробел, где ответ в ФИГУРЕ (оси, метки, графики), а не в тексте
     (GAIA L2/L3 с фигурами). Текстовый _pdf_pymupdf фигуры не видит — этот читает визуально.
+
+    transcribe=True — режим ДОСЛОВНОЙ перепечатки текста (для PDF с битым шрифтом, где
+    текстовый слой нечитаем): vision переписывает весь текст страницы, а не описывает фигуры.
     """
     import fitz  # pymupdf
 
@@ -235,8 +275,13 @@ def read_pdf_visual(path: str | Path, question: str = "", max_pages: int = 5) ->
         tmp = Path(tempfile.mkstemp(suffix=".png")[1])
         pix.save(str(tmp))
         try:
-            focus = (question or "") + " Особое внимание: ФИГУРЫ, графики, диаграммы — оси, "\
-                    "метки на концах осей, подписи, числа, легенды. Перепиши их точно."
+            if transcribe:
+                focus = ("Перепиши ВЕСЬ текст с этой страницы ДОСЛОВНО, сохраняя структуру "
+                         "(заголовки, списки, абзацы, таблицы). Только текст страницы — без "
+                         "своих комментариев и без описания оформления.")
+            else:
+                focus = (question or "") + " Особое внимание: ФИГУРЫ, графики, диаграммы — оси, "\
+                        "метки на концах осей, подписи, числа, легенды. Перепиши их точно."
             parts.append(f"[Стр. {i + 1}]\n" + describe_image(tmp, focus))
         except Exception as e:  # noqa: BLE001
             parts.append(f"[Стр. {i + 1}: vision не сработал: {e}]")

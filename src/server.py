@@ -15,6 +15,7 @@ FastAPI-сервер: единый вход для всех клиентов (П
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -69,6 +70,12 @@ async def _build_graph_async() -> None:
     # подтверждения», которое не появляется. auto-accept → браузер/плеер реально работают.
     # (Коммерцию/покупки агент всё равно отказывается делать на уровне логики.)
     hitl.set_work_mode(cli_config.get_cli("work_mode") or "auto-accept")
+    # SearXNG: в .app cwd=support-каталог → .env не грузится → SEARXNG_URL пуст. Берём из
+    # GUI-конфига (задаётся в Настройках) и кладём в окружение, чтобы веб/image-поиск его видел.
+    _sx = cli_config.get_cli("searxng_url")
+    if _sx:
+        import os as _o
+        _o.environ["SEARXNG_URL"] = _sx
     # Интерактивные каналы: уточнения (Q/A мультиселект) и подтверждения surface в GUI.
     clarify.set_clarifier(_server_clarifier)
     hitl.set_confirmer(_server_confirmer)
@@ -173,6 +180,7 @@ class SettingsIn(BaseModel):
     api_key: str | None = None
     work_mode: str | None = None     # "manual" | "auto-accept" | "auto"
     force_mode: str | None = None    # "" (авто) | fast | reason | act | deliberate | heavy
+    searxng_url: str | None = None   # свой SearXNG для веб/image-поиска (напр. http://localhost:8080)
 
 
 @app.on_event("startup")
@@ -342,6 +350,50 @@ async def upload(thread_id: str, file: UploadFile = File(...)) -> dict:
     return {"name": file.filename, "count": len(_THREAD_FILES[thread_id])}
 
 
+class AttachLocalIn(BaseModel):
+    thread_id: str
+    paths: list[str]
+
+
+@app.post("/attach_local")
+async def attach_local(inp: AttachLocalIn) -> dict:
+    """Десктоп (pywebview): нативный файл-диалог отдаёт ЛОКАЛЬНЫЕ пути, а сервер на той же машине —
+    читает их сам (без заливки контента по HTTP). В WKWebView программный клик по <input type=file>
+    не открывает панель → фронт зовёт pywebview.api.pick_files() и шлёт пути сюда."""
+    names: list[str] = []
+    errors: list[str] = []
+    for p in inp.paths:
+        try:
+            stored = await asyncio.to_thread(knowledge_base.add_session_file, inp.thread_id, p)
+            _THREAD_FILES.setdefault(inp.thread_id, []).append(stored)
+            names.append(Path(p).name)
+        except BaseException as e:  # noqa: BLE001 — pyo3-панику парсеров тоже ловим, не 500
+            errors.append(f"{Path(p).name}: {type(e).__name__}")
+    return {"names": names, "errors": errors, "count": len(_THREAD_FILES.get(inp.thread_id, []))}
+
+
+class DetachIn(BaseModel):
+    thread_id: str
+    name: str  # имя файла (basename), как показано в чипе
+
+
+@app.post("/detach")
+async def detach(inp: DetachIn) -> dict:
+    """Убрать ранее приложенный файл из вложений треда (по имени). Чистим in-memory список (его
+    читает прогон) и удаляем копию из session-стора. Идемпотентно: нет файла → просто count."""
+    files = _THREAD_FILES.get(inp.thread_id, [])
+    kept, removed = [], []
+    for f in files:
+        (removed if Path(f).name == inp.name else kept).append(f)
+    _THREAD_FILES[inp.thread_id] = kept
+    for f in removed:
+        try:
+            Path(f).unlink(missing_ok=True)
+        except Exception:  # noqa: BLE001 — копия в tmp/session, удалить best-effort
+            pass
+    return {"removed": [Path(f).name for f in removed], "count": len(kept)}
+
+
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)) -> dict:
     """Запись с микрофона → текст (STT). Фронт пишет аудио и шлёт сюда."""
@@ -353,6 +405,94 @@ async def transcribe(file: UploadFile = File(...)) -> dict:
         return {"text": text or ""}
     except Exception as e:  # noqa: BLE001
         return {"text": "", "error": f"{type(e).__name__}: {e}"}
+
+
+# Десктоп (pywebview/WKWebView): getUserMedia НЕ поддерживается → пишем с мика на СЕРВЕРЕ через ffmpeg
+# (avfoundation), как в TUI. start → запись, stop → стоп + расшифровка. Состояние по thread_id.
+_REC: dict = {}
+
+
+def _end_proc(proc) -> None:
+    """Гарантированно завершить процесс записи и ОТПУСТИТЬ микрофон: SIGTERM → ждём чуть →
+    SIGKILL, если не умер. Без kill-фолбэка ffmpeg иногда игнорит SIGTERM и держит мик висяком."""
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=3)
+    except Exception:  # noqa: BLE001 — не умер по-хорошему → жёстко
+        try:
+            proc.kill()
+            proc.wait(timeout=3)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _find_ffmpeg() -> str | None:
+    """ffmpeg по PATH, иначе в стандартных местах. ВАЖНО для .app: из Launchpad PATH урезан
+    (/usr/bin:/bin:…, без /opt/homebrew/bin) → shutil.which не находит установленный brew-ffmpeg."""
+    import os as _os
+    import shutil
+    p = shutil.which("ffmpeg")
+    if p:
+        return p
+    for c in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg",
+              str(Path.home() / "homebrew" / "bin" / "ffmpeg")):
+        if _os.path.exists(c):
+            return c
+    return None
+
+
+@app.on_event("shutdown")
+def _release_mic_on_exit() -> None:
+    """Закрыли приложение во время записи → отпустить микрофон (иначе ffmpeg-сирота держит мик)."""
+    for proc, _wav in list(_REC.values()):
+        _end_proc(proc)
+    _REC.clear()
+
+
+@app.post("/voice/start")
+async def voice_start(thread_id: str) -> dict:
+    import subprocess
+    ffmpeg = _find_ffmpeg()
+    if not ffmpeg:
+        return {"ok": False, "error": "ffmpeg не найден (brew install ffmpeg)"}
+    if thread_id in _REC:
+        return {"ok": True}  # уже пишем
+    wav = Path(tempfile.gettempdir()) / f"selfext_voice_{thread_id}.wav"
+    try:
+        proc = subprocess.Popen(
+            # -t 300: страховка от утечки мика — ffmpeg САМ остановится через 5 мин, даже если
+            # /voice/stop не пришёл (закрыли окно/сбой). Иначе процесс держит микрофон бесконечно.
+            [ffmpeg, "-y", "-loglevel", "error", "-f", "avfoundation", "-i", ":0",
+             "-ac", "1", "-ar", "16000", "-t", "300", str(wav)],
+            stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    _REC[thread_id] = (proc, str(wav))
+    return {"ok": True}
+
+
+@app.post("/voice/stop")
+async def voice_stop(thread_id: str) -> dict:
+    import os as _os
+    rec = _REC.pop(thread_id, None)
+    if not rec:
+        return {"text": ""}
+    proc, wav = rec
+    _end_proc(proc)  # terminate → wait → SIGKILL: гарантированно отпустить микрофон
+    text = ""
+    try:
+        if _os.path.exists(wav) and _os.path.getsize(wav) > 1200:
+            text = await asyncio.to_thread(media.transcribe_audio, wav) or ""
+    except Exception as e:  # noqa: BLE001
+        return {"text": "", "error": f"{type(e).__name__}: {e}"}
+    finally:
+        try:
+            _os.unlink(wav)
+        except OSError:
+            pass
+    return {"text": text}
 
 
 @app.get("/settings")
@@ -367,6 +507,7 @@ def get_settings() -> dict:
         "api_key_source": llm.api_key_source(),
         "work_mode": hitl.work_mode(),
         "force_mode": cli_config.get_cli("force_mode") or "",
+        "searxng_url": cli_config.get_cli("searxng_url") or os.getenv("SEARXNG_URL", ""),
         "active": llm.active_summary(),
         "bridge_connected": browser_bridge.connected(),
         "bridge_token": browser_bridge.token(),
@@ -388,6 +529,9 @@ def post_settings(s: SettingsIn) -> dict:
     if s.work_mode is not None:
         cli_config.set_cli("work_mode", s.work_mode)
         hitl.set_work_mode(s.work_mode)
+    if s.searxng_url is not None:
+        cli_config.set_cli("searxng_url", s.searxng_url or None)
+        os.environ["SEARXNG_URL"] = s.searxng_url or ""  # живо: веб/image-поиск подхватят сразу
     llm.set_provider(cli_config.get_cli("provider"), cli_config.get_cli("model"))
     rebuild_llms()
     ok, msg = llm.validate_credentials()

@@ -1,3 +1,7 @@
+import multiprocessing
+multiprocessing.freeze_support()  # PyInstaller: без этого spawn-дочерний РЕ-ИСПОЛНЯЕТ приложение
+                                  # (любая либа с multiprocessing → «приложение перезапускается»).
+
 import warnings
 # Тихий старт: глушим шумные сторонние warnings ДО тяжёлых импортов.
 warnings.filterwarnings("ignore", message="Pydantic serializer warnings", category=UserWarning)
@@ -24,24 +28,12 @@ console = Console()
 
 
 def _frozen_bootstrap() -> None:
-    """Только для упакованного бинаря (PyInstaller). Дефолтный config.yml лежит в бандле
-    (_MEIPASS); при первом запуске копируем его в рабочую папку, чтобы существующие
-    относительные load('config.yml') резолвились БЕЗ переписывания кода, а правки и данные
-    (data/, config.local.yml) персистились рядом с бинарём. ДОЛЖЕН отработать ДО тяжёлых
-    импортов (они грузят config.yml). В обычном запуске из исходников — no-op."""
-    import os as _os
-    import sys as _sys
-    import shutil as _shutil
-    if not getattr(_sys, "frozen", False):
-        return
-    bundle = getattr(_sys, "_MEIPASS", _os.path.dirname(_sys.executable))
-    if not _os.path.exists("config.yml"):
-        src = _os.path.join(bundle, "config.yml")
-        if _os.path.exists(src):
-            try:
-                _shutil.copy(src, "config.yml")
-            except OSError:
-                pass
+    """Только для упакованного бинаря (PyInstaller): перейти в writable per-user рабочую папку и
+    положить туда дефолтный config.yml из бандла (иначе относительные data/, config.local.yml падают
+    при запуске с read-only cwd, напр. из Launchpad). ДОЛЖЕН отработать ДО тяжёлых импортов (они
+    грузят config.yml/создают data/). Из исходников — no-op. Общая логика с desktop.py."""
+    from src.config_paths import bootstrap_frozen
+    bootstrap_frozen()
 
 
 _frozen_bootstrap()  # до импорта src.agent (он читает config.yml на импорте)

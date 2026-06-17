@@ -38,6 +38,11 @@ datas += [
     (str(ROOT / "config.yml"), "."),
     (str(ROOT / "src" / "skills"), "src/skills"),
 ]
+# Иконка приложения (Ика + SEA) — в бандл (фавикон GUI, окно десктопа).
+_icons = ROOT / "assets"
+for _ic in ("sea_icon.png", "sea_icon.icns", "sea_icon.ico"):
+    if (_icons / _ic).exists():
+        datas += [(str(_icons / _ic), "assets")]
 _dist = ROOT / "frontend" / "dist"
 if _dist.is_dir():
     datas += [(str(_dist), "frontend/dist")]
@@ -74,4 +79,7 @@ exe = EXE(
     target_arch=None,      # нативная арх. раннера (CI собирает под каждую ОС)
     codesign_identity=None,
     entitlements_file=None,
+    # Иконка: Windows читает .ico, macOS .app — .icns (для onefile-консоли ОС может игнорировать,
+    # но при сборке .app/через CI применится). Список — PyInstaller берёт подходящий под платформу.
+    icon=[str(ROOT / "assets" / "sea_icon.ico"), str(ROOT / "assets" / "sea_icon.icns")],
 )

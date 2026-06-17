@@ -226,6 +226,23 @@ def _syscall_sandbox_prefix(no_net: bool = False) -> list[str]:
     return []
 
 
+def _python_exe() -> str:
+    """Интерпретатор для подпроцесса-песочницы. ВАЖНО для упакованного приложения (PyInstaller):
+    там sys.executable = САМ бинарь приложения, и `[sys.executable, "-c", код]` ПЕРЕЗАПУСКАЕТ
+    приложение вместо исполнения python-кода (баг «приложение перезапустилось» на запросе). В
+    frozen берём реальный системный python3 (для python_exec достаточно — он stdlib-only). Из
+    исходников — обычный venv-python."""
+    import shutil
+    import sys as _sys
+    if not getattr(_sys, "frozen", False):
+        return _sys.executable
+    for cand in (shutil.which("python3"), shutil.which("python"),
+                 "/usr/bin/python3", "/usr/local/bin/python3", "/opt/homebrew/bin/python3"):
+        if cand and os.path.exists(cand):
+            return cand
+    return _sys.executable  # крайний случай (лучше, чем ничего)
+
+
 def run_tool_sandboxed(py_file: Path, tool_name: str, test_input: dict,
                        timeout: int = SMOKE_TEST_TIMEOUT, no_net: bool = False) -> tuple[bool, str]:
     """
@@ -235,7 +252,7 @@ def run_tool_sandboxed(py_file: Path, tool_name: str, test_input: dict,
     код не исполняется в процессе агента. no_net=True → отрезаем сеть (анти-эксфильтрация).
     Возвращает (success, result_or_error).
     """
-    base = [sys.executable, "-c", _SANDBOX_RUNNER, str(py_file), tool_name, json.dumps(test_input)]
+    base = [_python_exe(), "-c", _SANDBOX_RUNNER, str(py_file), tool_name, json.dumps(test_input)]
     cmd = _syscall_sandbox_prefix(no_net) + base
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + SMOKE_IMPORT_GRACE)
@@ -294,7 +311,7 @@ def run_python_sandboxed(code: str, timeout: int = 12, no_net: bool = False) -> 
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False, encoding="utf-8") as fh:
         fh.write(code)
         path = fh.name
-    base = [sys.executable, "-c", _PYEXEC_RUNNER, path]
+    base = [_python_exe(), "-c", _PYEXEC_RUNNER, path]
     cmd = _syscall_sandbox_prefix(no_net) + base
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)

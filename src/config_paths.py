@@ -59,3 +59,43 @@ def ensure_user_dir() -> Path:
 def project_local_path() -> Path:
     """Проектный config.local.yml (cwd) — per-project override."""
     return Path("config.local.yml")
+
+
+def bootstrap_frozen() -> None:
+    """Для УПАКОВАННОГО приложения (.app/.exe, PyInstaller). При запуске из Launchpad/Dock/Finder
+    cwd = '/' (read-only), а код пишет ОТНОСИТЕЛЬНЫЕ data/, traces.db, config.local.yml → краш
+    (OSError: Read-only file system: 'data'). Переходим в writable per-user рабочую папку и кладём
+    туда дефолтный config.yml из бандла. Зовётся entrypoint'ом (main.py/desktop.py) ДО тяжёлых
+    импортов (они читают config.yml/создают data/). Из исходников (не frozen) — no-op."""
+    import shutil
+    import sys
+    if not getattr(sys, "frozen", False):
+        return
+    if sys.platform == "darwin":
+        workdir = Path.home() / "Library" / "Application Support" / "SEA"
+    elif os.name == "nt":
+        workdir = Path(os.getenv("APPDATA", str(Path.home()))) / "SEA"
+    else:
+        workdir = Path(os.getenv("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "SEA"
+    workdir.mkdir(parents=True, exist_ok=True)
+    os.chdir(workdir)  # теперь относительные data/, config.local.yml резолвятся в writable папку
+    # PATH в .app из Launchpad УРЕЗАН (/usr/bin:/bin:…) — нет /opt/homebrew/bin → subprocess не
+    # находит brew-инструменты (ffmpeg для голоса/медиа и пр.). Дополняем стандартными bin-путями.
+    _extra = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+              str(Path.home() / "homebrew" / "bin")]
+    cur = os.environ.get("PATH", "").split(os.pathsep)
+    os.environ["PATH"] = os.pathsep.join(dict.fromkeys([*cur, *_extra]))  # дедуп, порядок сохранён
+    # liteparse грузит libpdfium.dylib через dlopen и ищет её в PDFIUM_LIB_PATH. В бандле она лежит
+    # в _MEIPASS/liteparse → указываем туда (иначе парсинг PDF падает PanicException в .app).
+    bundle = Path(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)))
+    if not os.environ.get("PDFIUM_LIB_PATH"):
+        for cand in (bundle / "liteparse", bundle):
+            if (cand / "libpdfium.dylib").exists():
+                os.environ["PDFIUM_LIB_PATH"] = str(cand)
+                break
+    bundle = Path(getattr(sys, "_MEIPASS", os.path.dirname(sys.executable)))
+    if not (workdir / "config.yml").exists() and (bundle / "config.yml").exists():
+        try:
+            shutil.copy(bundle / "config.yml", workdir / "config.yml")
+        except OSError:
+            pass

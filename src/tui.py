@@ -343,8 +343,10 @@ class VoiceModal(ModalScreen[str]):
             return
         self._wav = tempfile.mkstemp(suffix=".wav")[1]
         self._proc = subprocess.Popen(
+            # -t 300: ffmpeg САМ остановится через 5 мин → страховка от утечки мика, если стоп
+            # не вызвали (закрыли модалку/сбой). Иначе процесс держит микрофон бесконечно.
             ["ffmpeg", "-y", "-loglevel", "error", "-f", "avfoundation", "-i", ":0",
-             "-ac", "1", "-ar", "16000", self._wav],
+             "-ac", "1", "-ar", "16000", "-t", "300", self._wav],
             stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self._t0 = time.monotonic()
         self._vtimer = self.set_interval(0.14, self._vtick)  # живая индикация записи
@@ -365,10 +367,23 @@ class VoiceModal(ModalScreen[str]):
             self._vtimer.stop()
             self._vtimer = None
 
+    def _kill_proc(self) -> None:
+        """SIGTERM → SIGKILL-фолбэк: гарантированно отпустить микрофон (ffmpeg порой игнорит TERM)."""
+        if not self._proc:
+            return
+        try:
+            self._proc.terminate()
+            self._proc.wait(timeout=3)
+        except Exception:  # noqa: BLE001
+            try:
+                self._proc.kill()
+                self._proc.wait(timeout=3)
+            except Exception:  # noqa: BLE001
+                pass
+
     def action_cancel(self) -> None:
         self._stop_timer()
-        if self._proc:
-            self._proc.terminate()
+        self._kill_proc()
         self.dismiss("")
 
     def action_stop(self) -> None:
@@ -382,8 +397,7 @@ class VoiceModal(ModalScreen[str]):
 
         from src.media import transcribe_audio
         try:
-            self._proc.terminate()
-            self._proc.wait(timeout=10)
+            self._kill_proc()  # terminate → SIGKILL-фолбэк: мик отпущен гарантированно
             text = ""
             if self._wav and _P(self._wav).exists() and _P(self._wav).stat().st_size > 1000:
                 text = (transcribe_audio(self._wav) or "").strip()

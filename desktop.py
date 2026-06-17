@@ -11,6 +11,9 @@
 """
 from __future__ import annotations
 
+import multiprocessing
+multiprocessing.freeze_support()  # PyInstaller: spawn-дочерний иначе РЕ-ИСПОЛНЯЕТ .app (перезапуск)
+
 import socket
 import threading
 import time
@@ -44,7 +47,25 @@ def _wait_up(port: int, timeout: float = 60.0) -> bool:
     return False
 
 
+class _Api:
+    """JS-мост pywebview (window.pywebview.api): нативные вещи, недоступные WKWebView из веба.
+    pick_files — нативный файл-диалог ОС (HTML <input type=file> в WKWebView по программному клику
+    не открывается). Возвращает ЛОКАЛЬНЫЕ пути; их сервер (та же машина) читает сам."""
+
+    def pick_files(self):
+        import webview
+        try:
+            res = webview.windows[0].create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True)
+            return list(res) if res else []
+        except Exception:  # noqa: BLE001
+            return []
+
+
 def main() -> None:
+    # УПАКОВАННОЕ приложение: при запуске из Launchpad/Dock cwd='/' (read-only) → относительные
+    # data/, config.local.yml падают. Переходим в writable per-user папку ДО старта сервера/импортов.
+    from src.config_paths import bootstrap_frozen
+    bootstrap_frozen()
     try:
         import webview
     except ImportError:
@@ -57,8 +78,8 @@ def main() -> None:
     if not _wait_up(port):
         raise SystemExit("сервер не поднялся за отведённое время")
 
-    webview.create_window("self-extension-agent", f"http://{HOST}:{port}/",
-                          width=980, height=760, min_size=(560, 480))
+    webview.create_window("SEA — self-extension-agent", f"http://{HOST}:{port}/",
+                          width=980, height=760, min_size=(560, 480), js_api=_Api())
     webview.start()  # блокирует до закрытия окна; daemon-поток сервера завершится с процессом
 
 

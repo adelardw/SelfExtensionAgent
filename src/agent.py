@@ -94,6 +94,7 @@ from .memory_tools import make_memory_tools, clear_scratch
 from .memory import project_memory
 from . import context_files
 from .research import make_deep_research_tool, agentic_research
+from .tools.image_search import make_image_search_tool
 from .compute import make_compute_tool, make_datetime_tool
 from .media import make_pdf_vision_tool
 from .knowledge_base import (
@@ -683,13 +684,26 @@ def _strip_ungrounded_urls(answer: str, grounded: set[str]) -> str:
     def _ok(u: str) -> bool:
         dom = (re.match(r"https?://(?:www\.)?([a-z0-9.-]+\.[a-z]{2,})", u, re.I) or [None, ""])
         return bool(dom[1]) and dom[1].lower() in grounded
+    # Картинки ![alt](url) — НЕ цитаты, а контент для показа в чате. Выносим за скобки фильтра:
+    # CDN-домен картинки часто ≠ домен-источник → иначе их всегда вырезало бы. Битый src безвреден.
+    imgs: list[str] = []
+
+    def _stash(m):
+        imgs.append(m.group(0))
+        return f"\x00IMG{len(imgs) - 1}\x00"
+    # Блок-галерея ```sea-gallery ... ``` (URL картинок из реального поиска) — целиком за скобки.
+    answer = re.sub(r"```sea-gallery\n.*?\n```", _stash, answer, flags=re.S)
+    answer = re.sub(r"!\[[^\]]*\]\(https?://[^\s)]+\)", _stash, answer)
     # [текст](url) → текст, если url не заземлён
     answer = re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)",
                     lambda m: m.group(0) if _ok(m.group(2)) else m.group(1), answer)
     # голые невалидные URL → удалить
     answer = re.sub(r"https?://[^\s)\]}>\"']+",
                     lambda m: m.group(0) if _ok(m.group(0)) else "", answer)
-    return re.sub(r"[ \t]+\n", "\n", answer).strip()
+    answer = re.sub(r"[ \t]+\n", "\n", answer).strip()
+    for i, im in enumerate(imgs):  # вернуть картинки на место
+        answer = answer.replace(f"\x00IMG{i}\x00", im)
+    return answer
 
 
 async def _research_answer(state: GeneralGraphState, query: str) -> dict:
@@ -1699,6 +1713,9 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # core «web_search» — иначе селектор, выбрав самосозданный дубль, лишал агента research-слоя.
     if any(("search" in s or "web" in s or "link" in s) for s in selected):
         tools.append(make_deep_research_tool())
+        # Поиск картинок для показа В ЧАТЕ (desktop-GUI рендерит ![](url)). Вешаем вместе с
+        # веб-навыком: «покажи как выглядит…» — тот же класс задач, что обычный поиск.
+        tools.append(make_image_search_tool())
 
     # Догон-уточнение: исполнитель может спросить пользователя, упёршись в развилку.
     tools.append(clarify.make_ask_user_tool())
@@ -2017,13 +2034,25 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # (ретрай не «дозавершит» — прогон уже исчерпан). Заменяет регэксп «добавил|заказал…» в synthesize.
     if flag_false_completion and incomplete:
         done = [s["goal"] for s in _subs if s.get("status") == "done"]
-        progress = ("Успел: " + "; ".join(done[:4])) if done else "Подтверждённого результата нет."
         why = "бюджет прогона исчерпан" if _cut else "не все шаги завершены"
-        print("[Validation] судья: ложь о завершении при незавершённом прогоне → честный статус")
+        # Честная ПОМЕТКА вперёд (юзер не примет за «сделано»/side-effect), но СОДЕРЖАТЕЛЬНЫЙ черновик
+        # НЕ выбрасываем: для контентных задач («напиши стратегию/текст») синтез-ответ И ЕСТЬ результат,
+        # пусть и частичный. Раньше отдавали голую отписку «нет результата» — юзер терял черновик.
+        draft = (state.get("final_answer") or "").strip()
+        caveat = (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным, проверь. "
+                  + (f"Успел: {'; '.join(done[:4])}. " if done else "")
+                  + "Скажи «продолжи» — доведу с места остановки.")
+        # СОДЕРЖАТЕЛЬНЫЙ черновик (контентная задача — «напиши стратегию/текст») отдаём ПОД пометкой:
+        # сам ответ И ЕСТЬ результат, пусть частичный. Короткий/мета — это скорее ложный side-effect-
+        # claim («добавил в корзину») → НЕ сохраняем (только честная пометка).
+        if len(draft) >= 200 and not flag_meta_stub:
+            final = caveat + "\n\n———\n\n" + draft
+        else:
+            final = caveat + (" Подтверждённого результата пока нет." if not done else "")
+        print("[Validation] судья: незавершённый прогон → честная пометка + сохранён черновик")
         return {"validation_passed": True, "confidence": LOW_CONF,
-                "final_answer": (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным. "
-                                 f"{progress}. Проверь и скажи, продолжить ли с места остановки."),
-                "validation_feedback": "ложь о завершении при незавершённом прогоне → честный статус",
+                "final_answer": final,
+                "validation_feedback": "незавершённый прогон → честная пометка, черновик сохранён",
                 "global_retries": state.get("global_retries", 0)}
     # Мета-заглушка вместо результата → невалидно: уходит на ретрай собрать результат целиком.
     if flag_meta_stub:

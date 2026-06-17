@@ -328,15 +328,42 @@ currently **macOS-only**; Linux/Windows backends — on the roadmap.
 ## Install
 
 ```bash
+# dev (from a checkout):
 uv sync
 uv pip install -e .                                # installs the `sea` CLI command
 .venv/bin/python -m playwright install chromium    # for cloakbrowser search
+
+# as a package — works in ANY directory (global tool or a project venv):
+uv tool install <repo>            # global `sea` (config.yml is bundled — base models ship with it)
+uv pip install <repo>             # into a venv
 ```
 
-After `uv pip install -e .` the `sea` command is available (see **Run**). Without it, run
-`main.py` directly.
+Configure the key/provider **from the CLI** (no `.env` needed) — persisted to a **global** user
+config (`~/.config/sea/config.local.yml`, `0600`), so it works across all projects:
+```bash
+sea key                           # hidden prompt (safer than passing the key as an arg)
+sea provider openrouter|ollama [base_url]
+sea config                        # show provider/key source/paths
+```
+The `sea` command then runs from any directory: project `config.yml` (if present) overrides the
+bundled default; the API key comes from `.env` (if present) → else `sea key`. In the TUI: `/key`,
+`/provider`, `/config`.
+
+### Desktop app (macOS `SEA.app`)
+
+```bash
+cd frontend && npm install && npm run build        # build the GUI (SEA theme)
+uv sync --group package --group gui                 # pyinstaller + pywebview
+python scripts/build_binary.py --app                # → dist/SEA.app (Dock icon: Ика + SEA)
+```
+Native window (pywebview + FastAPI + React GUI), Launchpad icon. `.app` is ad-hoc-signed → for
+your own machine `open` it (or right-click → Open once); shipping to others needs Apple Developer
+ID + notarization. Runtime data lives in `~/Library/Application Support/SEA`.
 
 ## Configuration
+
+Key/provider can be set via **`sea key`/`sea provider`** (global config, above) OR via `.env`
+(`.env` wins). For a packaged/global install, `sea key` is the path; `.env` is the dev path.
 
 `.env` (template — `.env.example`, the file is in `.gitignore`, not committed):
 ```
@@ -370,16 +397,17 @@ A typical fast query ≈ $0.001; deliberate ≈ $0.005–0.02; heavy adds 1–2 
 ## Run
 
 ```bash
-sea                                      # interactive REPL (after `uv pip install -e .`)
+sea                                      # full-screen TUI (default interactive surface)
 sea "your task"                          # one-shot: run and exit (exit code 0/1)
 sea --auto "your task"                   # one-shot without confirmations (autonomous)
 sea init                                 # scaffold .sea/ + SEA.md/MEMORY.md/MCP.md (scans the repo)
+sea key | provider | config              # configure key/provider (global) — see Install
 sea --version | --help
-# equivalents without the installed command:
-.venv/bin/python main.py                 # REPL
+# other surfaces:
 .venv/bin/python bot.py                  # Telegram bot
-uvicorn src.server:app --port 8000       # HTTP API
+uvicorn src.server:app --port 8000       # HTTP API (the GUI talks to this)
 python desktop.py                        # native desktop window (uv sync --group gui)
+#   packaged desktop: dist/SEA.app (build_binary.py --app) → Launchpad
 ```
 
 API: `POST /chat {user_id, query}`, `GET /diagnose`, `/memory/facts`, `/memory/goal`, `/traces`.
@@ -867,14 +895,41 @@ app/ax-навыки сейчас **macOS-only**; Linux/Windows — в roadmap.
 ## Установка
 
 ```bash
+# из исходников (dev):
 uv sync
 uv pip install -e .                                # ставит CLI-команду `sea`
 .venv/bin/python -m playwright install chromium    # для cloakbrowser-поиска
+
+# пакетом — работает в ЛЮБОМ каталоге (глобально или в venv проекта):
+uv tool install <repo>            # глобальный `sea` (config.yml вшит — базовые модели едут с ним)
+uv pip install <repo>             # в venv
 ```
 
-После `uv pip install -e .` доступна команда `sea` (см. **Запуск**). Без неё запускай `main.py`.
+Ключ/провайдер задаются **из CLI** (без `.env`) — в **глобальный** конфиг
+(`~/.config/sea/config.local.yml`, `0600`), работает во всех проектах:
+```bash
+sea key                           # скрытый ввод (безопаснее, чем ключ аргументом)
+sea provider openrouter|ollama [base_url]
+sea config                        # показать провайдера/источник ключа/пути
+```
+Дальше `sea` работает из любого каталога: cwd-`config.yml` (если есть) переопределяет вшитый дефолт;
+ключ берётся из `.env` (если есть) → иначе `sea key`. В TUI: `/key`, `/provider`, `/config`.
+
+### Десктоп-приложение (macOS `SEA.app`)
+
+```bash
+cd frontend && npm install && npm run build        # собрать GUI (SEA-тема)
+uv sync --group package --group gui                 # pyinstaller + pywebview
+python scripts/build_binary.py --app                # → dist/SEA.app (Dock-иконка Ика+SEA)
+```
+Нативное окно (pywebview + FastAPI + React-GUI), плитка в Launchpad. `.app` ad-hoc-подписан → на
+своей машине запускай `open` (или правый клик → «Открыть» один раз); для раздачи другим нужен Apple
+Developer ID + нотаризация. Рабочие данные — в `~/Library/Application Support/SEA`.
 
 ## Настройка
+
+Ключ/провайдер можно задать через **`sea key`/`sea provider`** (глобальный конфиг, выше) ИЛИ через
+`.env` (`.env` приоритетнее). Для пакетной/глобальной установки путь — `sea key`; `.env` — для dev.
 
 `.env` (шаблон — `.env.example`, файл в `.gitignore`, в гит не попадает):
 ```
@@ -908,16 +963,17 @@ TELEGRAM_ALLOWED_IDS=11111,22222     # опц., но рекомендуется 
 ## Запуск
 
 ```bash
-sea                                      # интерактивный REPL (после `uv pip install -e .`)
+sea                                      # полноэкранный TUI (дефолтная интерактивная поверхность)
 sea "твоя задача"                        # one-shot: выполнить и выйти (код 0/1)
 sea --auto "твоя задача"                 # one-shot без подтверждений (автономно)
 sea init                                 # создать .sea/ + SEA.md/MEMORY.md/MCP.md (сканит репо)
+sea key | provider | config              # настройка ключа/провайдера (глобально) — см. Установку
 sea --version | --help
-# эквиваленты без установленной команды:
-.venv/bin/python main.py                 # REPL
+# другие поверхности:
 .venv/bin/python bot.py                  # Telegram-бот
-uvicorn src.server:app --port 8000       # HTTP API
+uvicorn src.server:app --port 8000       # HTTP API (с ним говорит GUI)
 python desktop.py                        # нативное десктоп-окно (uv sync --group gui)
+#   упакованный десктоп: dist/SEA.app (build_binary.py --app) → Launchpad
 ```
 
 API: `POST /chat {user_id, query}`, `GET /diagnose`, `/memory/facts`, `/memory/goal`, `/traces`.
