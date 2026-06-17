@@ -368,6 +368,18 @@ One brain (the LangGraph graph), several surfaces: CLI · desktop · Telegram ·
 The CLI is the terminal, **project-rooted** surface — run it from a project directory and it picks
 up convention files from the project root (like `CLAUDE.md`):
 
+**Interface** — `sea` opens a **full-screen TUI** (Textual): a one-time welcome banner (SEA logo +
+art + a guide) that disappears on your first message, then a clean conversation that fills the
+screen. Slash-commands have ghost autocomplete (Tab to accept); **↑/↓** recall input history;
+**Esc** closes an opened historical chat back to a fresh session; the mouse both **scrolls** the log
+and **selects/copies** text. HITL confirmations and clarification Q/A render as compact bottom-docked,
+keyboard-driven pickers (Claude-Code style: `❯` cursor, `[✓]` toggles; in multi-select **Enter** ticks
+each option and a `✓ Done` row submits). The browser-extension bridge starts with the TUI; `/token`
+shows the connect token. A live status line shows the current step, elapsed seconds, token spend
+(updating mid-run, with a `⟳ calling model…` indicator while the model is answering). One-shot mode
+stays scriptable: `sea "task"` runs once and exits. (`current_datetime` is a built-in tool, so "what
+time is it in Moscow?" is answered from the system clock, not guessed.)
+
 - **`SEA.md`** — project instructions for the agent (loaded into every request). `sea init` writes
   a starting map of the repo here (stack, structure, key files, build/test commands). Because the
   agent can run in an **arbitrary cwd** (the `code` skill, "analyze this cloned repo"), `SEA.md`/
@@ -375,6 +387,12 @@ up convention files from the project root (like `CLAUDE.md`):
   instructions — a malicious convention file in an untrusted repo is wrapped as data, not followed.
 - **`MEMORY.md`** — project memory index (curated; the agent also writes typed notes to
   `data/project_memory/`).
+
+  > **Auto-memory is per-chat.** The SQLite store (facts, active goal, episodes, summary) is scoped
+  > by **thread/chat** (`session_id`), not globally per user — each chat keeps its own memory and a
+  > new chat starts clean, so a goal from one conversation never bleeds into an unrelated one. KB
+  > documents (`/kb`) and the project `MEMORY.md` remain explicit, shared tiers. `/facts` · `/goal`
+  > show the current chat's memory; `/goal clear` closes its active goal.
 - **`MCP.md`** — your MCP server registry (YAML fields like a skill): connected from the CLI and the
   desktop alike. A server is **auto-trusted only with explicit `trusted: true`** (otherwise it's
   visible to the agent but launched only via confirmation) — so a cloned repo's `MCP.md` can't
@@ -869,6 +887,18 @@ API: `POST /chat {user_id, query}`, `GET /diagnose`, `/memory/facts`, `/memory/g
 CLI — терминальная, **project-rooted** поверхность: запускаешь из каталога проекта, и агент
 подцепляет из корня файлы-конвенции (как `CLAUDE.md`):
 
+**Интерфейс** — `sea` открывает **полноэкранный TUI** (Textual): одноразовое приветствие (лого SEA +
+арт + гайд), которое исчезает после первого сообщения, дальше — чистая лента диалога на весь экран.
+У слэш-команд ghost-автодополнение (Tab — принять); **↑/↓** листают историю ввода; **Esc** закрывает
+открытый исторический чат в свежую сессию; мышь и **скроллит** ленту, и **выделяет/копирует** текст.
+HITL-подтверждения и Q/A-уточнения — компактные пикеры внизу экрана, полностью с клавиатуры (стиль
+Claude Code: курсор `❯`, отметки `[✓]`; в мультиселекте **Enter** ставит галочку на каждом пункте,
+строка `✓ Done` отправляет). Мост браузер-расширения поднимается вместе с TUI; `/token` показывает
+токен подключения. Живая статус-строка: текущий шаг, секунды, расход токенов (обновляется по ходу
+прогона, индикатор `⟳ calling model…`, пока модель отвечает). One-shot остаётся скриптуемым:
+`sea "задача"` выполнит один раз и выйдет. (`current_datetime` — встроенный тул, поэтому «сколько
+времени в Москве?» отвечается из системных часов, а не угадывается.)
+
 - **`SEA.md`** — инструкции проекта для агента (грузятся в каждый запрос). Агент может работать в
   ПРОИЗВОЛЬНОМ cwd (навык `code`, «проанализируй этот репо»), поэтому содержимое `SEA.md`/`SKILL.md`
   **проверяется на инъекции** (по-предложенчно, эмбеддингом) перед впрыском как инструкции —
@@ -877,6 +907,12 @@ CLI — терминальная, **project-rooted** поверхность: з�
   стартовую карту репо (стек, структура, ключевые файлы, команды build/test).
 - **`MEMORY.md`** — индекс проектной памяти (курируемый; агент также пишет типизированные заметки
   в `data/project_memory/`).
+
+  > **Авто-память — по чату.** SQLite-стор (факты, активная цель, эпизоды, summary) скоупится по
+  > **треду/чату** (`session_id`), а не глобально на юзера — у каждого чата своя память, новый чат
+  > стартует чистым, и цель из одного разговора не протекает в несвязанный. KB-документы (`/kb`) и
+  > проектная `MEMORY.md` остаются явными общими ярусами. `/facts` · `/goal` показывают память
+  > текущего чата; `/goal clear` закрывает его активную цель.
 - **`MCP.md`** — пользовательский реестр MCP-серверов (yml-поля, как у навыка): подключается и из
   CLI, и из десктопа. Сервер авто-доверен **только по явному `trusted: true`** (иначе виден агенту,
   но запускается лишь через подтверждение) — чтобы `MCP.md` из чужого репо не запустил молча
