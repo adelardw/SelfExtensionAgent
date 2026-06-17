@@ -9,5 +9,5 @@
 <text x="40" y="236" font-size="30" fill="url(#sea)" xml:space="preserve">╚══════╝╚══════╝╚═╝  ╚═╝</text>
 <text x="40" y="298" font-size="21" fill="#7fb6d9">self-extension-agent</text>
 <text x="40" y="326" font-size="15" fill="#5b6472">a self-extending, self-improving agent on LangGraph</text>
-<text x="630" y="326" font-size="15" fill="#3a6ea5">~ deep blue sea 🌊</text>
+<text x="752" y="326" font-size="15" fill="#3a6ea5" text-anchor="end">~ deep blue sea 🌊</text>
 </svg>
