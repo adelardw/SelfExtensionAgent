@@ -301,6 +301,14 @@ async def _structured(role: str, schema, sysvars: dict, query: str):
     )
 
 
+def _mem_scope(state) -> str:
+    """Ключ скоупа АВТО-памяти (facts/goal/episodes/summary). ПОЛНАЯ ИЗОЛЯЦИЯ ПО ЧАТУ: ключ =
+    session_id (thread_id), а не user_id. Каждый чат — своя память; новый чат стартует чистым,
+    активная цель/факты прошлой сессии НЕ протекают (выбор юзера). KB-документы и проектная
+    MEMORY.md скоупятся отдельно (явные ярусы) — их это не касается."""
+    return state.get("session_id") or state.get("user_id") or "default"
+
+
 async def recall_node(state: GeneralGraphState) -> dict:
     """
     Reflective-контур (вход): поднимает долгую память и формирует гипотезу
@@ -311,7 +319,7 @@ async def recall_node(state: GeneralGraphState) -> dict:
     clarify.reset_ledger()  # чистый реестр уточнений на этот прогон
     interaction.reset_ledger()  # чистый журнал взаимодействий (HITL-решения и пр.)
     runbudget.reset()       # обнуляем токен-бюджет прогона (изолирован по run_id)
-    user_id = state.get("user_id") or "default"
+    user_id = _mem_scope(state)  # ПАМЯТЬ скоупится по чату (thread), не по юзеру — изоляция между чатами
     clear_scratch(user_id)  # временный (runtime) ярус памяти живёт только в рамках прогона
     query = state["query"]
     browser_bridge.set_user_domains(query)  # анти-тайпсквоттинг: домены, явно названные юзером
@@ -406,7 +414,7 @@ async def goal_node(state: GeneralGraphState) -> dict:
     Само-рефлексия цели: определяет цель запроса и держит «стоящую» цель в контексте.
     Отдельный гибкий модуль (не слит с reflexion) — удерживается через memory_context.
     """
-    user_id = state.get("user_id") or "default"
+    user_id = _mem_scope(state)  # цель скоупится по чату (thread) — не протекает в другие чаты
     active = memory_store.get_active_goal(user_id)
     active_text = active["aim"] if active else "Нет активной цели."
 
@@ -1642,9 +1650,11 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         subagent_names.append(sa.name)
 
     # Память-как-TOOL: агент САМ решает подтянуть память/восстановить полную историю
-    # (drill-back), а не только получать авто-впрыск. Привязаны к user_id прогона.
+    # (drill-back), а не только получать авто-впрыск. Привязаны к СКОУПУ ЧАТА (thread), как recall/
+    # reflect — изоляция авто-памяти между чатами. KB-документы ниже остаются по user_id (явные).
     uid = state.get("user_id") or "default"
-    tools.extend(make_memory_tools(memory_store, uid))
+    mem_uid = _mem_scope(state)
+    tools.extend(make_memory_tools(memory_store, mem_uid))
     # #2 Проектная память: агент может сам сохранить заметку проекта (профиль/фидбек/цель/ссылку)
     # в MEMORY.md — переживает сессии, подмешивается на recall следующих прогонов.
     tools.append(project_memory.make_project_memory_tool())
@@ -2022,7 +2032,7 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     извлекает устойчивые факты о пользователе и периодически синтезирует выводы.
     Терминальная нода — выполняется только на успешном завершении (не на ретраях).
     """
-    user_id = state.get("user_id") or "default"
+    user_id = _mem_scope(state)  # эпизоды/факты пишем в память ЧАТА (thread) — изоляция между чатами
     query = state["query"]
     answer = state.get("final_answer", "")
     confidence = state.get("confidence", 0.0)

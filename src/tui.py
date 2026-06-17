@@ -829,25 +829,34 @@ class SeaTUI(App):
         elif cmd == "/diagnose":
             from src.agent import memory_store
             from src.tracing import diagnose
-            rep = diagnose(memory_store, "local")
+            rep = diagnose(memory_store, self.thread_id)  # память скоупится по чату (thread)
             self._log("\n[bold #38c6ff]diagnose[/]\n" + str(rep))
         elif cmd == "/facts":
             from src.agent import memory_store
-            facts = memory_store.get_facts("local")
+            facts = memory_store.get_facts(self.thread_id)  # факты ЭТОГО чата (изоляция по треду)
             if not facts:
-                self._log("[dim]Nothing remembered yet.[/]")
+                self._log("[dim]Nothing remembered in this chat yet.[/]")
             else:
-                self._log("\n[bold #38c6ff]what I remember[/]\n"
+                self._log("\n[bold #38c6ff]what I remember (this chat)[/]\n"
                           + "\n".join(f"• [bold]{f['key']}[/]: {f['value']}" for f in facts[:30]))
         elif cmd == "/goal":
             from src.agent import memory_store
-            g = memory_store.get_active_goal("local")
-            if not g:
-                self._log("[dim]No active goal.[/]")
+            if args and args[0].lower() in ("clear", "done", "reset", "forget"):
+                # Закрыть активную цель ЭТОГО чата (память скоупится по треду — изоляция между чатами).
+                g = memory_store.get_active_goal(self.thread_id)
+                if g:
+                    memory_store.close_active_goal(self.thread_id)
+                    self._log(f"[#5b6472]🎯 Goal cleared:[/] {g['aim']}")
+                else:
+                    self._log("[dim]No active goal to clear.[/]")
             else:
-                crit = memory_store.goal_criteria(g)
-                txt = f"🎯 {g['aim']}" + ("\n" + "\n".join(f"  ☐ {c}" for c in crit) if crit else "")
-                self._log("\n[bold #38c6ff]goal[/]\n" + txt)
+                g = memory_store.get_active_goal(self.thread_id)
+                if not g:
+                    self._log("[dim]No active goal.[/]")
+                else:
+                    crit = memory_store.goal_criteria(g)
+                    txt = f"🎯 {g['aim']}" + ("\n" + "\n".join(f"  ☐ {c}" for c in crit) if crit else "")
+                    self._log("\n[bold #38c6ff]goal[/] [dim](/goal clear — forget it)[/]\n" + txt)
         elif cmd == "/usage":
             from src.usage import cost_of
             cost = cost_of(self._tok_in, self._tok_out)
