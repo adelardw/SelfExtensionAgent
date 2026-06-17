@@ -8,26 +8,26 @@
           <mxGeometry x="60" y="24" width="2100" height="44" as="geometry" />
         </mxCell>
         <mxCell id="ephdr" value="ENTRYPOINTS (app-слой) — вызывают граф (общий граф + память)" style="text;html=1;fontSize=15;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
-          <mxGeometry x="60" y="122" width="2100" height="26" as="geometry" />
+          <mxGeometry x="60" y="88" width="2100" height="26" as="geometry" />
         </mxCell>
-        <mxCell id="ep0" value="REPL&#10;main.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
-          <mxGeometry x="535" y="157" width="330" height="86" as="geometry" />
+        <mxCell id="ep0" value="CLI · sea  (default surface)&#10;полноэкранный TUI (Textual): слэш-команды + ghost/Tab,&#10;↑/↓ история, Esc-закрыть чат, мышь выделяет + скроллит.&#10;HITL-подтверждение + Q/A-пикеры (❯  [✓], Enter ставит ✓ → Done).&#10;живые токены (⟳ calling model) · мост браузера (/token) ·&#10;/init репо→SEA.md · /compact·/sync · one-shot: sea «задача»" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="530" y="126" width="460" height="168" as="geometry" />
         </mxCell>
         <mxCell id="ep_e0" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep0" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="ep1" value="Telegram&#10;bot.py" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
-          <mxGeometry x="955" y="157" width="330" height="86" as="geometry" />
+        <mxCell id="ep1" value="Telegram&#10;bot.py · чат + clarify/confirm" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="162" width="460" height="96" as="geometry" />
         </mxCell>
         <mxCell id="ep_e1" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep1" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="ep2" value="Desktop / Web GUI&#10;desktop.py · React+Vite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
-          <mxGeometry x="1375" y="157" width="330" height="86" as="geometry" />
+        <mxCell id="ep2" value="Desktop / Web GUI&#10;desktop.py · React+Vite&#10;живой прогресс (astream)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="162" width="460" height="96" as="geometry" />
         </mxCell>
         <mxCell id="ep_e2" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep2" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="ep3" value="Chrome extension&#10;агент в твоём браузере" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
-          <mxGeometry x="1795" y="157" width="330" height="86" as="geometry" />
+        <mxCell id="ep3" value="Chrome extension&#10;агент в твоём браузере · чат из side-panel&#10;→ browser_bridge → тот же граф" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1890" y="162" width="460" height="96" as="geometry" />
         </mxCell>
         <mxCell id="ep_e3" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep3" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
-        <mxCell id="ep4" value="FastAPI server&#10;server.py · /chat · /run · astream" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;" vertex="1" parent="1">
-          <mxGeometry x="2215" y="157" width="330" height="86" as="geometry" />
+        <mxCell id="ep4" value="FastAPI server&#10;server.py · /chat · /run · astream" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#666666;fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="2310" y="162" width="460" height="96" as="geometry" />
         </mxCell>
         <mxCell id="ep_e4" style="html=1;endArrow=block;rounded=1;strokeColor=#4a4a6a;" edge="1" parent="1" source="ep4" target="__start__"><mxGeometry relative="1" as="geometry" /></mxCell>
         <mxCell id="__start__" value="__start__" style="ellipse;whiteSpace=wrap;html=1;fillColor=#D5E8D4;strokeColor=#82B366;fontSize=16;fontStyle=1;shadow=1;" vertex="1" parent="1">

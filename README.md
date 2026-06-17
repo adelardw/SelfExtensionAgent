@@ -1,3 +1,29 @@
+<p align="center">
+  <img src="docs/sea_logo.svg" alt="SEA — self-extension-agent" width="640">
+</p>
+
+<p align="center">
+  <img alt="Python 3.13" src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white">
+  <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-1C3C3C?logo=langgraph&logoColor=white">
+  <img alt="LangChain" src="https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&logoColor=white">
+  <img alt="MCP" src="https://img.shields.io/badge/MCP-adapters-6E56CF">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=white">
+  <img alt="OpenRouter" src="https://img.shields.io/badge/OpenRouter-gateway-3a6ea5">
+  <img alt="Ollama" src="https://img.shields.io/badge/Ollama-local-000000?logo=ollama&logoColor=white">
+</p>
+<p align="center">
+  <img alt="Textual" src="https://img.shields.io/badge/Textual-TUI-5A4FCF">
+  <img alt="Rich" src="https://img.shields.io/badge/Rich-console-009688">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="Pydantic" src="https://img.shields.io/badge/Pydantic-E92063?logo=pydantic&logoColor=white">
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white">
+  <img alt="LightRAG" src="https://img.shields.io/badge/LightRAG-graph%20KB-0E8088">
+  <img alt="BM25s" src="https://img.shields.io/badge/BM25s-retrieval-7c899c">
+  <img alt="TurboVec" src="https://img.shields.io/badge/TurboVec-vectors-0E8088">
+  <img alt="TextGrad" src="https://img.shields.io/badge/TextGrad-backward%20opt-D79B00">
+  <img alt="tests" src="https://img.shields.io/badge/tests-410%20passed-3fae5a">
+</p>
+
 # self-extension-agent
 
 A self-extending, self-improving personal agent built on **LangGraph**. It picks a *thinking
@@ -516,6 +542,25 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 
 ---
 ---
+
+<p align="center">
+  <img src="docs/sea_logo.svg" alt="SEA — self-extension-agent" width="640">
+</p>
+
+<p align="center">
+  <img alt="Python 3.13" src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white">
+  <img alt="LangGraph" src="https://img.shields.io/badge/LangGraph-1C3C3C?logo=langgraph&logoColor=white">
+  <img alt="LangChain" src="https://img.shields.io/badge/LangChain-1C3C3C?logo=langchain&logoColor=white">
+  <img alt="OpenAI" src="https://img.shields.io/badge/OpenAI-412991?logo=openai&logoColor=white">
+  <img alt="OpenRouter" src="https://img.shields.io/badge/OpenRouter-gateway-3a6ea5">
+  <img alt="Ollama" src="https://img.shields.io/badge/Ollama-local-000000?logo=ollama&logoColor=white">
+  <img alt="Textual" src="https://img.shields.io/badge/Textual-TUI-5A4FCF">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white">
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white">
+  <img alt="LightRAG" src="https://img.shields.io/badge/LightRAG-graph%20KB-0E8088">
+  <img alt="TextGrad" src="https://img.shields.io/badge/TextGrad-backward%20opt-D79B00">
+  <img alt="tests" src="https://img.shields.io/badge/tests-410%20passed-3fae5a">
+</p>
 
 # self-extension-agent (Русская версия)
 

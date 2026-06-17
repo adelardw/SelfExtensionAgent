@@ -21,13 +21,25 @@ NW, NH = 380, 140                            # бокс-ноды
 def Y(r): return TOP + r * ROWH
 
 # entrypoints (app-слой) — вызывают граф; (label, desc_en, desc_ru, центр_x)
-EY = 200
+EY = 210
 ENTRY = [
-    ("REPL", "main.py", "main.py", 700),
-    ("Telegram", "bot.py", "bot.py", 1120),
-    ("Desktop / Web GUI", "desktop.py · React+Vite", "desktop.py · React+Vite", 1540),
-    ("Chrome extension", "agent in your browser", "агент в твоём браузере", 1960),
-    ("FastAPI server", "server.py · /chat · /run · astream", "server.py · /chat · /run · astream", 2380),
+    ("CLI · sea  (default surface)",
+     "full-screen TUI (Textual): slash-cmds + ghost/Tab,\n"
+     "↑/↓ history, Esc-close chat, mouse select + scroll.\n"
+     "HITL confirm + clarify Q/A pickers (❯  [✓], Enter ticks → Done).\n"
+     "live tokens (⟳ calling model) · browser bridge (/token) ·\n"
+     "/init repo→SEA.md · /compact·/sync · one-shot: sea \"task\"",
+     "полноэкранный TUI (Textual): слэш-команды + ghost/Tab,\n"
+     "↑/↓ история, Esc-закрыть чат, мышь выделяет + скроллит.\n"
+     "HITL-подтверждение + Q/A-пикеры (❯  [✓], Enter ставит ✓ → Done).\n"
+     "живые токены (⟳ calling model) · мост браузера (/token) ·\n"
+     "/init репо→SEA.md · /compact·/sync · one-shot: sea «задача»", 760),
+    ("Telegram", "bot.py · chat + clarify/confirm", "bot.py · чат + clarify/confirm", 1280),
+    ("Desktop / Web GUI", "desktop.py · React+Vite\nlive progress (astream)",
+     "desktop.py · React+Vite\nживой прогресс (astream)", 1700),
+    ("Chrome extension", "agent in your browser · side-panel chat\n→ browser_bridge → same graph",
+     "агент в твоём браузере · чат из side-panel\n→ browser_bridge → тот же граф", 2120),
+    ("FastAPI server", "server.py · /chat · /run · astream", "server.py · /chat · /run · astream", 2540),
 ]
 
 # имя → (центр_x, rank, тип)   тип: "io" | "node"
@@ -187,8 +199,11 @@ def box(name, cx, cy, kind, desc):
 def entry_box(i, label, desc, cx):
     fill, stroke = COLORS["iface"]
     style = (f"rounded=1;whiteSpace=wrap;html=1;fillColor={fill};strokeColor={stroke};"
-             "fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;")
-    return cell(f"ep{i}", f"{label}\n{desc}", style, cx, EY, 330, 86)
+             "fontSize=13;verticalAlign=middle;shadow=1;arcSize=12;align=left;spacingLeft=10;")
+    # CLI-вход (i==0) — детальный, выше; остальные — компактные. cell() сам экранирует; первую
+    # строку (label) рендер делает жирной — поэтому без <b> и без ручного escape здесь.
+    h = 168 if i == 0 else 96
+    return cell(f"ep{i}", f"{label}\n{desc}", style, cx, EY, 460, h)
 
 
 def edge(i, src, tgt, dashed, wps):
@@ -235,7 +250,7 @@ def main() -> int:
     parts.append(
         f'        <mxCell id="ephdr" value="{escape(ep_hdr)}" '
         'style="text;html=1;fontSize=15;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">\n'
-        f'          <mxGeometry x="60" y="{EY - 78}" width="2100" height="26" as="geometry" />\n'
+        f'          <mxGeometry x="60" y="88" width="2100" height="26" as="geometry" />\n'
         '        </mxCell>')
     for i, (label, de, dr, cx) in enumerate(ENTRY):
         parts.append(entry_box(i, label, de if lang == "en" else dr, cx))

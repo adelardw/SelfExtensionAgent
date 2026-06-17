@@ -1,11 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2585" height="5558" viewBox="0 0 2585 5558" font-family="Helvetica,Arial,sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="2810" height="5558" viewBox="0 0 2810 5558" font-family="Helvetica,Arial,sans-serif">
 <defs><marker id="a_4a4a6a" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#4a4a6a"/></marker><marker id="a_8a8fb8" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L8,3 L0,6 z" fill="#8a8fb8"/></marker><filter id="nodeshadow" x="-10%" y="-10%" width="125%" height="130%"><feDropShadow dx="0" dy="2.5" stdDeviation="3.5" flood-color="#3a3a5a" flood-opacity="0.30"/></filter></defs>
-<rect width="2585" height="5558" fill="#ffffff"/>
-<path d="M 854.1,243.0 L 1470.0,414.9" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 1198.8,243.0 L 1501.3,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 1543.6,243.0 L 1557.3,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 1888.3,243.0 L 1613.3,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
-<path d="M 2233.1,243.0 L 1650.0,413.7" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<rect width="2810" height="5558" fill="#ffffff"/>
+<path d="M 990.0,276.1 L 1470.0,414.1" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1338.4,258.0 L 1521.0,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 1670.8,258.0 L 1579.5,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 2003.1,258.0 L 1637.9,408.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
+<path d="M 2335.5,258.0 L 1650.0,418.9" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
 <path d="M 1560.0,472.0 L 1560.0,660.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
 <path d="M 1560.0,800.0 L 1560.0,950.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
 <path d="M 889.7,1670.0 L 610.3,1820.0" fill="none" stroke="#4a4a6a" stroke-width="1.7" marker-end="url(#a_4a4a6a)"/>
@@ -38,22 +38,29 @@
 <path d="M 290.0,4790.0 L 222.0,4790.0 Q 210.0,4790.0 210.0,4778.0 L 210.0,1902.0 Q 210.0,1890.0 222.0,1890.0 L 290.0,1890.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
 <path d="M 670.0,4841.0 L 1370.0,5029.0" fill="none" stroke="#8a8fb8" stroke-width="1.7" stroke-dasharray="6,5" marker-end="url(#a_8a8fb8)"/>
 <text x="68" y="56" font-size="22" fill="#1a1a1a" text-anchor="start" font-weight="bold">self-extension-agent — LangGraph forward graph (every node = what happens &amp; how)</text>
-<text x="68" y="141" font-size="15" fill="#1a1a1a" text-anchor="start" font-weight="bold">ENTRYPOINTS (app layer) — invoke the graph (shared graph + memory)</text>
-<rect x="535" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="700" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">REPL</text>
-<text x="700" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">main.py</text>
-<rect x="955" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="1120" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Telegram</text>
-<text x="1120" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">bot.py</text>
-<rect x="1375" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="1540" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Desktop / Web GUI</text>
-<text x="1540" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">desktop.py · React+Vite</text>
-<rect x="1795" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="1960" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">Chrome extension</text>
-<text x="1960" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">agent in your browser</text>
-<rect x="2215" y="157" width="330" height="86" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="2380" y="197" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">FastAPI server</text>
-<text x="2380" y="213" font-size="13" fill="#1a1a1a" text-anchor="middle">server.py · /chat · /run · astream</text>
+<text x="68" y="107" font-size="15" fill="#1a1a1a" text-anchor="start" font-weight="bold">ENTRYPOINTS (app layer) — invoke the graph (shared graph + memory)</text>
+<rect x="530" y="126" width="460" height="168" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="540" y="167" font-size="13" fill="#1a1a1a" text-anchor="start" font-weight="bold">CLI · sea  (default surface)</text>
+<text x="540" y="183" font-size="13" fill="#1a1a1a" text-anchor="start">full-screen TUI (Textual): slash-cmds + ghost/Tab,</text>
+<text x="540" y="199" font-size="13" fill="#1a1a1a" text-anchor="start">↑/↓ history, Esc-close chat, mouse select + scroll.</text>
+<text x="540" y="215" font-size="13" fill="#1a1a1a" text-anchor="start">HITL confirm + clarify Q/A pickers (❯ [✓], Enter ticks →</text>
+<text x="540" y="231" font-size="13" fill="#1a1a1a" text-anchor="start">Done).</text>
+<text x="540" y="247" font-size="13" fill="#1a1a1a" text-anchor="start">live tokens (⟳ calling model) · browser bridge (/token) ·</text>
+<text x="540" y="263" font-size="13" fill="#1a1a1a" text-anchor="start">/init repo→SEA.md · /compact·/sync · one-shot: sea &quot;task&quot;</text>
+<rect x="1050" y="162" width="460" height="96" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1060" y="207" font-size="13" fill="#1a1a1a" text-anchor="start" font-weight="bold">Telegram</text>
+<text x="1060" y="223" font-size="13" fill="#1a1a1a" text-anchor="start">bot.py · chat + clarify/confirm</text>
+<rect x="1470" y="162" width="460" height="96" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1480" y="199" font-size="13" fill="#1a1a1a" text-anchor="start" font-weight="bold">Desktop / Web GUI</text>
+<text x="1480" y="215" font-size="13" fill="#1a1a1a" text-anchor="start">desktop.py · React+Vite</text>
+<text x="1480" y="231" font-size="13" fill="#1a1a1a" text-anchor="start">live progress (astream)</text>
+<rect x="1890" y="162" width="460" height="96" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="1900" y="199" font-size="13" fill="#1a1a1a" text-anchor="start" font-weight="bold">Chrome extension</text>
+<text x="1900" y="215" font-size="13" fill="#1a1a1a" text-anchor="start">agent in your browser · side-panel chat</text>
+<text x="1900" y="231" font-size="13" fill="#1a1a1a" text-anchor="start">→ browser_bridge → same graph</text>
+<rect x="2310" y="162" width="460" height="96" rx="10" fill="#F5F5F5" stroke="#666666" stroke-width="1.5" filter="url(#nodeshadow)"/>
+<text x="2320" y="207" font-size="13" fill="#1a1a1a" text-anchor="start" font-weight="bold">FastAPI server</text>
+<text x="2320" y="223" font-size="13" fill="#1a1a1a" text-anchor="start">server.py · /chat · /run · astream</text>
 <ellipse cx="1560" cy="440" rx="90" ry="32" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
 <text x="1560" y="446" font-size="16" fill="#1a1a1a" text-anchor="middle" font-weight="bold">__start__</text>
 <rect x="1370" y="660" width="380" height="140" rx="10" fill="#E1D5E7" stroke="#9673A6" stroke-width="1.5" filter="url(#nodeshadow)"/>
