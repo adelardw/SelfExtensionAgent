@@ -84,6 +84,7 @@ from .memory import (
     MemoryStore, build_embedder, detect_implicit_feedback,
     feedback_is_negative, feedback_strip_marker,
 )
+from .memory.embedder import cosine
 from .improve import get_prompt as get_prompt_override, maybe_auto_improve, maybe_improve_user
 from .improve.safety import sanitize_tool_output, strip_ungrounded_pii
 from .improve.prompt_store import format_fewshots, add_fewshot, add_user_fewshot
@@ -318,6 +319,29 @@ def _mem_scope(state) -> str:
     return state.get("session_id") or state.get("user_id") or "default"
 
 
+_FINDINGS_SIM_GATE = 0.30  # ниже — находка не относится к запросу, не впрыскиваем (чтобы не шуметь)
+
+
+def _relevant_findings(state, k: int = 2) -> str:
+    """Из КОЛЛЕКЦИИ находок тяжёлых прогонов выбрать СЕМАНТИЧЕСКИ близкие к текущему запросу
+    (top-k по косинусу к query_emb) → блок доп-контекста. 'all' раздувал бы контекст (цена растёт
+    с сессией), 'last' терял бы ранние подтемы. Без эмбеддинга запроса — отдаём последнюю. Без LLM."""
+    items = state.get("session_findings") or []
+    if not isinstance(items, list):
+        return ""  # совместимость со старым str-форматом → игнор
+    items = [it for it in items if isinstance(it, dict) and it.get("summary")]
+    if not items:
+        return ""
+    qe = state.get("query_emb") or None
+    scored = [(cosine(qe, it.get("emb") or []) if (qe and it.get("emb")) else -1.0, it) for it in items]
+    if qe and any(s >= 0 for s, _ in scored):
+        scored.sort(key=lambda x: x[0], reverse=True)
+        picked = [it for s, it in scored if s >= _FINDINGS_SIM_GATE][:k]
+    else:
+        picked = [items[-1]]  # нет эмбеддингов → последняя находка (graceful)
+    return "\n\n".join(it["summary"] for it in picked)
+
+
 async def recall_node(state: GeneralGraphState) -> dict:
     """
     Reflective-контур (вход): поднимает долгую память и формирует гипотезу
@@ -349,6 +373,13 @@ async def recall_node(state: GeneralGraphState) -> dict:
     summary = memory_store.get_summary(user_id)
     if summary:
         memory_context = f"[Саммари сессии]\n{summary}\n\n{memory_context}"
+    # Findings-кэш тяжёлых прогонов (коллекция в STATE; чекпоинтер несёт по thread_id — «локальная
+    # память», БД не нужна). Впрыскиваем СЕМАНТИЧЕСКИ близкие к запросу (top-k) ПЕРВЫМ блоком →
+    # reflexion видит, что тема проработана, и роняет режим (deliberate→reason/fast); агент отвечает
+    # из находок, не гоняя граф заново. Эскалация назад — штатным runtime-evidence, если их не хватит.
+    findings = _relevant_findings(state)
+    if findings:
+        memory_context = f"{findings}\n\n{memory_context}"
 
     # Рабочий профиль (persona): держится в контексте ВСЕХ запросов — агент работает
     # под роль пользователя (фин-аналитик/разработчик/…): персонализация, навыки, стэши.
@@ -2091,6 +2122,28 @@ async def reflect_node(state: GeneralGraphState) -> dict:
     validated = mode in ("deliberate", "reason", "heavy")
     outcome = "ok" if (not validated or confidence >= LOW_CONF) else "low_conf"
 
+    # Findings-кэш: после ТЯЖЁЛОГО/мультишагового прогона — детерминированная выжимка проделанного
+    # (шаги + итог) ДОБАВЛЯЕТСЯ В КОЛЛЕКЦИЮ в state → чекпоинтер несёт её по thread_id (БД не нужна),
+    # recall впрыснет следующим turn'ом СЕМАНТИЧЕСКИ близкие → reflexion ответит ЛЁГКИМ режимом, не
+    # повторяя ризонинг. Без LLM (бюджет). Лёгкий turn → коллекция не трогается. Дедуп близких тем +
+    # кап последними N (бюджет state/чекпоинта). Эскалация назад — штатным runtime-evidence.
+    _done = [s for s in (state.get("step_results") or []) if str(s.get("result") or "").strip()]
+    findings_coll = None  # None = лёгкий турн, коллекцию не меняем
+    if answer and (mode in ("deliberate", "heavy") or len(_done) >= 2):
+        _fp = ["[Уже проработано в этом чате — используй как контекст, НЕ повторяй тяжёлый ризонинг]",
+               f"Запрос: «{query[:90]}»"]
+        for s in _done[:6]:
+            _fp.append(f"• {str(s.get('goal', ''))[:90]}: {str(s.get('result', ''))[:380]}")
+        _fp.append(f"Итог: {answer[:700]}")
+        _qe = state.get("query_emb") or []
+        entry = {"query": query[:120], "summary": "\n".join(_fp)[:2800], "emb": _qe}
+        coll = state.get("session_findings")
+        coll = [c for c in coll if isinstance(c, dict)] if isinstance(coll, list) else []
+        # дедуп: очень близкий по теме прошлый прогон заменяем (не плодим near-дубли)
+        coll = [c for c in coll if not (_qe and c.get("emb") and cosine(_qe, c["emb"]) >= 0.88)]
+        coll.append(entry)
+        findings_coll = coll[-6:]  # последние 6 находок — бюджет state/чекпоинта
+
     # Журнал взаимодействий прогона (стадия «сигнал» контура): HITL-решения + уточнения.
     # Раньше эти события умирали в конце прогона — теперь живут в эпизоде (сырьё для
     # per-user backward / бандитов) и тут же конвертируются в персонализацию.
@@ -2325,7 +2378,7 @@ async def reflect_node(state: GeneralGraphState) -> dict:
             pass
 
     threading.Thread(target=_post_reflect, daemon=True).start()
-    return {}
+    return {"session_findings": findings_coll} if findings_coll is not None else {}
 
 
 def route_after_reflexion(state: GeneralGraphState) -> str:

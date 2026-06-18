@@ -75,9 +75,20 @@ def _looks_like_language(text: str, min_tokens: int = 80, min_ratio: float = 0.0
     состоит из настоящих букв, но не образует ни одного реального слова. Детектор «мусорных
     символов» такое НЕ ловит (буквы валидны). Сигнал — доля частотных стоп-слов: прозаичный
     русский/английский даёт >5%, скрэмбл ~0%. Числовые таблицы/код судить нельзя (мало слов-
-    токенов) → при <min_tokens возвращаем True (не трогаем). Регэксп — токенизация, не интент."""
-    import re
+    токенов) → при <min_tokens возвращаем True (не трогаем). Регэксп — токенизация, не интент.
 
+    ВАЖНО (мультиязычность): стоп-слова только RU/EN. Для других скриптов (CJK/арабица/…) детектор
+    не применим → НЕ судим (иначе ложный «не язык» → дорогой visual-OCR фолбэк на нормальном PDF,
+    напр. в GAIA). Проверяем только когда текст преимущественно латиница/кириллица."""
+    import re
+    import unicodedata
+
+    letters = [c for c in (text or "") if c.isalpha()]
+    if len(letters) < 40:
+        return True
+    latin_cyr = sum(1 for c in letters if unicodedata.name(c, "").startswith(("LATIN", "CYRILLIC")))
+    if latin_cyr / len(letters) < 0.6:  # доминирует чужой скрипт → стоп-слова неприменимы, не трогаем
+        return True
     toks = re.findall(r"[^\W\d_]{2,}", (text or "").lower(), re.UNICODE)
     if len(toks) < min_tokens:
         return True

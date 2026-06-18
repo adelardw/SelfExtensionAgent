@@ -134,6 +134,13 @@ and characterization tests pinning the anti-hallucination + embedding-injection 
   (`collective.py`): a pattern that proved itself for one user becomes an install best-practice and
   is recommended to **similar** people (query + profile matching); personal always wins,
   injections aren't promoted.
+- **Within-session findings cache (amortized reasoning)** — after a heavy/multi-step run, `reflect`
+  stores a deterministic digest (steps + result) into `session_findings`, a **collection** carried in
+  graph state by the checkpointer per `thread_id` (no DB). On the next turn `recall` injects the
+  **semantically closest** findings (top-k by cosine over the query embedding) — so a follow-up on an
+  already-analyzed subject is answered in a **lighter mode** (deliberate→reason/fast) instead of
+  re-running the graph; it re-escalates only when the cached context is genuinely insufficient. Empty
+  in single-shot eval (no checkpointer → GAIA-neutral).
 - **User knowledge base** (`/kb`) — personal documents in a folder hierarchy, a graph on
   **real LightRAG** (entities + relations, multi-hop), BM25 fallback without a key; graph
   indexing comes with a cost estimate and confirmation (`/kb add` doesn't spend silently). Session
@@ -359,6 +366,12 @@ python scripts/build_binary.py --app                # → dist/SEA.app (Dock ico
 Native window (pywebview + FastAPI + React GUI), Launchpad icon. `.app` is ad-hoc-signed → for
 your own machine `open` it (or right-click → Open once); shipping to others needs Apple Developer
 ID + notarization. Runtime data lives in `~/Library/Application Support/SEA`.
+
+GUI features: English UI, live **token counter + cost** in the header, attach/detach files (multi),
+**image gallery** in chat (`search_images` → SearXNG images → DuckDuckGo fallback; renders as a
+window with the agent's commentary above/below), voice input (mic released after each recording),
+thread history. Settings hold provider/key/models, work & thinking mode, and **SearXNG URL** (the
+`.app` does not read `.env` — set it here once, e.g. `http://localhost:8080`).
 
 ## Configuration
 
@@ -701,6 +714,13 @@ concurrency/изоляция-тесты (per-request run_context, HITL-гран�
   переиспользуемый навык. **Коллективный ярус** (`collective.py`): паттерн, доказавший
   себя у юзера, становится best-practice инсталляции и рекомендуется ПОХОЖИМ людям
   (матчинг запроса+профиля); личное всегда приоритетнее, инъекции не промоутятся.
+- **Findings-кэш в рамках сессии (амортизация рассуждения)** — после ТЯЖЁЛОГО/мультишагового
+  прогона `reflect` кладёт детерминированную выжимку (шаги+итог) в `session_findings` — **коллекцию**,
+  которую чекпоинтер несёт в state по `thread_id` (без БД). Следующий ход `recall` впрыскивает
+  **семантически ближайшие** находки (top-k по косинусу к эмбеддингу запроса) → follow-up по уже
+  разобранному закрывается **лёгким режимом** (deliberate→reason/fast), а не повтором графа;
+  эскалация назад — только если кэша реально не хватает. В single-shot бенче пусто (нет чекпоинтера →
+  GAIA-нейтрально).
 - **База знаний пользователя** (`/kb`) — личные документы в иерархии папок, граф на
   **настоящем LightRAG** (сущности+связи, multi-hop), BM25 fallback без ключа; индексация
   в граф — с прикидкой цены и подтверждением (`/kb add` не тратит молча). Вложения
@@ -925,6 +945,12 @@ python scripts/build_binary.py --app                # → dist/SEA.app (Dock-и�
 Нативное окно (pywebview + FastAPI + React-GUI), плитка в Launchpad. `.app` ad-hoc-подписан → на
 своей машине запускай `open` (или правый клик → «Открыть» один раз); для раздачи другим нужен Apple
 Developer ID + нотаризация. Рабочие данные — в `~/Library/Application Support/SEA`.
+
+Возможности GUI: английский интерфейс, **счётчик токенов + стоимость** в хедере на лету, вложения с
+убором (несколько), **окно-галерея** картинок в чате (`search_images` → SearXNG images → фолбэк
+DuckDuckGo; рендер как окно с комментом агента сверху/снизу), голосовой ввод (мик отпускается после
+записи), история тредов. В Настройках — провайдер/ключ/модели, режимы работы и мышления, и **URL
+SearXNG** (`.app` не читает `.env` — задаётся тут один раз, напр. `http://localhost:8080`).
 
 ## Настройка
 

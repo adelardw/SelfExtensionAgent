@@ -64,21 +64,25 @@
 <ellipse cx="1560" cy="440" rx="90" ry="32" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
 <text x="1560" y="446" font-size="16" fill="#1a1a1a" text-anchor="middle" font-weight="bold">__start__</text>
 <rect x="1370" y="660" width="380" height="140" rx="10" fill="#E1D5E7" stroke="#9673A6" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="1560" y="687" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">recall</text>
-<text x="1560" y="703" font-size="13" fill="#1a1a1a" text-anchor="middle">memory (episodes / facts / conclusions / goals)</text>
-<text x="1560" y="719" font-size="13" fill="#1a1a1a" text-anchor="middle">+ implicit feedback + external ctx + AutoRAG</text>
-<text x="1560" y="735" font-size="13" fill="#1a1a1a" text-anchor="middle">(user KB + session files, BM25 + sanitize).</text>
-<text x="1560" y="751" font-size="13" fill="#1a1a1a" text-anchor="middle">CONDITIONAL &amp; FLEXIBLE (recall_gate): facts AND</text>
-<text x="1560" y="767" font-size="13" fill="#1a1a1a" text-anchor="middle">associative memory BY RELEVANCE · GraphRAG-lite ·</text>
-<text x="1560" y="783" font-size="13" fill="#1a1a1a" text-anchor="middle">query embedded ONCE → router reuses it</text>
+<text x="1560" y="674" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">recall</text>
+<text x="1560" y="690" font-size="12" fill="#1a1a1a" text-anchor="middle">memory (episodes / facts / conclusions / goals)</text>
+<text x="1560" y="704" font-size="12" fill="#1a1a1a" text-anchor="middle">+ implicit feedback + external ctx + AutoRAG</text>
+<text x="1560" y="720" font-size="12" fill="#1a1a1a" text-anchor="middle">(user KB + session files, BM25 + sanitize).</text>
+<text x="1560" y="734" font-size="12" fill="#1a1a1a" text-anchor="middle">CONDITIONAL &amp; FLEXIBLE (recall_gate): facts AND</text>
+<text x="1560" y="750" font-size="12" fill="#1a1a1a" text-anchor="middle">associative memory BY RELEVANCE · GraphRAG-lite ·</text>
+<text x="1560" y="764" font-size="12" fill="#1a1a1a" text-anchor="middle">query embedded ONCE → router reuses it.</text>
+<text x="1560" y="780" font-size="12" fill="#1a1a1a" text-anchor="middle">+ inject SEMANTICALLY-closest session_findings</text>
+<text x="1560" y="794" font-size="12" fill="#1a1a1a" text-anchor="middle">(cached digests of past HEAVY runs)</text>
 <rect x="1370" y="950" width="380" height="140" rx="10" fill="#FFE6CC" stroke="#D79B00" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="1560" y="980" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflexion</text>
-<text x="1560" y="994" font-size="12" fill="#1a1a1a" text-anchor="middle">Self-Reflexion CHOICE of the thinking mode from</text>
-<text x="1560" y="1010" font-size="12" fill="#1a1a1a" text-anchor="middle">task analysis · + bandit prior (Beta/Thompson over</text>
-<text x="1560" y="1024" font-size="12" fill="#1a1a1a" text-anchor="middle">the user&#x27;s episodes, sees failures) + few-shots</text>
-<text x="1560" y="1040" font-size="12" fill="#1a1a1a" text-anchor="middle">+ intent router L2 (embedding-kNN, any language).</text>
-<text x="1560" y="1054" font-size="12" fill="#1a1a1a" text-anchor="middle">high ambiguity → clarify · heavy is NOT predicted —</text>
-<text x="1560" y="1070" font-size="12" fill="#1a1a1a" text-anchor="middle">it is EARNED by runtime evidence</text>
+<text x="1560" y="964" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflexion</text>
+<text x="1560" y="980" font-size="12" fill="#1a1a1a" text-anchor="middle">Self-Reflexion CHOICE of the thinking mode from</text>
+<text x="1560" y="994" font-size="12" fill="#1a1a1a" text-anchor="middle">task analysis · + bandit prior (Beta/Thompson over</text>
+<text x="1560" y="1010" font-size="12" fill="#1a1a1a" text-anchor="middle">the user&#x27;s episodes, sees failures) + few-shots</text>
+<text x="1560" y="1024" font-size="12" fill="#1a1a1a" text-anchor="middle">+ intent router L2 (embedding-kNN, any language).</text>
+<text x="1560" y="1040" font-size="12" fill="#1a1a1a" text-anchor="middle">high ambiguity → clarify · heavy is NOT predicted —</text>
+<text x="1560" y="1054" font-size="12" fill="#1a1a1a" text-anchor="middle">it is EARNED by runtime evidence.</text>
+<text x="1560" y="1070" font-size="12" fill="#1a1a1a" text-anchor="middle">findings already cover it → COMPRESS the mode</text>
+<text x="1560" y="1084" font-size="12" fill="#1a1a1a" text-anchor="middle">(deliberate → reason/fast); re-escalate on evidence</text>
 <rect x="1370" y="1240" width="380" height="140" rx="10" fill="#D5E8D4" stroke="#82B366" stroke-width="1.5" filter="url(#nodeshadow)"/>
 <text x="1560" y="1283" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">act</text>
 <text x="1560" y="1299" font-size="13" fill="#1a1a1a" text-anchor="middle">System 1 with hands: ONE direct action with</text>
@@ -157,14 +161,14 @@
 <text x="480" y="4795" font-size="13" fill="#1a1a1a" text-anchor="middle">grounding + rubric check of the answer</text>
 <text x="480" y="4811" font-size="13" fill="#1a1a1a" text-anchor="middle">(deterministic anti-hallucination floor)</text>
 <rect x="1370" y="5010" width="380" height="140" rx="10" fill="#FFF2CC" stroke="#D6B656" stroke-width="1.5" filter="url(#nodeshadow)"/>
-<text x="1560" y="5029" font-size="13" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflect</text>
-<text x="1560" y="5045" font-size="13" fill="#1a1a1a" text-anchor="middle">write the episode (+ interaction journal),</text>
-<text x="1560" y="5061" font-size="13" fill="#1a1a1a" text-anchor="middle">harvest</text>
-<text x="1560" y="5077" font-size="13" fill="#1a1a1a" text-anchor="middle">signal (HITL / clarify → profile facts), compile</text>
-<text x="1560" y="5093" font-size="13" fill="#1a1a1a" text-anchor="middle">the</text>
-<text x="1560" y="5109" font-size="13" fill="#1a1a1a" text-anchor="middle">PATTERN (+win/lose) → collective pool, detect a</text>
-<text x="1560" y="5125" font-size="13" fill="#1a1a1a" text-anchor="middle">habit, extract facts (+edges), summary, prune,</text>
-<text x="1560" y="5141" font-size="13" fill="#1a1a1a" text-anchor="middle">degradation tracking, auto self-learning</text>
+<text x="1560" y="5032" font-size="12" fill="#1a1a1a" text-anchor="middle" font-weight="bold">reflect</text>
+<text x="1560" y="5047" font-size="12" fill="#1a1a1a" text-anchor="middle">write the episode (+ interaction journal), harvest</text>
+<text x="1560" y="5062" font-size="12" fill="#1a1a1a" text-anchor="middle">signal (HITL / clarify → profile facts), compile the</text>
+<text x="1560" y="5077" font-size="12" fill="#1a1a1a" text-anchor="middle">PATTERN (+win/lose) → collective pool, detect a</text>
+<text x="1560" y="5092" font-size="12" fill="#1a1a1a" text-anchor="middle">habit, extract facts (+edges), summary, prune,</text>
+<text x="1560" y="5107" font-size="12" fill="#1a1a1a" text-anchor="middle">degradation tracking, auto self-learning.</text>
+<text x="1560" y="5122" font-size="12" fill="#1a1a1a" text-anchor="middle">HEAVY/multi-step run → COMPRESS into a findings</text>
+<text x="1560" y="5137" font-size="12" fill="#1a1a1a" text-anchor="middle">digest → session_findings (state, by thread)</text>
 <ellipse cx="1560" cy="5370" rx="90" ry="32" fill="#F8CECC" stroke="#B85450" stroke-width="1.5" filter="url(#nodeshadow)"/>
 <text x="1560" y="5376" font-size="16" fill="#1a1a1a" text-anchor="middle" font-weight="bold">__end__</text>
 <text x="68" y="5473" font-size="15" fill="#1a1a1a" text-anchor="start">── solid: fixed transition (add_edge)        ┄┄ dashed: conditional (add_conditional_edges)        ⟲ self-loop: step retry / next step</text>

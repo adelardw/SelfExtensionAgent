@@ -70,8 +70,8 @@ NODES = {
 # подробное описание «что и как идёт» (заголовок-имя движок делает жирным сам)
 DESC = {
     "en": {
-        "recall": "memory (episodes / facts / conclusions / goals)\n+ implicit feedback + external ctx + AutoRAG\n(user KB + session files, BM25 + sanitize).\nCONDITIONAL & FLEXIBLE (recall_gate): facts AND\nassociative memory BY RELEVANCE · GraphRAG-lite ·\nquery embedded ONCE → router reuses it",
-        "reflexion": "Self-Reflexion CHOICE of the thinking mode from\ntask analysis · + bandit prior (Beta/Thompson over\nthe user's episodes, sees failures) + few-shots\n+ intent router L2 (embedding-kNN, any language).\nhigh ambiguity → clarify · heavy is NOT predicted —\nit is EARNED by runtime evidence",
+        "recall": "memory (episodes / facts / conclusions / goals)\n+ implicit feedback + external ctx + AutoRAG\n(user KB + session files, BM25 + sanitize).\nCONDITIONAL & FLEXIBLE (recall_gate): facts AND\nassociative memory BY RELEVANCE · GraphRAG-lite ·\nquery embedded ONCE → router reuses it.\n+ inject SEMANTICALLY-closest session_findings\n(cached digests of past HEAVY runs)",
+        "reflexion": "Self-Reflexion CHOICE of the thinking mode from\ntask analysis · + bandit prior (Beta/Thompson over\nthe user's episodes, sees failures) + few-shots\n+ intent router L2 (embedding-kNN, any language).\nhigh ambiguity → clarify · heavy is NOT predicted —\nit is EARNED by runtime evidence.\nfindings already cover it → COMPRESS the mode\n(deliberate → reason/fast); re-escalate on evidence",
         "act": "System 1 with hands: ONE direct action with\n1–2 tools (BM25 skill pick, HITL kept).\nzero tool calls / ESCALATE → goal (deliberate path)",
         "goal": "goal-setting: aim + a 'worthwhile' goal +\nrubric, kept in context for all nodes",
         "fast_answer": "direct answer (System 1 / System 2), no tools;\nthe clarify branch also resolves here",
@@ -88,11 +88,11 @@ DESC = {
         "synthesize": "assemble the final solution from the steps",
         "review": "HEAVY only: end-to-end review of the assembled\nsolution by the DEEP model · problems → fix\nsub-steps (→ step_executor) · clean → validation",
         "validation": "grounding + rubric check of the answer\n(deterministic anti-hallucination floor)",
-        "reflect": "write the episode (+ interaction journal), harvest\nsignal (HITL / clarify → profile facts), compile the\nPATTERN (+win/lose) → collective pool, detect a\nhabit, extract facts (+edges), summary, prune,\ndegradation tracking, auto self-learning",
+        "reflect": "write the episode (+ interaction journal), harvest\nsignal (HITL / clarify → profile facts), compile the\nPATTERN (+win/lose) → collective pool, detect a\nhabit, extract facts (+edges), summary, prune,\ndegradation tracking, auto self-learning.\nHEAVY/multi-step run → COMPRESS into a findings\ndigest → session_findings (state, by thread)",
     },
     "ru": {
-        "recall": "память (эпизоды / факты / выводы / цели)\n+ implicit feedback + external ctx + AutoRAG\n(БЗ юзера + файлы сессии, BM25 + sanitize).\nУСЛОВНЫЙ и ГИБКИЙ (recall_gate): И факты, И\nассоциативная память ПО РЕЛЕВАНТНОСТИ · GraphRAG-lite\nзапрос эмбеддится ОДИН раз → роутер переиспользует",
-        "reflexion": "Self-Reflexion ВЫБОР режима мышления по анализу\nзадачи · + априор бандита (Beta/Thompson по эпизодам\nюзера, видит неудачи) + few-shots\n+ intent-роутер L2 (embedding-kNN, любой язык).\nвысокая неоднозначность → clarify · heavy НЕ\nпредсказывается — ЗАРАБАТЫВАЕТСЯ рантайм-evidence",
+        "recall": "память (эпизоды / факты / выводы / цели)\n+ implicit feedback + external ctx + AutoRAG\n(БЗ юзера + файлы сессии, BM25 + sanitize).\nУСЛОВНЫЙ и ГИБКИЙ (recall_gate): И факты, И\nассоциативная память ПО РЕЛЕВАНТНОСТИ · GraphRAG-lite\nзапрос эмбеддится ОДИН раз → роутер переиспользует.\n+ впрыск СЕМАНТИЧЕСКИ ближайших session_findings\n(кэш выжимок прошлых ТЯЖЁЛЫХ прогонов)",
+        "reflexion": "Self-Reflexion ВЫБОР режима мышления по анализу\nзадачи · + априор бандита (Beta/Thompson по эпизодам\nюзера, видит неудачи) + few-shots\n+ intent-роутер L2 (embedding-kNN, любой язык).\nвысокая неоднозначность → clarify · heavy НЕ\nпредсказывается — ЗАРАБАТЫВАЕТСЯ рантайм-evidence.\nнаходки уже покрывают → СЖАТЬ режим\n(deliberate → reason/fast); эскалация назад по evidence",
         "act": "System 1 с руками: ОДНО прямое действие\n1–2 инструментами (BM25-подбор навыка, HITL).\nноль вызовов / ESCALATE → goal (путь deliberate)",
         "goal": "целеполагание: цель + «стоящая» цель +\nrubric, держится в контексте всех нод",
         "fast_answer": "прямой ответ (System 1 / System 2), без тулов;\nветка clarify тоже отвечает здесь",
@@ -109,7 +109,7 @@ DESC = {
         "synthesize": "сборка финального решения из шагов",
         "review": "только HEAVY: сквозной ревью собранного решения\nDEEP-моделью · проблемы → fix-подшаги\n(→ step_executor) · чисто → validation",
         "validation": "заземление + проверка по rubric\n(детерминированный анти-галлюцинационный пол)",
-        "reflect": "запись эпизода (+ журнал взаимодействий), harvest\nсигнала (HITL / clarify → факты профиля), компиляция\nПАТТЕРНА (+win/lose) → коллективный пул, детекция\nпривычки, извлечение фактов (+рёбра), саммари, prune,\nтрекинг деградации, авто self-learning",
+        "reflect": "запись эпизода (+ журнал взаимодействий), harvest\nсигнала (HITL / clarify → факты профиля), компиляция\nПАТТЕРНА (+win/lose) → коллективный пул, детекция\nпривычки, извлечение фактов (+рёбра), саммари, prune,\nтрекинг деградации, авто self-learning.\nТЯЖЁЛЫЙ/мультишаговый прогон → СЖАТЬ в выжимку-\nfindings → session_findings (state, по треду)",
     },
 }
 

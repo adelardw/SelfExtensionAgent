@@ -30,7 +30,7 @@ from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
 from pydantic import BaseModel
 
-from . import browser_bridge, chat_store, clarify, cli_config, hitl, knowledge_base, llm, media, runbudget, run_context
+from . import browser_bridge, chat_store, clarify, cli_config, hitl, knowledge_base, llm, media, runbudget, run_context, usage
 from .agent import build_graph, memory_store, rebuild_llms
 from .improve import graph_backward
 from .tracing import diagnose, trace_store
@@ -239,11 +239,13 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
         history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
         state: dict = {}
         with run_context.request_scope(f"chat-{uuid.uuid4().hex}", inp.user_id):  # изоляция per-request
+            tracker = usage.TokenTracker()  # ловит usage каждого LLM-вызова прогона (в десктопе их не было)
             async for chunk in _graph.astream(
                 {"query": query, "user_id": inp.user_id, "session_id": tid,
                  "force_mode": cli_config.get_cli("force_mode") or "",
                  "chat_history": history + [{"role": "user", "content": inp.query}]},
-                config={"configurable": {"thread_id": tid}, "recursion_limit": 50},
+                config={"configurable": {"thread_id": tid}, "recursion_limit": 50,
+                        "callbacks": [tracker]},
                 stream_mode="updates",
             ):
                 for node, delta in (chunk or {}).items():
@@ -253,11 +255,14 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                         run["steps"].append(lbl)
                     if isinstance(delta, dict):
                         state.update(delta)
+                    run["tokens"] = tracker.total       # живой счётчик на лету (для поллинга)
         answer = state.get("final_answer", "")
         chat_store.record_turn(tid, inp.user_id, inp.query, answer)
         t = chat_store.get_thread(tid)
         run["result"] = {"answer": answer, "thread_id": tid, "title": (t or {}).get("title", ""),
-                         "mode": state.get("mode", ""), "active_tools": state.get("active_tools", [])}
+                         "mode": state.get("mode", ""), "active_tools": state.get("active_tools", []),
+                         "tokens": tracker.total, "tokens_in": tracker.input, "tokens_out": tracker.output,
+                         "cost": round(tracker.cost(), 4), "cached_rate": round(tracker.cache_hit_rate, 2)}
         run["status"] = "done"
     except Exception as e:  # noqa: BLE001
         run["error"] = f"{type(e).__name__}: {e}"
@@ -289,12 +294,14 @@ def run_status(run_id: str) -> dict:
         return {"status": "unknown"}
     st = run["status"]
     if st == "waiting":
-        return {"status": "waiting", "pending": run["pending"], "progress": run["progress"], "steps": run["steps"]}
+        return {"status": "waiting", "pending": run["pending"], "progress": run["progress"],
+                "steps": run["steps"], "tokens": run.get("tokens", 0)}
     if st == "done":
         return {"status": "done", **(run["result"] or {}), "steps": run["steps"]}
     if st == "error":
         return {"status": "error", "error": run["error"], "steps": run["steps"]}
-    return {"status": "running", "progress": run["progress"], "steps": run["steps"]}
+    return {"status": "running", "progress": run["progress"], "steps": run["steps"],
+            "tokens": run.get("tokens", 0)}
 
 
 @app.post("/run/{run_id}/respond")

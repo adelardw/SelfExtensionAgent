@@ -112,6 +112,18 @@ LLM-free (plan from the pattern); win/lose tracking, a losing pattern self-delet
 is a ladder with checkable escalation (act → deliberate → heavy; up only on a
 grounded failure).
 
+**Within-session amortization — the findings cache (mode goes DOWN, not just up).** After a
+heavy/multi-step run, `reflect` compresses the work (steps + result) into a digest and appends it to
+`session_findings` — a **collection** carried in graph state by the checkpointer per `thread_id` (no
+DB; this is the "local memory" of the chat). On the next turn `recall` injects the **semantically
+closest** entries (top-k by cosine over the query embedding, threshold 0.30; not "all" — context
+bloat, not "last" — loses earlier subtopics). Now a follow-up on an already-analyzed subject sees the
+prior reasoning as context, and `reflexion` **compresses the mode** (deliberate → reason/fast) instead
+of re-running the heavy graph; it re-escalates only when the cached context is genuinely insufficient
+(the same grounded-evidence rule as the up-ladder). Deterministic, no extra LLM call; per-chat
+isolated; empty in single-shot eval (no checkpointer → GAIA-neutral). See the recall/reflexion/reflect
+nodes in the diagram.
+
 **Empirics** (`scripts/amortize_bench.py`: one task list, cold vs warm pass of one
 user_id): the warm pass is **−13% tokens with quality rising
 conf 78%→98%** (a cold task failed at 18% solved at 95%). The key lesson, learned
@@ -340,6 +352,17 @@ START
 (план из паттерна); win/lose-трекинг, проигрывающий паттерн самоудаляется. Исполнение —
 лестница с проверяемой эскалацией (act → deliberate → heavy; вверх только по
 заземлённому провалу).
+
+**Амортизация в рамках сессии — findings-кэш (режим идёт ВНИЗ, не только вверх).** После
+тяжёлого/мультишагового прогона `reflect` сжимает работу (шаги + итог) в выжимку и добавляет в
+`session_findings` — **коллекцию**, которую чекпоинтер несёт в state по `thread_id` (без БД; это
+«локальная память» чата). Следующий ход `recall` впрыскивает **семантически ближайшие** записи (top-k
+по косинусу к эмбеддингу запроса, порог 0.30; не «все» — раздув контекста, не «последняя» — теряет
+ранние подтемы). Теперь follow-up по уже разобранному видит прошлое рассуждение как контекст, и
+`reflexion` **сжимает режим** (deliberate → reason/fast) вместо повтора тяжёлого графа; эскалация назад
+— только когда кэша реально не хватает (то же правило заземлённого evidence, что и вверх по лестнице).
+Детерминированно, без лишнего LLM-вызова; изолировано по чату; пусто в single-shot бенче (нет
+чекпоинтера → GAIA-нейтрально). См. ноды recall/reflexion/reflect на схеме.
 
 **Эмпирика** (`scripts/amortize_bench.py`: один список задач, cold vs warm проход одного
 user_id): тёплый проход **−13% токенов при росте

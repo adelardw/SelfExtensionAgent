@@ -13,6 +13,9 @@ class GeneralGraphState(TypedDict):
 
     # ── Memory (recall) ──
     memory_context: str       # инъектируемый блок долгой памяти
+    session_findings: list    # КОЛЛЕКЦИЯ выжимок тяжёлых прогонов [{query, summary, emb}]; живёт в state
+                              # (чекпоинтер несёт по thread_id, БД не нужна). recall впрыскивает СЕМАНТИЧЕСКИ
+                              # близкие к запросу (top-k по косинусу) → follow-up идёт лёгким режимом
     own_docs: bool            # AutoRAG нашёл СОБСТВЕННЫЕ документы юзера (БЗ/сессия) → reflexion глушит мнимый clarify
     implicit_feedback: str    # гипотеза о неявной обратной связи пользователя
     query_emb: list           # эмбеддинг запроса, посчитанный в recall ОДИН раз — переиспользуется (intent-роутер, без лишних вызовов)

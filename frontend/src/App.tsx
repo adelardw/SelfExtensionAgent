@@ -69,6 +69,8 @@ export default function App() {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [title, setTitle] = useState("New chat")
   const [mode, setMode] = useState("")
+  const [tokens, setTokens] = useState(0)   // токены текущего/последнего прогона (живой счётчик)
+  const [cost, setCost] = useState(0)
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
   const [online, setOnline] = useState(false)
@@ -94,7 +96,7 @@ export default function App() {
   useEffect(() => { loadThreads(); const t = setInterval(loadThreads, 15000); return () => clearInterval(t) }, [loadThreads])
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" }) }, [msgs])
 
-  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("New chat"); setMode(""); setAttached([]); setPending(null); setSteps([]); setProgress(""); ta.current?.focus() }
+  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("New chat"); setMode(""); setTokens(0); setCost(0); setAttached([]); setPending(null); setSteps([]); setProgress(""); ta.current?.focus() }
   const openThread = async (id: string) => {
     setCur(id); setAttached([]); setPending(null); setSteps([]); setProgress("")
     try { const d = await (await fetch(`/chats/${id}`)).json(); setTitle(d.thread?.title || "Chat"); setMsgs(d.messages || []) }
@@ -121,13 +123,14 @@ export default function App() {
       let d: any
       try { d = await (await fetch(`/run/${run_id}`)).json() } catch { continue }  // транзиент → ещё раз
       if (d.steps) setSteps(d.steps)
+      if (typeof d.tokens === "number") setTokens(d.tokens)   // живой счётчик токенов
       if (d.status === "running") { setProgress(d.progress || ""); continue }
       if (d.status === "waiting") {
         if (d.pending?.type === "clarify") { setPending({ run_id, questions: d.pending.questions || [] }); return }
         if (d.pending?.type === "confirm") { setPending({ run_id, confirm: d.pending.text }); return }
         setProgress(d.progress || ""); continue
       }
-      if (d.status === "done") { setProgress(""); await streamAnswer(d.answer || "(empty)"); if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads(); setBusy(false); return }
+      if (d.status === "done") { setProgress(""); if (typeof d.tokens === "number") setTokens(d.tokens); if (typeof d.cost === "number") setCost(d.cost); await streamAnswer(d.answer || "(empty)"); if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads(); setBusy(false); return }
       if (d.status === "error") { setProgress(""); setLastAssistant("⚠ error: " + (d.error || "")); setBusy(false); return }
       setProgress(""); setLastAssistant("⚠ run not found (server restarted?)"); setBusy(false); return
     }
@@ -135,7 +138,7 @@ export default function App() {
 
   const sendText = async (text: string) => {
     text = text.trim(); if (!text || busy) return
-    setBusy(true); setInput(""); setSteps([]); setProgress(""); if (ta.current) ta.current.style.height = "auto"
+    setBusy(true); setInput(""); setSteps([]); setProgress(""); setTokens(0); setCost(0); if (ta.current) ta.current.style.height = "auto"
     setMsgs(m => [...m, { role: "user", content: text }, { role: "assistant", content: "…" }])
     setAttached([])
     try {
@@ -302,7 +305,14 @@ export default function App() {
             onMouseEnter={e => (e.currentTarget.style.background = "var(--surface)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
             title="Toggle sidebar"><PanelLeft size={17} /></button>
           <span className="text-[14px] font-semibold truncate" style={{ color: "var(--ink)" }}>{title}</span>
-          {mode && <span className="ml-auto text-[11px] font-medium px-2 py-0.5 rounded-md" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>{mode}</span>}
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            {tokens > 0 && (
+              <span className="text-[11px] font-mono" style={{ color: "var(--faint)" }} title={cost > 0 ? `~$${cost.toFixed(4)}` : "tokens this run"}>
+                🧮 {tokens.toLocaleString("en-US")} tok{cost > 0 ? ` · $${cost.toFixed(4)}` : ""}
+              </span>
+            )}
+            {mode && <span className="text-[11px] font-medium px-2 py-0.5 rounded-md" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>{mode}</span>}
+          </div>
         </div>
 
         <div ref={scroller} className="flex-1 overflow-y-auto min-h-0">
