@@ -17,6 +17,7 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, Tool
 from langgraph.graph import START, END, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langchain.agents import create_agent
+from langchain_core.callbacks import BaseCallbackHandler
 from omegaconf import OmegaConf
 
 from .schemas import GeneralGraphState
@@ -1676,6 +1677,17 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
     return text, msgs + [resp]
 
 
+class _StepToolTrace(BaseCallbackHandler):
+    """Эмитит тул-вызовы ReAct-фолбэка шага в intra-node трейс (EXECUTION LOG). Иначе они
+    НЕВИДИМЫ: nested agent.ainvoke НЕ наследует _TraceCb уровня графа (TOOL CALLS), а сам ReAct
+    в research_log не пишет → search_web «исчезал» из обеих панелей (живой баг: юзер видел шаг
+    17s без единого следа веб-поиска)."""
+
+    def on_tool_start(self, serialized, input_str=None, **kwargs) -> None:  # noqa: ANN001, ARG002
+        name = (serialized or {}).get("name", "?")
+        run_context.research_emit(f"  🔎 {name}")
+
+
 async def _exec_research(system: str, goal: str, tools: list, deadline: float) -> tuple[str, list]:
     """
     research-шаг. Для ВЕБ-шагов сначала ДИСЦИПЛИНИРОВАННЫЙ agentic_research (план под-вопросов
@@ -1701,9 +1713,11 @@ async def _exec_research(system: str, goal: str, tools: list, deadline: float) -
         except Exception:  # noqa: BLE001
             pass
 
+    run_context.research_emit("↩ ReAct-фолбэк шага")
     agent = create_agent(code_llm, _compress_tools(tools), system_prompt=system)
     result = await asyncio.wait_for(
-        agent.ainvoke({"messages": [("human", goal)]}, config={"recursion_limit": STEP_ITER_LIMIT}),
+        agent.ainvoke({"messages": [("human", goal)]},
+                      config={"recursion_limit": STEP_ITER_LIMIT, "callbacks": [_StepToolTrace()]}),
         timeout=deadline,
     )
     msgs = result["messages"]
