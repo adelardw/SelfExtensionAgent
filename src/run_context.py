@@ -52,6 +52,29 @@ def external_content_seen() -> bool:
 register_cleanup(lambda rid: _tainted.pop(rid, None))
 
 
+# ── INTRA-NODE трейс: события внутри нод, которых НЕ видно в node-/tool-трейсе ──
+# Покрывает (1) дисциплинированный поиск agentic_research (план/под-вопрос/чтение/verify/синтез —
+# это chains/urllib, не «тулы») и (2) раунды step_executor (_exec_direct/_exec_compose: где реально
+# уходят секунды шага — генерация vs тул-раунды vs ретраи). Эмитим сюда → сервер кладёт в трейс UI,
+# видно где время. Скоуп по run_id (как taint), наследуется вниз по asyncio.
+_research: dict[str, list] = {}
+
+
+def research_emit(text: str) -> None:
+    """Событие research-цикла для трейса. Кап, чтобы лог не рос бесконечно при многих под-вопросах."""
+    log = _research.setdefault(current_run_id() or "_default", [])
+    log.append(text)
+    if len(log) > 80:
+        del log[: len(log) - 80]
+
+
+def research_log() -> list:
+    return list(_research.get(current_run_id() or "_default", []))
+
+
+register_cleanup(lambda rid: _research.pop(rid, None))
+
+
 @contextmanager
 def request_scope(run_id: str, user_id: str = ""):
     """Изолировать запрос по run_id (+ user_id). Оборачивать вызов графа на границе сервера/бота."""

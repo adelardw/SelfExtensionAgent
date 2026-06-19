@@ -10,12 +10,17 @@ class GeneralGraphState(TypedDict):
     session_id: str  # идентификатор СЕССИИ/чата для временных приложенных файлов (ярус 3)
     messages: Annotated[list, add_messages]
     chat_history: list[dict]  # [{role: "user"|"assistant", content: str}] — управляется из main.py
+    image_paths: list         # пути приложенных КАРТИНОК → отдаются мультимодальной модели НАПРЯМУЮ
+                              # (image_url), а не через vision→текст-описание (точнее, без конфабуляций)
+    has_attachments: bool     # в ЭТОМ сообщении есть свежие вложения → recall НЕ впрыскивает findings
+                              # (иначе агент «восстанавливает» старый анализ вместо чтения нового файла)
 
     # ── Memory (recall) ──
     memory_context: str       # инъектируемый блок долгой памяти
     session_findings: list    # КОЛЛЕКЦИЯ выжимок тяжёлых прогонов [{query, summary, emb}]; живёт в state
                               # (чекпоинтер несёт по thread_id, БД не нужна). recall впрыскивает СЕМАНТИЧЕСКИ
                               # близкие к запросу (top-k по косинусу) → follow-up идёт лёгким режимом
+    findings_used: bool       # recall впрыснул кэш находок прошлого тяжёлого прогона (для трейса)
     own_docs: bool            # AutoRAG нашёл СОБСТВЕННЫЕ документы юзера (БЗ/сессия) → reflexion глушит мнимый clarify
     implicit_feedback: str    # гипотеза о неявной обратной связи пользователя
     query_emb: list           # эмбеддинг запроса, посчитанный в recall ОДИН раз — переиспользуется (intent-роутер, без лишних вызовов)

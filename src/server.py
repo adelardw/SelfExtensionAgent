@@ -24,6 +24,8 @@ import contextvars
 import tempfile
 import uuid
 
+from langchain_core.callbacks import BaseCallbackHandler
+
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -76,6 +78,9 @@ async def _build_graph_async() -> None:
     if _sx:
         import os as _o
         _o.environ["SEARXNG_URL"] = _sx
+    # Модальности текущей модели (image/audio/…) — узнаём у OpenRouter раз на старте, кэшируем (фон,
+    # не блокируем старт): чтобы картинка шла напрямую без пере-сохранения настроек.
+    asyncio.create_task(asyncio.to_thread(llm.remember_modalities))
     # Интерактивные каналы: уточнения (Q/A мультиселект) и подтверждения surface в GUI.
     clarify.set_clarifier(_server_clarifier)
     hitl.set_confirmer(_server_confirmer)
@@ -221,6 +226,30 @@ _PROGRESS = {
 }
 
 
+class _TraceCb(BaseCallbackHandler):
+    """Лёгкий трейс для интерпретируемости в UI: ТУЛЫ, которые агент реально звал, по порядку
+    (включая MCP-тулы), с РАНТАЙМОМ каждого (on_tool_end − on_tool_start) — видно, что внутри шага
+    ело время (search_web / browse / LLM-раунды). Узлы графа идут отдельно (run['steps'])."""
+
+    def __init__(self) -> None:
+        self.tools: list[dict] = []        # [{"name": str, "sec": float|None}] по порядку вызова
+        self._starts: dict[str, tuple] = {}  # run_id → (idx, monotonic-старт)
+
+    def on_tool_start(self, serialized, input_str=None, *, run_id=None, **kwargs) -> None:  # noqa: ANN001, ARG002
+        name = (serialized or {}).get("name") if isinstance(serialized, dict) else ""
+        name = name or kwargs.get("name") or "tool"
+        self.tools.append({"name": name, "sec": None})
+        if run_id is not None:
+            self._starts[str(run_id)] = (len(self.tools) - 1, time.monotonic())
+
+    def on_tool_end(self, output, *, run_id=None, **kwargs) -> None:  # noqa: ANN001, ARG002
+        st = self._starts.pop(str(run_id), None)
+        if st:
+            idx, t0 = st
+            if 0 <= idx < len(self.tools):
+                self.tools[idx]["sec"] = round(time.monotonic() - t0, 1)
+
+
 async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
     """Фоновый прогон через astream: прогресс по узлам → run['progress'], а clarify/confirm
     всплывают в _RUNS[run_id] и ждут клиента."""
@@ -229,44 +258,99 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
     try:
         query = inp.query
         files = _THREAD_FILES.get(tid)
+        # САНИТАЙЗ: add_session_file при несуществующем src возвращает СТРОКУ "[файл не найден: …]",
+        # которая попадала в _THREAD_FILES как «путь» → потом «не найден» + конфабуляция. Отсекаем
+        # такие записи и реально несуществующие пути ДО обработки.
         if files:
-            try:
-                ctx = await asyncio.to_thread(media.attachment_context, files, inp.query)
-                if ctx:
-                    query = f"{inp.query}\n\n=== ПРИЛОЖЕННЫЕ ФАЙЛЫ ===\n{ctx}"
-            except Exception as e:  # noqa: BLE001
-                print(f"[chat] attachment_context failed: {e}")
+            files = [f for f in files if not str(f).startswith("[") and Path(f).exists()]
+        # Диагностика в трейс: что РЕАЛЬНО дошло (имена + существование) — чтобы не гадать.
+        run["attach"] = [{"n": Path(f).name, "ok": Path(f).exists()}
+                         for f in (_THREAD_FILES.get(tid) or [])]
+        image_paths: list = []
+        if files:
+            _att_t0 = time.monotonic()  # «Reading attachments» — РЕАЛЬНЫЙ шаг в трейсе (с таймингом)
+            run["progress"] = "Reading attachments"
+            if "Reading attachments" not in run["steps"]:
+                run["steps"].append("Reading attachments")
+            imgs = [f for f in files if Path(f).suffix.lower() in media.IMAGE_EXTS]
+            run["n_attached"], run["n_images"] = len(files), len(imgs)  # для трейса: дошло ли вложение
+            # vision_supported при непрогретом кэше делает сетевой фетч (urlopen 8с) → в поток, чтобы
+            # НЕ морозить event loop сервера (после первого раза — мгновенно из кэша).
+            direct = bool(imgs) and await asyncio.to_thread(llm.vision_supported)
+            image_paths = imgs if direct else []
+            # direct (мультимодальная модель) → fast/reason читают картинку САМИ (image_url), описывать
+            # её НЕ надо (это были лишние ~10с/картинку vision-вызовов на «Reading attachments»).
+            # НЕ direct (text-only) → описываем в текст (единственный способ её «прочитать»).
+            others = [f for f in files if f not in imgs] if direct else list(files)
+            if image_paths:  # пометка для reflexion/decompose (они видят только текст)
+                query = f"{query}\n\n[К сообщению приложено изображений: {len(image_paths)} — посмотри на них.]"
+            if others:
+                try:
+                    ctx = await media.attachment_context_async(others, inp.query)
+                    if ctx:
+                        query = f"{query}\n\n=== ПРИЛОЖЕННЫЕ ФАЙЛЫ ===\n{ctx}"
+                except Exception as e:  # noqa: BLE001
+                    print(f"[chat] attachment_context failed: {e}")
+            run.setdefault("timings", {})["Reading attachments"] = round(time.monotonic() - _att_t0, 1)
         history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
         state: dict = {}
         with run_context.request_scope(f"chat-{uuid.uuid4().hex}", inp.user_id):  # изоляция per-request
             tracker = usage.TokenTracker()  # ловит usage каждого LLM-вызова прогона (в десктопе их не было)
+            trace_cb = _TraceCb()           # трейс тулов для интерпретируемости в UI
+            _last_ts = time.monotonic()     # для тайминга по нодам (где реально уходит время)
             async for chunk in _graph.astream(
                 {"query": query, "user_id": inp.user_id, "session_id": tid,
                  "force_mode": cli_config.get_cli("force_mode") or "",
+                 "image_paths": image_paths,  # картинки — напрямую в мультимодальную модель
+                 "has_attachments": bool(files),  # свежие вложения → recall не подменяет их findings'ами
                  "chat_history": history + [{"role": "user", "content": inp.query}]},
                 config={"configurable": {"thread_id": tid}, "recursion_limit": 50,
-                        "callbacks": [tracker]},
+                        "callbacks": [tracker, trace_cb]},
                 stream_mode="updates",
             ):
                 for node, delta in (chunk or {}).items():
+                    _now = time.monotonic()
                     lbl = _PROGRESS.get(node, node)
+                    # длительность ноды ≈ время между апдейтами (update приходит, когда нода завершилась).
+                    # Накапливаем по метке (шаги executor повторяются) → видно, ЧТО ел время.
+                    run.setdefault("timings", {})[lbl] = round(
+                        run.get("timings", {}).get(lbl, 0.0) + (_now - _last_ts), 1)
+                    _last_ts = _now
                     run["progress"] = lbl
                     if lbl not in run["steps"]:
                         run["steps"].append(lbl)
                     if isinstance(delta, dict):
                         state.update(delta)
                     run["tokens"] = tracker.total       # живой счётчик на лету (для поллинга)
+                    run["tools_used"] = list(trace_cb.tools)            # трейс: какие тулы звал
+                    run["mode"] = state.get("mode", "") or run.get("mode", "")
+                    run["rationale"] = state.get("mode_rationale", "") or run.get("rationale", "")
+                    run["findings_used"] = bool(state.get("findings_used"))  # сработал ли кэш находок
+                    rlog = run_context.research_log()  # шаги дисциплинированного research (intra-node)
+                    if rlog:
+                        run["research_log"] = rlog
         answer = state.get("final_answer", "")
         chat_store.record_turn(tid, inp.user_id, inp.query, answer)
         t = chat_store.get_thread(tid)
         run["result"] = {"answer": answer, "thread_id": tid, "title": (t or {}).get("title", ""),
                          "mode": state.get("mode", ""), "active_tools": state.get("active_tools", []),
+                         "tools_used": list(trace_cb.tools), "rationale": state.get("mode_rationale", ""),
+                         "findings_used": bool(state.get("findings_used")), "timings": dict(run.get("timings", {})),
+                         "research_log": run.get("research_log", []),
+                         "n_attached": run.get("n_attached", 0), "n_images": run.get("n_images", 0),
+                         "attach": run.get("attach", []),
                          "tokens": tracker.total, "tokens_in": tracker.input, "tokens_out": tracker.output,
                          "cost": round(tracker.cost(), 4), "cached_rate": round(tracker.cache_hit_rate, 2)}
         run["status"] = "done"
     except Exception as e:  # noqa: BLE001
         run["error"] = f"{type(e).__name__}: {e}"
         run["status"] = "error"
+    finally:
+        # Вложения — ПЕР-СООБЩЕНИЕ: чистим после прогона, иначе _THREAD_FILES копит ВСЕ картинки треда
+        # → следующий запрос обрабатывает старые (часть удалена → «не считаны») и агент конфабулирует
+        # из findings. UI и так гасит чипы при отправке — синхронизируем бэкенд. (clarify — внутри astream,
+        # сюда доходим только по завершении всего прогона.)
+        _THREAD_FILES.pop(tid, None)
 
 
 @app.post("/chat")
@@ -278,7 +362,7 @@ async def chat(inp: ChatIn) -> dict:
     tid = inp.thread_id or inp.user_id
     run_id = uuid.uuid4().hex
     _RUNS[run_id] = {"status": "running", "pending": None, "future": None, "result": None,
-                     "error": None, "progress": "Начинаю", "steps": []}
+                     "error": None, "progress": "Starting", "steps": []}
     if len(_RUNS) > 60:  # анти-утечка: чистим старые завершённые
         for k in [k for k, v in list(_RUNS.items()) if v["status"] in ("done", "error")][:40]:
             _RUNS.pop(k, None)
@@ -293,15 +377,20 @@ def run_status(run_id: str) -> dict:
     if not run:
         return {"status": "unknown"}
     st = run["status"]
+    _trace = {"tokens": run.get("tokens", 0), "tools_used": run.get("tools_used", []),
+              "mode": run.get("mode", ""), "rationale": run.get("rationale", ""),
+              "findings_used": run.get("findings_used", False), "timings": run.get("timings", {}),
+              "research_log": run.get("research_log", []),
+              "n_attached": run.get("n_attached", 0), "n_images": run.get("n_images", 0),
+              "attach": run.get("attach", [])}
     if st == "waiting":
         return {"status": "waiting", "pending": run["pending"], "progress": run["progress"],
-                "steps": run["steps"], "tokens": run.get("tokens", 0)}
+                "steps": run["steps"], **_trace}
     if st == "done":
         return {"status": "done", **(run["result"] or {}), "steps": run["steps"]}
     if st == "error":
         return {"status": "error", "error": run["error"], "steps": run["steps"]}
-    return {"status": "running", "progress": run["progress"], "steps": run["steps"],
-            "tokens": run.get("tokens", 0)}
+    return {"status": "running", "progress": run["progress"], "steps": run["steps"], **_trace}
 
 
 @app.post("/run/{run_id}/respond")
@@ -353,8 +442,11 @@ async def upload(thread_id: str, file: UploadFile = File(...)) -> dict:
         stored = await asyncio.to_thread(knowledge_base.add_session_file, thread_id, str(tmp))
     except Exception:  # noqa: BLE001
         stored = str(tmp)
-    _THREAD_FILES.setdefault(thread_id, []).append(stored)
-    return {"name": file.filename, "count": len(_THREAD_FILES[thread_id])}
+    lst = _THREAD_FILES.setdefault(thread_id, [])
+    if stored not in lst:
+        lst.append(stored)
+    return {"name": file.filename, "count": len(_THREAD_FILES[thread_id]),
+            "vision_warn": await _vision_warn([file.filename or ""])}
 
 
 class AttachLocalIn(BaseModel):
@@ -372,11 +464,23 @@ async def attach_local(inp: AttachLocalIn) -> dict:
     for p in inp.paths:
         try:
             stored = await asyncio.to_thread(knowledge_base.add_session_file, inp.thread_id, p)
-            _THREAD_FILES.setdefault(inp.thread_id, []).append(stored)
+            lst = _THREAD_FILES.setdefault(inp.thread_id, [])
+            if stored not in lst:  # дедуп: не плодим дубли (был баг «5 вместо 3»)
+                lst.append(stored)
             names.append(Path(p).name)
         except BaseException as e:  # noqa: BLE001 — pyo3-панику парсеров тоже ловим, не 500
             errors.append(f"{Path(p).name}: {type(e).__name__}")
-    return {"names": names, "errors": errors, "count": len(_THREAD_FILES.get(inp.thread_id, []))}
+    return {"names": names, "errors": errors, "count": len(_THREAD_FILES.get(inp.thread_id, [])),
+            "vision_warn": await _vision_warn(inp.paths)}
+
+
+async def _vision_warn(names: list) -> bool:
+    """Среди вложений есть картинка, а текущая модель её НЕ читает (text-only)? Тогда предупреждаем
+    юзера выбрать мультимодальную модель — описать картинку всё равно нечем (vision идёт через ту же
+    модель). vision_supported читает кэш модальностей (фетч раз на модель) → в поток, не морозим loop."""
+    if not any(Path(n).suffix.lower() in media.IMAGE_EXTS for n in (names or [])):
+        return False
+    return not await asyncio.to_thread(llm.vision_supported)
 
 
 class DetachIn(BaseModel):
@@ -515,6 +619,7 @@ def get_settings() -> dict:
         "work_mode": hitl.work_mode(),
         "force_mode": cli_config.get_cli("force_mode") or "",
         "searxng_url": cli_config.get_cli("searxng_url") or os.getenv("SEARXNG_URL", ""),
+        "model_modalities": llm.model_modalities(),  # входные модальности модели (image/audio/…)
         "active": llm.active_summary(),
         "bridge_connected": browser_bridge.connected(),
         "bridge_token": browser_bridge.token(),
@@ -541,6 +646,9 @@ def post_settings(s: SettingsIn) -> dict:
         os.environ["SEARXNG_URL"] = s.searxng_url or ""  # живо: веб/image-поиск подхватят сразу
     llm.set_provider(cli_config.get_cli("provider"), cli_config.get_cli("model"))
     rebuild_llms()
+    # Модель сменилась → один раз спрашиваем у OpenRouter её модальности (image/audio/…) и запоминаем.
+    if s.provider is not None or s.model is not None:
+        llm.remember_modalities()
     ok, msg = llm.validate_credentials()
     return {"ok": ok, "message": msg, "active": llm.active_summary(),
             "api_key_source": llm.api_key_source(), "work_mode": hitl.work_mode()}

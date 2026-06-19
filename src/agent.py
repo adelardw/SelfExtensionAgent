@@ -1,4 +1,5 @@
 import re
+import time
 import asyncio
 import threading
 import warnings
@@ -97,7 +98,7 @@ from . import context_files
 from .research import make_deep_research_tool, agentic_research
 from .tools.image_search import make_image_search_tool
 from .compute import make_compute_tool, make_datetime_tool
-from .media import make_pdf_vision_tool
+from .media import make_pdf_vision_tool, image_data_url
 from .knowledge_base import (
     make_kb_tool, kb_has_docs, search_kb_raw,
     make_session_kb_tool, session_has_files, search_session_raw,
@@ -377,7 +378,10 @@ async def recall_node(state: GeneralGraphState) -> dict:
     # память», БД не нужна). Впрыскиваем СЕМАНТИЧЕСКИ близкие к запросу (top-k) ПЕРВЫМ блоком →
     # reflexion видит, что тема проработана, и роняет режим (deliberate→reason/fast); агент отвечает
     # из находок, не гоняя граф заново. Эскалация назад — штатным runtime-evidence, если их не хватит.
-    findings = _relevant_findings(state)
+    # При СВЕЖИХ вложениях findings НЕ впрыскиваем: иначе агент «восстанавливает» старый анализ из
+    # кэша вместо чтения нового файла (живой баг: 2 картинки приложены, а reason реконструировал
+    # старую из findings, написав «файлы не считаны»). Новое вложение → читаем его, не подменяем.
+    findings = "" if state.get("has_attachments") else _relevant_findings(state)
     if findings:
         memory_context = f"{findings}\n\n{memory_context}"
 
@@ -436,6 +440,7 @@ async def recall_node(state: GeneralGraphState) -> dict:
         # Структурный флаг «в контексте есть собственные документы юзера» — reflexion читает
         # его, а не ищет фразы-маркеры в memory_context (текст меняется, флаг — нет).
         "own_docs": bool(kb_bits),
+        "findings_used": bool(findings),  # сработал ли findings-кэш (для трейса/интерпретируемости)
         "implicit_feedback": implicit_fb or "Сигналов нет.",
         "external_context": ext,
         # Сброс run-scoped счётчиков: с чекпойнтером state живёт между ходами треда,
@@ -693,6 +698,27 @@ def _history_messages(state: GeneralGraphState, keep: int = 8) -> list:
         out.append(HumanMessage(content=content) if h.get("role") == "user"
                    else AIMessage(content=content))
     return out
+
+
+def _img_human(text: str, paths) -> HumanMessage:
+    """HumanMessage с текстом + ПРЯМЫМИ картинками (image_url). Мультимодальная модель (gemini) ВИДИТ
+    саму картинку — точнее промежуточного vision→текст-описания (оно конфабулировало). Нет картинок →
+    обычный текстовый месседж (поведение прежнее)."""
+    paths = [p for p in (paths or []) if p][:4]
+    if not paths:
+        return HumanMessage(content=text)
+    parts: list = [{"type": "text", "text": text}]
+    for p in paths:
+        try:
+            parts.append({"type": "image_url", "image_url": {"url": image_data_url(p)}})
+        except Exception:  # noqa: BLE001 — битый файл → просто без него (текст остаётся)
+            pass
+    return HumanMessage(content=parts)
+
+
+def _human_msg(state, text: str) -> HumanMessage:
+    """То же, но картинки из state['image_paths'] (для нод с доступом к state: fast/reason)."""
+    return _img_human(text, state.get("image_paths"))
 
 
 def _tool_by_name(tools: list, name: str):
@@ -1002,7 +1028,7 @@ async def fast_answer_node(state: GeneralGraphState) -> dict:
         "chat_history": _format_chat_history(state),
         "mode": state.get("mode", "fast"),
     })
-    resp = await llm.ainvoke([SystemMessage(content=sys_text), HumanMessage(content=state["query"])])
+    resp = await llm.ainvoke([SystemMessage(content=sys_text), _human_msg(state, state["query"])])
     answer = resp.content if hasattr(resp, "content") else str(resp)
     # Анти-PII пол (Thread 2c): email из памяти легитимен (recall данных юзера ему же), выдуманный — нет.
     answer = strip_ungrounded_pii(answer, state["query"] + "\n" + state.get("memory_context", ""))
@@ -1016,7 +1042,7 @@ async def reason_node(state: GeneralGraphState) -> dict:
         "memory_context": state.get("memory_context", "Память пуста."),
         "chat_history": _format_chat_history(state),
     })
-    msgs = [SystemMessage(content=sys_text), HumanMessage(content=state["query"])]
+    msgs = [SystemMessage(content=sys_text), _human_msg(state, state["query"])]
     # Crash-safe: транзиентный сетевой сбой LLM не должен ронять ГРАФ (amortize-бенч №2
     # упал целиком на APIConnectionError здесь). Пауза + один повтор, дальше честный отказ.
     try:
@@ -1525,12 +1551,16 @@ def _compress_tools(tools: list, cap: int = TOOL_OUTPUT_CAP) -> list:
     return wrapped
 
 
-async def _exec_compose(system: str, goal: str, deadline: float) -> tuple[str, list]:
+async def _exec_compose(system: str, goal: str, deadline: float, images=None) -> tuple[str, list]:
     """compose-шаг: синтез из предыдущих результатов БЕЗ инструментов — один LLM-вызов."""
+    _glabel = (goal or "").strip().replace("\n", " ")[:70]
+    run_context.research_emit(f"✍️ генерация: {_glabel}")
+    _t0 = time.monotonic()
     resp = await asyncio.wait_for(
-        code_llm.ainvoke([SystemMessage(content=system), HumanMessage(content=goal)]),
+        code_llm.ainvoke([SystemMessage(content=system), _img_human(goal, images)]),
         timeout=deadline,
     )
+    run_context.research_emit(f"  ✓ готово ({round(time.monotonic()-_t0,1)}s)")
     return (resp.content if hasattr(resp, "content") else str(resp)), []
 
 
@@ -1540,7 +1570,7 @@ _DIRECT_ROUNDS = 6  # максимум раундов «вызов → инст�
 
 async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                        history: list | None = None, rounds_cap: int | None = None,
-                       max_nudges: int = 1) -> tuple[str, list]:
+                       max_nudges: int = 1, images=None) -> tuple[str, list]:
     """
     direct-шаг: лёгкая петля «вызов → инструменты» (≤_DIRECT_ROUNDS раундов, вывод сжат) —
     1–2 LLM-вызова в типовом случае. Тулы привязаны и в продолжениях: живой прогон показал,
@@ -1552,11 +1582,15 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
     из текстового поля промпта.
     """
     if not tools:
-        return await _exec_compose(system, goal, deadline)
+        return await _exec_compose(system, goal, deadline, images=images)
     by_name = {t.name: t for t in tools}
     llm_t = code_llm.bind_tools(tools)
-    msgs: list = [SystemMessage(content=system), *(history or []), HumanMessage(content=goal)]
+    msgs: list = [SystemMessage(content=system), *(history or []), _img_human(goal, images)]
+    _glabel = (goal or "").strip().replace("\n", " ")[:70]
+    run_context.research_emit(f"⚙️ шаг: {_glabel}")
+    _t0 = time.monotonic()
     resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
+    run_context.research_emit(f"  💭 раунд 1 ({round(time.monotonic()-_t0,1)}s)")
     cap = _DIRECT_ROUNDS if rounds_cap is None else rounds_cap
     rounds, nudges = 0, 0
     seen_calls: set[str] = set()  # анти-зацикливание: тот же тул с теми же аргументами
@@ -1581,6 +1615,8 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
         if rounds >= cap:
             break
         msgs.append(resp)
+        _rt0 = time.monotonic()
+        _names = ", ".join(dict.fromkeys(c.get("name", "?") for c in calls[:MAX_DIRECT_TOOLCALLS]))
         for tc in calls[:MAX_DIRECT_TOOLCALLS]:
             sig = f"{tc.get('name')}({tc.get('args')})"
             if sig in seen_calls:  # живой тест: open_url того же URL по кругу
@@ -1604,6 +1640,7 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                 run_context.mark_external_content()
             msgs.append(ToolMessage(content=s[:TOOL_OUTPUT_CAP], tool_call_id=tc.get("id", "")))
         rounds += 1
+        run_context.research_emit(f"  🔧 раунд {rounds+1}: {_names} ({round(time.monotonic()-_rt0,1)}s)")
         _mask_old_tool_msgs(msgs)  # свернуть старые наблюдения (анти-квадратичность шага)
         resp = await asyncio.wait_for(llm_t.ainvoke(msgs), timeout=deadline)
 
@@ -1831,11 +1868,14 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # срезан МЯГКИМ между-нодовым потолком (как в бейзлайне, без потери качества) — arm сорвёт
     # ТОЛЬКО шаг, раздувшийся на целый бюджет внутри себя (подпись взрыва). disarm в finally.
     runbudget.arm(*_step_hard_limits(state))
+    # Картинки в step НЕ шлём: модель шага (code) может быть text-only (дефолт deepseek) → image_url
+    # её сломал бы. Картинку читают fast/reason (модель fast). Deliberate-чтение картинки — редкость.
+    _imgs = None
     try:
         if (kind == "compose" or not tools) and not _is_web:
-            output, msgs = await _exec_compose(system, step["goal"], step_deadline)
+            output, msgs = await _exec_compose(system, step["goal"], step_deadline, images=_imgs)
         elif kind == "direct" and not _is_web:
-            output, msgs = await _exec_direct(system, step["goal"], tools, step_deadline)
+            output, msgs = await _exec_direct(system, step["goal"], tools, step_deadline, images=_imgs)
         else:  # research, ИЛИ любой веб-шаг → agentic research (план→верификация→синтез)
             output, msgs = await _exec_research(system, step["goal"], tools, step_deadline)
         # Маркер отказа живёт в TOOL-сообщении, а финальное его перефразирует —

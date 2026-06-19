@@ -23,6 +23,7 @@ from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 from .llm import chat
+from . import run_context
 
 _URL_RE = re.compile(r"https?://[^\s)\]]+")
 
@@ -113,6 +114,7 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
         subqs = [s for s in (plan.subquestions or []) if s.strip()][:max_subq] or [question]
     except Exception:  # noqa: BLE001
         subqs = [question]
+    run_context.research_emit(f"📋 план: {len(subqs)} под-вопрос(ов) — поиск параллельно")
 
     # БЫСТРОЕ чтение БЕЗ cloakbrowser: urllib+trafilatura + наш chunk-экстракт. cloak спавнит
     # Chromium-подпроцесс (35с/страница, asyncio _do_waitpid висел) — для фактосбора не нужен.
@@ -126,12 +128,15 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
 
     async def _resolve(sq_q: str, known: str) -> dict:
         """Один проход: поиск → БЫСТРОЕ прицельное чтение → ИЗВЛЕЧЬ+ПРОВЕРИТЬ факт."""
+        _rt = time.monotonic()
+        run_context.research_emit(f"🔎 {sq_q[:60]}")
         try:
             # КАП на поиск: search_web падает в cloakbrowser (Chromium, 35с) когда SearXNG лёг —
             # в research это ×под-вопросы = взрыв. 12с хватает на SearXNG/urllib, cloak бросаем.
             res = await asyncio.wait_for(
                 asyncio.to_thread(search_web.invoke, {"query": sq_q, "max_results": 4}), timeout=12)
         except Exception as e:  # noqa: BLE001
+            run_context.research_emit(f"  ⚠ поиск прерван ({type(e).__name__})")
             return {"subq": sq_q, "found": False, "fact": f"(поиск прерван: {type(e).__name__})", "conf": 0.0, "sources": []}
         urls = _URL_RE.findall(res)[:max_sources]
         # СНИППЕТЫ ПОИСКА как evidence: выдача (заголовки+сниппеты) часто УЖЕ содержит ответ —
@@ -141,6 +146,8 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
         reads = await asyncio.gather(
             *[asyncio.wait_for(asyncio.to_thread(_fast_read, u, sq_q), timeout=15) for u in urls],
             return_exceptions=True)
+        n_read = sum(1 for r in reads if isinstance(r, str) and r.strip())
+        run_context.research_emit(f"  📄 прочитано {n_read}/{len(urls)} стр.")
         pages = "\n\n".join(r for r in reads if isinstance(r, str) and r.strip())[:5000]
         evidence = (snippets + ("\n\n" + pages if pages else "")).strip()
         if not evidence:
@@ -148,18 +155,39 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
         try:
             fc = await (_verify_prompt | fast.with_structured_output(FactCheck)).ainvoke(
                 {"subq": sq_q, "known": known or "(пока ничего)", "evidence": evidence[:6000]})
+            run_context.research_emit(
+                (f"  ✓ {fc.fact[:60]}" if fc.found else "  ✗ не подтверждено")
+                + f" · {time.monotonic() - _rt:.0f}s")
             return {"subq": sq_q, "found": fc.found, "fact": fc.fact, "conf": fc.confidence,
                     "sources": urls, "evidence": evidence[:2500]}
         except Exception:  # noqa: BLE001
+            run_context.research_emit(f"  ⚠ verify не прошёл · {time.monotonic() - _rt:.0f}s")
             return {"subq": sq_q, "found": False, "fact": "(не удалось проверить)", "conf": 0.0,
                     "sources": urls, "evidence": evidence[:2500]}
 
-    facts: list[dict] = []
-    for sq in subqs:
-        if _left() < 18:  # времени на ещё один под-вопрос нет → СТОП, синтезируем что есть
-            break
-        # ЗАВИСИМАЯ ЦЕПОЧКА: подставляем уже найденное в абстрактные ссылки под-вопроса.
+    # ПАРАЛЛЕЛЬНЫЙ первый проход: под-вопросы веером (search → ПАРАЛЛЕЛЬНОЕ чтение страниц → verify).
+    # Это «параллельные page-reads через все под-вопросы» — главный выигрыш (было 4× последовательно).
+    # Дептент-цепочку НЕ теряем: ниже идёт последовательный ДОБОР ТОЛЬКО по промахам (multi-hop с
+    # подстановкой известного + alt-ретрай) → качество (verify-or-gap, зависимые ссылки) сохранено.
+    per_q = max(20.0, _left() / max(1, len(subqs)))  # бюджет на под-вопрос в параллельном проходе
+
+    async def _first(sq: str) -> dict:
+        try:
+            return await asyncio.wait_for(_resolve(sq, ""), timeout=per_q)
+        except Exception as e:  # noqa: BLE001
+            return {"subq": sq, "found": False, "fact": f"(прервано: {type(e).__name__})",
+                    "conf": 0.0, "sources": [], "evidence": ""}
+
+    facts: list[dict] = list(await asyncio.gather(*[_first(sq) for sq in subqs]))
+
+    # ЗАВИСИМЫЙ ДОБОР (последовательно, ТОЛЬКО по не найденным): подставляем уже найденное в
+    # абстрактные ссылки под-вопроса + alt-формулировка. Тут живёт multi-hop, который параллельный
+    # проход мог не взять (sq2 без ответа sq1). Тратим время только там, где реально не нашли.
+    for i, fact in enumerate(facts):
+        if fact["found"] or _left() < 22:
+            continue
         known = "; ".join(f["fact"] for f in facts if f["found"] and f["conf"] >= 0.5)
+        sq = subqs[i]
         sq_q = sq
         if known:
             try:
@@ -167,19 +195,20 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
                 sq_q = (rf.content if hasattr(rf, "content") else str(rf)).strip() or sq
             except Exception:  # noqa: BLE001
                 sq_q = sq
-        fact = await _resolve(sq_q, known)
-        # РЕФЛЕКСИЯ-РЕТРАЙ: не нашли → одна попытка с альтернативной формулировкой (если есть время).
-        if not fact["found"] and _left() > 22:
+        fact2 = await _resolve(sq_q, known)
+        # РЕФЛЕКСИЯ-РЕТРАЙ: всё ещё нет → одна попытка альтернативной формулировки (если есть время).
+        if not fact2["found"] and _left() > 22:
             try:
                 alt = await (_alt_prompt | fast).ainvoke({"subq": sq_q, "known": known or "(нет)"})
                 alt_q = (alt.content if hasattr(alt, "content") else str(alt)).strip()
                 if alt_q and alt_q.lower() != sq_q.lower():
-                    fact2 = await _resolve(alt_q, known)
-                    if fact2["found"]:
-                        fact = fact2
+                    f3 = await _resolve(alt_q, known)
+                    if f3["found"]:
+                        fact2 = f3
             except Exception:  # noqa: BLE001
                 pass
-        facts.append(fact)
+        if fact2["found"]:
+            facts[i] = fact2
 
     verified = [f for f in facts if f["found"] and f["conf"] >= 0.5]
     facts_text = "\n".join(
@@ -194,6 +223,7 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
     if len(verified) < len(facts):
         ev = "\n\n".join(f"[{f['subq']}]\n{f.get('evidence', '')}" for f in facts if f.get("evidence"))
         evidence_blob = ev[:6000] or "(находок нет)"
+    run_context.research_emit(f"🧩 синтез: подтверждено {len(verified)}/{len(facts)} · {time.monotonic() - _t0:.0f}s")
     try:
         ans = await (_synth_prompt | fast).ainvoke(
             {"question": question, "facts": facts_text, "evidence": evidence_blob})
