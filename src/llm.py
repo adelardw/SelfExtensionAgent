@@ -44,6 +44,69 @@ def _cli_override(key: str, default=None):
         return default
 
 
+# ── Модальности активной модели (image/audio/video на входе) ─────────────────────────────────
+# Спрашиваем у OpenRouter input_modalities ОДИН раз — при СМЕНЕ модели (remember_modalities) —
+# и кэшируем в конфиг. Дальше supports_modality читает кэш (без запроса на каждое сообщение).
+# Это решает: модель умеет модальность → шлём напрямую; нет → пайплайн (OCR/describe/transcribe) →
+# без ошибок; не умеет ни модель, ни пайплайн → модель сама скажет «не могу» (graceful).
+def fetch_modalities(model_id: str) -> list | None:
+    """Запрос input_modalities модели у OpenRouter. None — не удалось (сеть/модель не в списке)."""
+    try:
+        req = urllib.request.Request(f"{OPENROUTER_BASE}/models", headers={"User-Agent": "SEA"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            data = json.loads(r.read().decode("utf-8", "ignore"))
+        for m in data.get("data", []):
+            if m.get("id") == model_id:
+                return list((m.get("architecture") or {}).get("input_modalities") or ["text"])
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+def remember_modalities() -> list | None:
+    """Определить и ЗАПОМНИТЬ модальности активной fast-модели. Кэш MODEL-AWARE: {model_id:[mods]} в
+    config.cli.model_modalities → на смену модели не затирает прошлые, на КАЖДУЮ модель один запрос.
+    ollama → ['text'] без запроса. Зовётся на старте, при смене модели и лениво (см. model_modalities)."""
+    mid = model_for("fast")
+    mods = ["text"] if provider() == "ollama" else fetch_modalities(mid)
+    if mods is not None:
+        try:
+            from .cli_config import get_cli, set_cli
+            cache = get_cli("model_modalities", None)
+            cache = dict(cache) if isinstance(cache, dict) else {}
+            cache[mid] = list(mods)
+            set_cli("model_modalities", cache)
+        except Exception:  # noqa: BLE001
+            pass
+    return mods
+
+
+def model_modalities() -> list:
+    """Входные модальности активной модели. Из MODEL-AWARE кэша; НЕТ в кэше → фетчим один раз (на эту
+    модель) и запоминаем — НЕ зависим от того, отработал ли старт. Не определили → ['text']."""
+    mid = model_for("fast")
+    cache = _cli_override("model_modalities", None)
+    if isinstance(cache, dict) and mid in cache and cache[mid]:
+        return list(cache[mid])
+    return remember_modalities() or ["text"]
+
+
+def supports_modality(mod: str) -> bool:
+    """Принимает ли активная модель эту модальность во входе НАПРЯМУЮ (image/audio/video)."""
+    return mod in model_modalities()
+
+
+def vision_supported() -> bool:
+    """Слать картинку модели напрямую (image_url)? Явный флаг `vision_direct` → он; иначе по
+    ЗАПОМНЕННЫМ модальностям ('image' среди input_modalities). Не умеет → describe_image (пайплайн)."""
+    flag = _cli_override("vision_direct", None)
+    if flag is None:
+        flag = _cfg.get("agent", {}).get("vision_direct", None)
+    if flag is not None:
+        return bool(flag)
+    return supports_modality("image")
+
+
 def api_key() -> str | None:
     """Ключ: env (приоритет) → пользовательский ввод из настроек (config.local.yml)."""
     return (os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")

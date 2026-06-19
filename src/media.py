@@ -247,8 +247,15 @@ def _b64(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode()
 
 
-def describe_image(path: str | Path, question: str = "") -> str:
-    """Vision-анализ изображения fast-моделью. question — на что обратить внимание."""
+def image_data_url(path: str | Path) -> str:
+    """Картинка → data-URL для ПРЯМОЙ передачи мультимодальной модели (gemini) в content-части
+    HumanMessage. Без промежуточного vision→текст: модель видит саму картинку (точнее, без потерь)."""
+    p = Path(path)
+    mime = mimetypes.guess_type(p.name)[0] or "image/png"
+    return f"data:{mime};base64,{_b64(p)}"
+
+
+def _vision_msg(path: str | Path, question: str = "") -> HumanMessage:
     p = Path(path)
     mime = mimetypes.guess_type(p.name)[0] or "image/png"
     prompt = (
@@ -258,11 +265,23 @@ def describe_image(path: str | Path, question: str = "") -> str:
     )
     if question:
         prompt += f"\nЗапрос пользователя (учти при описании): {question}"
-    msg = HumanMessage(content=[
+    return HumanMessage(content=[
         {"type": "text", "text": prompt},
         {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{_b64(p)}"}},
     ])
-    resp = chat("fast").invoke([msg])
+
+
+def describe_image(path: str | Path, question: str = "") -> str:
+    """Vision-анализ изображения fast-моделью (СИНХРОННО — CLI/telegram/PDF-vision)."""
+    resp = chat("fast").invoke([_vision_msg(path, question)])
+    return resp.content if hasattr(resp, "content") else str(resp)
+
+
+async def adescribe_image(path: str | Path, question: str = "") -> str:
+    """Vision АСИНХРОННО — `ainvoke` в ТЕКУЩЕМ event loop. КРИТИЧНО для десктоп-сервера: если звать
+    sync `describe_image` из `asyncio.to_thread`-воркера, async-клиент привязывается к чужому/мёртвому
+    loop → 'asyncio.Lock is bound to a different event loop' на приложенной картинке. Здесь — в loop."""
+    resp = await chat("fast").ainvoke([_vision_msg(path, question)])
     return resp.content if hasattr(resp, "content") else str(resp)
 
 
@@ -354,51 +373,70 @@ def transcribe_audio(path: str | Path) -> str:
     return (resp.content if hasattr(resp, "content") else str(resp)).strip()
 
 
+def _attach_block_sync(p: Path, question: str = "") -> str:
+    """Блок контекста по ОДНОМУ не-картиночному вложению (документ/видео/аудио/текст/бинарь).
+    Картинки обрабатываются отдельно (sync describe_image или async adescribe_image у вызывающего)."""
+    ext = p.suffix.lower()
+    if ext in IMAGE_EXTS:
+        try:
+            return f"[Изображение {p.name} (путь: {p})]\nОписание:\n{describe_image(p, question)}"
+        except Exception as e:  # noqa: BLE001
+            return f"[Изображение {p.name} (путь: {p}) — vision не сработал: {e}]"
+    if ext in DOC_EXTS:
+        content = read_file(p, MAX_INLINE_TEXT)
+        kind = {"pdf": "PDF", "xlsx": "Excel", "xls": "Excel", "docx": "Word",
+                "pptx": "Презентация"}.get(ext.lstrip("."), "Документ")
+        return f"[{kind} {p.name} (путь: {p})]\n{content}"
+    if ext in VIDEO_EXTS:
+        try:
+            return f"[Видео {p.name} (путь: {p})]\n{read_video(p, question)}"
+        except Exception as e:  # noqa: BLE001
+            return f"[Видео {p.name} — разбор не сработал: {e}]"
+    if ext in AUDIO_EXTS:
+        try:
+            return f"[Аудио {p.name} (путь: {p})]\nТранскрипт:\n{transcribe_audio(p)}"
+        except Exception as e:  # noqa: BLE001
+            return f"[Аудио {p.name} — транскрипт не сработал: {e}]"
+    if ext in TEXT_EXTS:
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+            cut = text[:MAX_INLINE_TEXT]
+            tail = f"\n…(обрезано, всего {len(text)} симв.; полный файл: {p})" if len(text) > MAX_INLINE_TEXT else ""
+            return f"[Файл {p.name} (путь: {p})]\n{cut}{tail}"
+        except Exception as e:  # noqa: BLE001
+            return f"[Файл {p.name} (путь: {p}) — не читается: {e}]"
+    return (f"[Файл {p.name} (путь: {p}, {p.stat().st_size} байт) — бинарный/другой формат; "
+            f"открой инструментами при необходимости]")
+
+
 def attachment_context(paths: list[str | Path], question: str = "") -> str:
-    """
-    Готовит блок контекста по вложениям: картинки — vision-описание, текстовые файлы —
-    инлайн содержимого (с обрезкой), прочее — путь+размер (deliberate-путь откроет
-    навыками file_operations/text_file_processor).
-    """
+    """СИНХРОННО (CLI/telegram): блок контекста по вложениям. В async-сервере используй
+    `attachment_context_async` — иначе vision из to_thread ломает event loop (см. adescribe_image)."""
     blocks = []
     for raw in paths:
         p = Path(raw)
+        blocks.append(f"[Вложение {p.name}: файл не найден]" if not p.exists()
+                      else _attach_block_sync(p, question))
+    return "\n\n".join(blocks)
+
+
+async def attachment_context_async(paths: list[str | Path], question: str = "") -> str:
+    """АСИНХРОННО (десктоп-сервер): картинки → vision через `ainvoke` В ТЕКУЩЕМ loop (фикс
+    'Lock bound to a different event loop'); тяжёлый файловый I/O (PDF/аудио/видео) — в поток.
+    ПАРАЛЛЕЛЬНО (gather): несколько файлов обрабатываются разом, а не последовательно (было ~10с
+    × картинку на «Reading attachments»). Порядок блоков сохраняется."""
+    import asyncio
+
+    async def _one(raw) -> str:
+        p = Path(raw)
         if not p.exists():
-            blocks.append(f"[Вложение {p.name}: файл не найден]")
-            continue
-        ext = p.suffix.lower()
-        if ext in IMAGE_EXTS:
+            return f"[Вложение {p.name}: файл не найден]"
+        if p.suffix.lower() in IMAGE_EXTS:
             try:
-                desc = describe_image(p, question)
-                blocks.append(f"[Изображение {p.name} (путь: {p})]\nОписание:\n{desc}")
+                return f"[Изображение {p.name} (путь: {p})]\nОписание:\n{await adescribe_image(p, question)}"
             except Exception as e:  # noqa: BLE001
-                blocks.append(f"[Изображение {p.name} (путь: {p}) — vision не сработал: {e}]")
-        elif ext in DOC_EXTS:
-            content = read_file(p, MAX_INLINE_TEXT)
-            kind = {"pdf": "PDF", "xlsx": "Excel", "xls": "Excel", "docx": "Word",
-                    "pptx": "Презентация"}.get(ext.lstrip("."), "Документ")
-            blocks.append(f"[{kind} {p.name} (путь: {p})]\n{content}")
-        elif ext in VIDEO_EXTS:
-            try:
-                blocks.append(f"[Видео {p.name} (путь: {p})]\n{read_video(p, question)}")
-            except Exception as e:  # noqa: BLE001
-                blocks.append(f"[Видео {p.name} — разбор не сработал: {e}]")
-        elif ext in AUDIO_EXTS:
-            try:
-                blocks.append(f"[Аудио {p.name} (путь: {p})]\nТранскрипт:\n{transcribe_audio(p)}")
-            except Exception as e:  # noqa: BLE001
-                blocks.append(f"[Аудио {p.name} — транскрипт не сработал: {e}]")
-        elif ext in TEXT_EXTS:
-            try:
-                text = p.read_text(encoding="utf-8", errors="ignore")
-                cut = text[:MAX_INLINE_TEXT]
-                tail = f"\n…(обрезано, всего {len(text)} симв.; полный файл: {p})" if len(text) > MAX_INLINE_TEXT else ""
-                blocks.append(f"[Файл {p.name} (путь: {p})]\n{cut}{tail}")
-            except Exception as e:  # noqa: BLE001
-                blocks.append(f"[Файл {p.name} (путь: {p}) — не читается: {e}]")
-        else:
-            blocks.append(
-                f"[Файл {p.name} (путь: {p}, {p.stat().st_size} байт) — бинарный/другой формат; "
-                f"открой инструментами при необходимости]"
-            )
+                return f"[Изображение {p.name} (путь: {p}) — vision не сработал: {e}]"
+        return await asyncio.to_thread(_attach_block_sync, p, question)
+
+    blocks = await asyncio.gather(*[_one(r) for r in paths])
     return "\n\n".join(blocks)
