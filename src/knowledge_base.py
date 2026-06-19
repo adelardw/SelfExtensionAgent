@@ -17,11 +17,31 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Optional
 
 from .retrieval import bm25_rank
+
+# ── ЕДИНЫЙ персистентный event loop для sync-обёрток (CLI/TUI) ────────────────────────────────
+# LightRAG кэширует инстансы с async-ресурсами, привязанными к loop их СОЗДАНИЯ. `asyncio.run`
+# создаёт НОВЫЙ loop на каждый вызов → add_document (loop#1) и search_kb (loop#2) шарят один кэш
+# инстансов → 'asyncio.Lock is bound to a different event loop'. Один долгоживущий loop это снимает.
+# Async-контексты (десктоп-сервер) этот путь НЕ используют — там зовут *_async напрямую (await).
+_kb_loop: Optional[asyncio.AbstractEventLoop] = None
+_kb_loop_lock = threading.Lock()
+
+
+def _run_sync(coro):
+    """Выполнить KB-корутину в едином персистентном loop (вместо свежего asyncio.run каждый раз)."""
+    global _kb_loop
+    with _kb_loop_lock:
+        if _kb_loop is None or _kb_loop.is_closed():
+            _kb_loop = asyncio.new_event_loop()
+            threading.Thread(target=_kb_loop.run_forever, daemon=True,
+                             name="kb-loop").start()
+    return asyncio.run_coroutine_threadsafe(coro, _kb_loop).result()
 
 _KB_ROOT = Path("data/kb")
 # Ярус 3 (временная память, CLAUDE.md): файлы, приложенные В ЭТОЙ СЕССИИ. Живут в tmp,
@@ -120,7 +140,7 @@ async def add_document_async(user_id: str, src_path: str | Path, folder: str = "
 
 def add_document(user_id: str, src_path: str | Path, folder: str = "") -> str:
     """Синхронная обёртка add_document_async (для CLI/скриптов)."""
-    return asyncio.run(add_document_async(user_id, src_path, folder))
+    return _run_sync(add_document_async(user_id, src_path, folder))
 
 
 def list_kb(user_id: str) -> str:
@@ -179,7 +199,7 @@ async def search_kb_async(user_id: str, query: str, k: int = 5, folder: Optional
 
 def search_kb(user_id: str, query: str, k: int = 5, folder: Optional[str] = None) -> str:
     """Синхронная обёртка (CLI/тулы вне async-контекста)."""
-    return asyncio.run(search_kb_async(user_id, query, k, folder))
+    return _run_sync(search_kb_async(user_id, query, k, folder))
 
 
 def kb_has_docs(user_id: str) -> bool:
@@ -225,7 +245,10 @@ def _sess_conn(session_id: str) -> sqlite3.Connection:
 
 
 def add_session_file(session_id: str, src_path: str | Path) -> str:
-    """Приложить файл В ТЕКУЩЕЙ СЕССИИ (tmp): скопировать + проиндексировать. Не persist."""
+    """Приложить файл В ТЕКУЩЕЙ СЕССИИ (tmp): скопировать + проиндексировать. Не persist.
+    Возвращает ПУТЬ к копии (его кладут в _THREAD_FILES и читают на прогоне). На ошибке —
+    строка '[файл не найден: …]' (вызывающий/санитайз её отсекают). РАНЬШЕ возвращалась
+    строка-СООБЩЕНИЕ об успехе → она попадала в _THREAD_FILES как «путь» → файлы «не найдены»."""
     from .media import read_file
 
     src = Path(src_path)
@@ -244,7 +267,7 @@ def add_session_file(session_id: str, src_path: str | Path) -> str:
     con.executemany("INSERT INTO chunks (doc, chunk) VALUES (?,?)", [(src.name, ch) for ch in chunks])
     con.commit()
     con.close()
-    return f"Приложен в сессию: {src.name} ({len(chunks)} фрагментов)"
+    return str(dst)  # ПУТЬ к копии (не сообщение!) — его читает прогон
 
 
 def session_has_files(session_id: str) -> bool:

@@ -1047,8 +1047,11 @@ class SeaTUI(App):
 
         from src.knowledge_base import add_session_file
         try:
-            msg = add_session_file(self.thread_id, str(_P(path).expanduser()))
-            self.call_from_thread(self._log, f"[#5b6472]📎 attached:[/] {msg}")
+            stored = add_session_file(self.thread_id, str(_P(path).expanduser()))  # ПУТЬ к копии (не сообщение)
+            if stored.startswith("["):  # «[файл не найден: …]»
+                self.call_from_thread(self._log, f"[#bf616a]attach failed:[/] {stored}")
+            else:  # файл проиндексирован в session-KB (recall-AutoRAG его подхватит)
+                self.call_from_thread(self._log, f"[#5b6472]📎 attached:[/] {_P(stored).name}")
         except Exception as e:  # noqa: BLE001
             self.call_from_thread(self._log, f"[#bf616a]attach failed:[/] {type(e).__name__}: {e}")
 

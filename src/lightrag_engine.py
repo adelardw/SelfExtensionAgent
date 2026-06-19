@@ -44,13 +44,16 @@ def estimate_index_cost(text: str) -> dict:
     return {"tokens": tokens, "chunks": chunks, "calls": calls, "usd": usd}
 
 
-_instances: dict[str, object] = {}
-_locks: dict[str, asyncio.Lock] = {}
+_instances: dict[tuple, object] = {}
+_locks: dict[tuple, asyncio.Lock] = {}
 
 
 async def _get_rag(working_dir: Path):
-    """Создать/поднять кэшированный LightRAG для рабочей директории (один раз инициализируем)."""
-    key = str(working_dir)
+    """Создать/поднять кэшированный LightRAG для рабочей директории. Кэш ключуется ещё и по
+    id текущего event loop: LightRAG держит async-ресурсы, привязанные к loop СОЗДАНИЯ → инстанс
+    из одного loop нельзя использовать в другом ('Lock bound to a different event loop'). Так каждый
+    loop получает СВОЙ инстанс (TUI: kb-loop для /kb add + loop агента для async-тула — не пересекутся)."""
+    key = (str(working_dir), id(asyncio.get_running_loop()))
     if key in _instances:
         return _instances[key]
     lock = _locks.setdefault(key, asyncio.Lock())
