@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { marked } from "marked"
 import DOMPurify from "dompurify"
+import renderMathInElement from "katex/contrib/auto-render"
 import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, ChevronDown, Check } from "lucide-react"
 
 marked.setOptions({ gfm: true, breaks: true })
@@ -10,7 +11,7 @@ type Thread = { thread_id: string; title: string; favorite?: number }
 type Msg = { role: "user" | "assistant"; content: string }
 type Cfg = { provider?: string; base_url?: string; api_key_source?: string; active?: string;
   model?: string; code_model?: string; deep_model?: string; work_mode?: string; force_mode?: string;
-  searxng_url?: string; bridge_connected?: boolean; bridge_token?: string; bridge_port?: number }
+  searxng_url?: string; model_modalities?: string[]; bridge_connected?: boolean; bridge_token?: string; bridge_port?: number }
 
 // СТАБИЛЬНЫЙ user_id (single-owner). Раньше был случайный gui-XXXX в localStorage, но в pywebview
 // порт сервера случаен каждый запуск → origin меняется → localStorage сбрасывается → новый uid →
@@ -63,6 +64,27 @@ function md(s: string): string {
   }
 }
 
+// Рендер ответа: markdown (md) + LaTeX-математика через KaTeX (после вставки HTML находит $…$/$$…$$
+// и рендерит). throwOnError=false → битый LaTeX показывается как текст, не ломает сообщение.
+function Markdown({ html }: { html: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!ref.current) return
+    try {
+      renderMathInElement(ref.current, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "\\[", right: "\\]", display: true },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "$", right: "$", display: false },
+        ],
+        throwOnError: false,
+      })
+    } catch { /* битый LaTeX → оставляем как текст */ }
+  }, [html])
+  return <div className="md" ref={ref} style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: html }} />
+}
+
 export default function App() {
   const [threads, setThreads] = useState<Thread[]>([])
   const [cur, setCur] = useState<string>(newId())
@@ -71,6 +93,13 @@ export default function App() {
   const [mode, setMode] = useState("")
   const [tokens, setTokens] = useState(0)   // токены текущего/последнего прогона (живой счётчик)
   const [cost, setCost] = useState(0)
+  const [tools, setTools] = useState<{ name: string; sec: number | null }[]>([])   // трейс: тулы + рантайм
+  const [showTrace, setShowTrace] = useState(false)   // полное окно трейса (show more)
+  const [rationale, setRationale] = useState("")      // почему выбран режим (интерпретируемость)
+  const [findingsUsed, setFindingsUsed] = useState(false)  // сработал ли findings-кэш
+  const [timings, setTimings] = useState<Record<string, number>>({})  // сек по нодам (где время)
+  const [researchLog, setResearchLog] = useState<string[]>([])  // шаги ресерчера (intra-node)
+  const [attachInfo, setAttachInfo] = useState<{ n: string; ok: boolean }[]>([])  // вложения: имя+существует (только в «show more»)
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
   const [online, setOnline] = useState(false)
@@ -78,6 +107,7 @@ export default function App() {
   const [attached, setAttached] = useState<string[]>([])
   const [uploading, setUploading] = useState(0)   // файлов в процессе загрузки/обработки (PDF парсится)
   const [attachErr, setAttachErr] = useState("")  // ошибка прикрепления (показываем, не глотаем)
+  const [visionWarn, setVisionWarn] = useState(false)  // приложили картинку, а модель её не читает
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -96,9 +126,9 @@ export default function App() {
   useEffect(() => { loadThreads(); const t = setInterval(loadThreads, 15000); return () => clearInterval(t) }, [loadThreads])
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" }) }, [msgs])
 
-  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("New chat"); setMode(""); setTokens(0); setCost(0); setAttached([]); setPending(null); setSteps([]); setProgress(""); ta.current?.focus() }
+  const newChat = () => { setCur(newId()); setMsgs([]); setTitle("New chat"); setMode(""); setTokens(0); setCost(0); setTools([]); setRationale(""); setFindingsUsed(false); setTimings({}); setResearchLog([]); setAttachInfo([]); setAttached([]); setVisionWarn(false); setPending(null); setSteps([]); setProgress(""); ta.current?.focus() }
   const openThread = async (id: string) => {
-    setCur(id); setAttached([]); setPending(null); setSteps([]); setProgress("")
+    setCur(id); setAttached([]); setVisionWarn(false); setPending(null); setSteps([]); setProgress(""); setTools([]); setRationale(""); setFindingsUsed(false); setTimings({}); setResearchLog([]); setAttachInfo([]); setMode(""); setTokens(0); setCost(0)
     try { const d = await (await fetch(`/chats/${id}`)).json(); setTitle(d.thread?.title || "Chat"); setMsgs(d.messages || []) }
     catch { setMsgs([]) }
   }
@@ -124,6 +154,13 @@ export default function App() {
       try { d = await (await fetch(`/run/${run_id}`)).json() } catch { continue }  // транзиент → ещё раз
       if (d.steps) setSteps(d.steps)
       if (typeof d.tokens === "number") setTokens(d.tokens)   // живой счётчик токенов
+      if (Array.isArray(d.tools_used)) setTools(d.tools_used)
+      if (typeof d.rationale === "string") setRationale(d.rationale)
+      if (typeof d.findings_used === "boolean") setFindingsUsed(d.findings_used)
+      if (d.timings && typeof d.timings === "object") setTimings(d.timings)
+      if (Array.isArray(d.research_log)) setResearchLog(d.research_log)
+      if (Array.isArray(d.attach)) setAttachInfo(d.attach)
+      if (typeof d.mode === "string" && d.mode) setMode(d.mode)   // режим виден сразу (трейс)
       if (d.status === "running") { setProgress(d.progress || ""); continue }
       if (d.status === "waiting") {
         if (d.pending?.type === "clarify") { setPending({ run_id, questions: d.pending.questions || [] }); return }
@@ -137,10 +174,10 @@ export default function App() {
   }
 
   const sendText = async (text: string) => {
-    text = text.trim(); if (!text || busy) return
-    setBusy(true); setInput(""); setSteps([]); setProgress(""); setTokens(0); setCost(0); if (ta.current) ta.current.style.height = "auto"
+    text = text.trim(); if (!text || busy || uploading > 0) return  // не слать, пока грузятся файлы
+    setBusy(true); setInput(""); setSteps([]); setProgress(""); setTokens(0); setCost(0); setTools([]); setRationale(""); setFindingsUsed(false); setTimings({}); setResearchLog([]); setAttachInfo([]); if (ta.current) ta.current.style.height = "auto"
     setMsgs(m => [...m, { role: "user", content: text }, { role: "assistant", content: "…" }])
-    setAttached([])
+    setAttached([]); setVisionWarn(false)
     try {
       const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, thread_id: cur, query: text }) })
       if (!r.ok) throw new Error("HTTP " + r.status)
@@ -166,6 +203,19 @@ export default function App() {
     try { await fetch(`/run/${run_id}/respond`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ value }) }) } catch { /* */ }
     poll(run_id)
   }
+  // Esc выходит из ожидающего уточнения/подтверждения: clarify → пустые ответы (агент действует
+  // по своему усмотрению), confirm → «нет». Прогон разблокируется (иначе висит в waiting).
+  useEffect(() => {
+    if (!pending) return
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return
+      e.preventDefault()
+      if (pending.questions) submitClarify(pending.questions.map(() => ""))
+      else if (pending.confirm) submitConfirm("нет")
+    }
+    document.addEventListener("keydown", h)
+    return () => document.removeEventListener("keydown", h)
+  }, [pending])
   const send = () => sendText(input)
   const onKey = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send() } }
   const grow = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = Math.min(el.scrollHeight, 200) + "px" }
@@ -176,7 +226,10 @@ export default function App() {
     setUploading(u => u + list.length)
     for (const f of list) {
       const fd = new FormData(); fd.append("file", f)
-      try { await fetch(`/upload?thread_id=${cur}`, { method: "POST", body: fd }); setAttached(a => [...a, f.name]) }
+      try {
+        const d = await (await fetch(`/upload?thread_id=${cur}`, { method: "POST", body: fd })).json()
+        setAttached(a => [...a, f.name]); if (d?.vision_warn) setVisionWarn(true)
+      }
       catch { /* ignore */ }
       finally { setUploading(u => Math.max(0, u - 1)) }
     }
@@ -193,6 +246,7 @@ export default function App() {
       })).json()
       if (d.names?.length) setAttached(a => [...a, ...d.names])
       if (d.errors?.length) setAttachErr(`couldn't attach: ${d.errors.join(", ")}`)
+      setVisionWarn(!!d.vision_warn)   // текущая модель не читает картинки → предложить мультимодальную
     } catch { setAttachErr("file upload error") }
     finally { setUploading(u => Math.max(0, u - paths.length)) }
   }
@@ -340,7 +394,7 @@ export default function App() {
                 {msgs.map((m, i) => (
                   m.role === "user" ? (
                     <motion.div key={i} initial={{ opacity: 0, y: 6, filter: "blur(6px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.4, ease: [0.22, 0.7, 0.2, 1] }} className="pt-3 pb-6">
-                      <div className="text-[20px] font-semibold leading-snug tracking-[-0.02em] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{m.content}</div>
+                      <div className="umsg text-[20px] font-semibold leading-snug tracking-[-0.02em] whitespace-pre-wrap" style={{ color: "var(--ink)" }}>{m.content}</div>
                     </motion.div>
                   ) : (
                     <motion.div key={i} initial={{ opacity: 0.3, y: 6, filter: "blur(7px)" }} animate={{ opacity: 1, y: 0, filter: "blur(0px)" }} transition={{ duration: 0.55, ease: [0.22, 0.7, 0.2, 1] }} className="pb-10">
@@ -350,7 +404,7 @@ export default function App() {
                       </div>
                       {m.content === "…" || m.content === ""
                         ? <Working steps={steps} current={progress} />
-                        : <div className="md" style={{ color: "var(--ink)" }} dangerouslySetInnerHTML={{ __html: md(m.content) }} />}
+                        : <Markdown html={md(m.content)} />}
                     </motion.div>
                   )
                 ))}
@@ -363,7 +417,53 @@ export default function App() {
 
         <div className="px-7 pb-7 pt-2">
           <div className="max-w-3xl mx-auto">
-            {(attached.length > 0 || uploading > 0 || attachErr) && (
+            {/* Мутный трейс прогона (интерпретируемость): режим+почему · кэш · ноды · тулы */}
+            {(busy || tools.length > 0 || steps.length > 0 || rationale) && (
+              <div className="mb-2 px-1 text-[11px] leading-relaxed flex items-start gap-2" style={{ color: "var(--faint)", opacity: busy ? 0.95 : 0.6 }}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    {mode && <span className="font-medium" style={{ color: "var(--muted)" }}>🧠 {mode}</span>}
+                    {findingsUsed && <span title="reused cached findings of a past heavy run" style={{ color: "var(--accent)" }}>♻ findings</span>}
+                    {rationale && <span className="truncate">· {rationale}</span>}
+                  </div>
+                  {steps.length > 0 && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-1" style={{ opacity: 0.85 }}>
+                      {steps.map((s, i) => {
+                        const t = timings[s]; const slow = t >= 3
+                        return (
+                          <span key={i}>
+                            <span style={slow ? { color: "#e0a23a", fontWeight: 600 } : undefined}>{s}{t ? ` ${t}s` : ""}</span>
+                            {i < steps.length - 1 && <span style={{ opacity: 0.5 }}> › </span>}
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {tools.length > 0 && (() => {
+                    // Инлайн — КОМПАКТНАЯ сводка (не все чипы, иначе стрип распирает на 3 ряда и
+                    // толкает инпут). Полный список с временем — в «show more».
+                    const slow = tools.reduce<{ name: string; sec: number | null } | null>(
+                      (a, t) => (t.sec != null && (!a || (t.sec > (a.sec || 0))) ? t : a), null)
+                    return (
+                      <div className="flex items-center gap-1.5 mt-0.5 truncate">
+                        <span style={{ opacity: 0.7 }}>🔧</span>
+                        <span>{tools.length} tool call{tools.length > 1 ? "s" : ""}</span>
+                        {slow && <span style={{ color: (slow.sec || 0) >= 3 ? "#e0a23a" : "inherit" }}>· slowest {slow.name} {slow.sec}s</span>}
+                      </div>
+                    )
+                  })()}
+                  {busy && researchLog.length > 0 && (
+                    <div className="truncate mt-0.5" style={{ opacity: 0.9 }}>{researchLog[researchLog.length - 1]}</div>
+                  )}
+                </div>
+                <button onClick={() => setShowTrace(true)} title="full trace log"
+                  className="shrink-0 text-[10.5px] px-2 py-0.5 rounded-md transition-colors"
+                  style={{ color: "#cfd8e3", border: "1px solid var(--bd)", background: "transparent" }}
+                  onMouseEnter={e => (e.currentTarget.style.background = "var(--surface)")}
+                  onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>show more</button>
+              </div>
+            )}
+            {(attached.length > 0 || uploading > 0 || attachErr || visionWarn) && (
               <div className="flex flex-wrap gap-2 mb-2 px-1">
                 {attached.map((n, i) => (
                   <span key={i} className="group flex items-center gap-1.5 text-[12px] pl-2.5 pr-1.5 py-1 rounded-lg" style={{ background: "var(--accent-soft)", color: "var(--ink)" }}>
@@ -385,6 +485,12 @@ export default function App() {
                     <X size={12} /> {attachErr}
                   </span>
                 )}
+                {visionWarn && (
+                  <span className="flex items-center gap-1.5 text-[12px] px-2.5 py-1 rounded-lg" style={{ background: "rgba(224,162,58,.16)", color: "#e0a23a" }}>
+                    ⚠ This model can't read images.
+                    <button onClick={() => setShowSettings(true)} className="underline font-medium" style={{ color: "#e0a23a" }}>Pick a multimodal model</button>
+                  </span>
+                )}
               </div>
             )}
             <div className="flex items-end gap-2 rounded-xl px-3 py-2.5" style={{ background: "var(--surface2)", boxShadow: "var(--sh3)" }}>
@@ -400,7 +506,8 @@ export default function App() {
                 onMouseEnter={e => { if (!recording) e.currentTarget.style.background = "var(--surface)" }}
                 onMouseLeave={e => { if (!recording) e.currentTarget.style.background = "transparent" }}
                 title={recording ? "Stop recording" : "Record voice"}>{recording ? <Square size={15} fill="#fff" /> : <Mic size={18} />}</button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={busy || !input.trim()}
+              <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={busy || uploading > 0 || !input.trim()}
+                title={uploading > 0 ? "wait — files are loading" : undefined}
                 className="grid place-items-center w-9 h-9 rounded-lg shrink-0 transition-all disabled:opacity-35"
                 style={{ background: "var(--accent)", color: "var(--accent-fg)", boxShadow: input.trim() ? "var(--sh1)" : "none" }}><ArrowUp size={17} strokeWidth={2.5} /></motion.button>
             </div>
@@ -409,7 +516,91 @@ export default function App() {
       </main>
 
       <AnimatePresence>{showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}</AnimatePresence>
+      <AnimatePresence>{showTrace && <TraceModal onClose={() => setShowTrace(false)}
+        mode={mode} rationale={rationale} findingsUsed={findingsUsed} tokens={tokens} cost={cost}
+        steps={steps} timings={timings} tools={tools} researchLog={researchLog} attachInfo={attachInfo} />}</AnimatePresence>
     </div>
+  )
+}
+
+function TraceModal({ onClose, mode, rationale, findingsUsed, tokens, cost, steps, timings, tools, researchLog, attachInfo }: {
+  attachInfo?: { n: string; ok: boolean }[];
+  onClose: () => void; mode: string; rationale: string; findingsUsed: boolean; tokens: number; cost: number
+  steps: string[]; timings: Record<string, number>; tools: { name: string; sec: number | null }[]; researchLog: string[]
+}) {
+  const totalNode = steps.reduce((a, s) => a + (timings[s] || 0), 0)
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
+      className="fixed inset-0 z-50 grid place-items-center p-5" style={{ background: "rgba(9,30,66,.54)" }}>
+      <motion.div initial={{ scale: 0.97, y: 10 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.97, opacity: 0 }} transition={{ duration: 0.18 }}
+        onClick={e => e.stopPropagation()} className="w-full max-w-[560px] max-h-[86vh] flex flex-col rounded-2xl select-text" style={{ background: "var(--surface)", boxShadow: "var(--sh3)" }}>
+        <div className="flex items-center px-6 pt-5 pb-3">
+          <h2 className="text-[16px] font-bold tracking-tight" style={{ color: "var(--ink)" }}>Run trace</h2>
+          <button onClick={onClose} className="ml-auto grid place-items-center w-8 h-8 rounded-lg transition-colors" style={{ color: "var(--muted)" }}
+            onMouseEnter={e => (e.currentTarget.style.background = "var(--hover)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}><X size={18} /></button>
+        </div>
+        <div className="px-6 pb-5 overflow-y-auto space-y-4 text-[12.5px]" style={{ color: "var(--ink)" }}>
+          <div className="flex flex-wrap items-center gap-2 text-[12px]" style={{ color: "var(--muted)" }}>
+            {mode && <span className="px-2 py-0.5 rounded-md" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>{mode}</span>}
+            {findingsUsed && <span style={{ color: "var(--accent)" }}>♻ reused findings</span>}
+            <span>· {tokens.toLocaleString("en-US")} tok</span>
+            {cost > 0 && <span>· ${cost.toFixed(4)}</span>}
+          </div>
+          {rationale && <div className="leading-relaxed" style={{ color: "var(--muted)" }}>{rationale}</div>}
+          <div>
+            <div className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--faint)" }}>NODES · {totalNode.toFixed(1)}s total</div>
+            <div className="space-y-0.5 font-mono text-[12px]">
+              {steps.map((s, i) => {
+                const t = timings[s] || 0; const slow = t >= 3
+                return (
+                  <div key={i} className="flex items-center justify-between gap-3">
+                    <span style={slow ? { color: "#e0a23a", fontWeight: 600 } : { color: "var(--ink)" }}>{i + 1}. {s}</span>
+                    <span style={{ color: slow ? "#e0a23a" : "var(--faint)" }}>{t ? `${t}s` : "—"}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+          {attachInfo && attachInfo.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--faint)" }}>ATTACHMENTS · {attachInfo.length}</div>
+              <div className="space-y-0.5 font-mono text-[12px]">
+                {attachInfo.map((a, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3">
+                    <span style={{ color: "var(--ink)" }}>{a.n}</span>
+                    <span style={{ color: a.ok ? "#3ecf8e" : "#e0a23a" }}>{a.ok ? "reached ✓" : "missing ✗"}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {researchLog.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--faint)" }}>EXECUTION LOG · {researchLog.length} events</div>
+              <div className="space-y-0.5 font-mono text-[11.5px] whitespace-pre-wrap" style={{ color: "var(--muted)" }}>
+                {researchLog.map((r, i) => <div key={i}>{r}</div>)}
+              </div>
+            </div>
+          )}
+          {tools.length > 0 && (
+            <div>
+              <div className="text-[11px] font-semibold mb-1.5" style={{ color: "var(--faint)" }}>TOOL CALLS · {tools.length}</div>
+              <div className="space-y-0.5 font-mono text-[12px]">
+                {tools.map((t, i) => {
+                  const slow = t.sec != null && t.sec >= 3
+                  return (
+                    <div key={i} className="flex items-center justify-between gap-3">
+                      <span style={slow ? { color: "#e0a23a", fontWeight: 600 } : { color: "var(--ink)" }}>{i + 1}. {t.name}</span>
+                      <span style={{ color: slow ? "#e0a23a" : "var(--faint)" }}>{t.sec != null ? `${t.sec}s` : "running…"}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </motion.div>
   )
 }
 
@@ -466,6 +657,12 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
             <div><Lbl>Code model</Lbl><input value={codeModel} onChange={e => setCodeModel(e.target.value)} placeholder="deepseek/deepseek-v4-flash" className={field} style={fst} /></div>
           </div>
           <div><Lbl>Heavy review model (deep)</Lbl><input value={deepModel} onChange={e => setDeepModel(e.target.value)} placeholder="model for heavy mode" className={field} style={fst} /></div>
+          {cfg.model_modalities && cfg.model_modalities.length > 0 && (
+            <div className="text-[11px] -mt-1" style={{ color: "var(--faint)" }}>
+              Input modalities of the model (from OpenRouter): <b style={{ color: "var(--muted)" }}>{cfg.model_modalities.join(", ")}</b>
+              {" · "}images {cfg.model_modalities.includes("image") ? "→ sent directly" : "→ OCR/describe (model is text-only)"}
+            </div>
+          )}
           <div><Lbl>Endpoint (base_url)</Lbl><input value={baseUrl} onChange={e => setBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" className={field} style={fst} /></div>
           <div><Lbl>API key · now: {cfg.api_key_source || "—"}</Lbl>
             <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="paste key (optional)" className={field} style={fst} /></div>

@@ -61,6 +61,8 @@ body {
 textarea { font-family: inherit; }
 
 /* рендер markdown в ответах агента */
+/* Выделение текста мышью в истории чата (WKWebView режет по дефолту → включаем явно с webkit-префиксом) */
+.md, .umsg { -webkit-user-select: text; user-select: text; cursor: text; }
 .md { line-height: 1.71; font-size: 15px; }
 .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
 .md p { margin: 0 0 13px; }
