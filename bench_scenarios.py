@@ -161,7 +161,7 @@ _OUT = "/tmp/bench_results.jsonl"
 
 
 async def _run_one(graph, cat, q, sem):
-    import src.agent as A
+    import src.graph.agent as A
     async with sem:
         t0 = time.time()
         rec = {"cat": cat, "q": q, "should_ground": A._needs_web_grounding(q),
@@ -190,8 +190,8 @@ async def _run_one(graph, cat, q, sem):
 
 async def main():
     from main import make_checkpointer
-    from src.agent import build_graph
-    from src import hitl
+    from src.graph.agent import build_graph
+    from src.runtime import hitl
     hitl.set_work_mode("auto")
 
     items = _flatten()

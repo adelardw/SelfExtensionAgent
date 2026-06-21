@@ -14,7 +14,7 @@ needs_key = pytest.mark.skipif(
 
 def _judge(**kw):
     """Замоканный финальный судья: возвращает ValidationResult с заданными флагами."""
-    from src.structured_outputs import ValidationResult
+    from src.llm.structured_outputs import ValidationResult
 
     class _Chain:
         async def ainvoke(self, _payload):
@@ -27,7 +27,7 @@ def _judge(**kw):
 def test_validator_flags_false_completion(monkeypatch):
     """Оборванный прогон + судья поднял false_completion → честный статус с прогрессом, ПРИНЯТЬ."""
     import asyncio
-    import src.agent as A
+    import src.graph.agent as A
 
     monkeypatch.setattr(A, "validation_chain", _judge(false_completion=True))
     monkeypatch.setattr(A, "CONSENSUS_VALIDATION", False)
@@ -46,7 +46,7 @@ def test_validator_flags_false_completion(monkeypatch):
 def test_validator_keeps_answer_when_complete(monkeypatch):
     """Прогон завершён (все шаги done, бюджет цел) → флаг не применяется: ответ НЕ подменяем."""
     import asyncio
-    import src.agent as A
+    import src.graph.agent as A
 
     monkeypatch.setattr(A, "validation_chain", _judge(false_completion=False))
     monkeypatch.setattr(A, "CONSENSUS_VALIDATION", False)
@@ -64,7 +64,7 @@ def test_false_completion_guarded_by_incomplete(monkeypatch):
     """Даже если судья ошибочно поднял false_completion на ЗАВЕРШЁННОМ прогоне — структурный
     гейт incomplete не даёт подменить ответ (поле только про оборванный прогон)."""
     import asyncio
-    import src.agent as A
+    import src.graph.agent as A
 
     monkeypatch.setattr(A, "validation_chain", _judge(false_completion=True))
     monkeypatch.setattr(A, "CONSENSUS_VALIDATION", False)

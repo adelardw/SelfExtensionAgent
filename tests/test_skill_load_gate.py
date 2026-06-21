@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from src.tools import skill_creation as sc
-from src.utils_validation import validate_module_level
+from src.tools.utils_validation import validate_module_level
 
 
 @pytest.fixture

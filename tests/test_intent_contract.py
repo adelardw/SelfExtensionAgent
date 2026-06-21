@@ -7,7 +7,7 @@
 (feedback «no-keyword-crutches»). Это характеризационный тест: ловит регресс, если кто-то добавит
 регэксп-ветку или поменяет деградацию.
 """
-from src import intent
+from src.graph import intent
 
 
 class _StubRouter:
@@ -26,7 +26,7 @@ def test_classify_none_without_embeddings():
 
 def test_callers_defer_to_reflexion_on_none(monkeypatch):
     """Нет сигнала → helpers возвращают False (отдают решение reflexion), НЕ регэксп-эвристику."""
-    from src import agent
+    from src.graph import agent
 
     monkeypatch.setattr(intent, "get_router", lambda: _StubRouter())
 
@@ -38,7 +38,7 @@ def test_callers_defer_to_reflexion_on_none(monkeypatch):
 
 def test_positive_label_routes_true(monkeypatch):
     """Когда классификатор уверенно вернул label — helper срабатывает (контроль, что False не зашит)."""
-    from src import agent
+    from src.graph import agent
 
     class _PosRouter:
         def classify(self, text, qvec=None):

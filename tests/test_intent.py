@@ -2,7 +2,7 @@
 рост из фидбек-лупа, деградация в None (→ регэксп-fallback). Мок-эмбеддер, без сети."""
 import pytest
 
-from src import intent
+from src.graph import intent
 
 
 class _FakeEmb:

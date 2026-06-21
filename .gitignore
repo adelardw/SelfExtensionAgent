@@ -12,7 +12,7 @@ logs
 
 # Secrets / runtime data
 .env
-data/
+/data/
 config.local.yml
 .sea/
 data/browser_bridge.token

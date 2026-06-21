@@ -39,5 +39,5 @@ class _DetRouter:
 
 @pytest.fixture(autouse=True)
 def _det_intent_router(monkeypatch):
-    import src.intent as _intent
+    import src.graph.intent as _intent
     monkeypatch.setattr(_intent, "get_router", lambda: _DetRouter())

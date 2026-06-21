@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from src.intent import get_router
+from src.graph.intent import get_router
 
 # (query, expected_label) — НОВЫЕ формулировки, мультиязычные. Не копии _SEED.
 CASES: list[tuple[str, str]] = [

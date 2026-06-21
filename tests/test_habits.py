@@ -2,7 +2,7 @@
 факт-директива create_skill → закрытие после создания навыка. Офлайн, без LLM."""
 import pytest
 
-from src import habits
+from src.search import habits
 from src.memory.store import MemoryStore
 
 UID = "test-user"

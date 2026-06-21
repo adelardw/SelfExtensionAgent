@@ -9,7 +9,7 @@
 """
 import asyncio
 
-from src import runbudget as rb
+from src.runtime import runbudget as rb
 
 
 def test_sequential_default_unchanged():

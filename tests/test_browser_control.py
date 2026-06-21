@@ -24,7 +24,7 @@ def test_skill_module_loads_without_browser():
 
 
 def test_browser_see_is_readonly_no_confirm():
-    from src import hitl
+    from src.runtime import hitl
     assert "browser_see" in hitl.READONLY_TOOLS or "browser_see" in hitl._DEFAULT_READONLY
     # сами действия — под подтверждением (skills.confirm)
     from omegaconf import OmegaConf
@@ -34,7 +34,7 @@ def test_browser_see_is_readonly_no_confirm():
 
 @needs_key
 def test_act_picks_browser_hands():
-    from src.agent import _skills_for_act
+    from src.graph.agent import _skills_for_act
     picked = _skills_for_act("включи трек chikoi the maid")
     assert "browser_control" in picked
 
@@ -46,7 +46,7 @@ def test_browser_media_tool_exists_and_trusted():
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     assert getattr(m.browser_media, "name", "") == "browser_media"
-    from src import hitl
+    from src.runtime import hitl
     # «поставь на паузу» по просьбе юзера не должно переспрашиваться
     assert "browser_media" in hitl._DEFAULT_READONLY
 
@@ -59,14 +59,14 @@ def test_full_media_toolset_and_trust():
     spec.loader.exec_module(m)
     names = {getattr(getattr(m, n), "name", "") for n in dir(m)}
     assert {"browser_read", "browser_media"} <= names
-    from src import hitl
+    from src.runtime import hitl
     # смотреть/читать/управлять воспроизведением по просьбе — без подтверждений
     assert {"browser_see", "browser_read", "browser_media"} <= hitl._DEFAULT_READONLY
 
 
 def test_default_backend_is_system_chrome():
     """Зафиксировано: по умолчанию системный Chrome пользователя, не Chromium."""
-    import src.browser_session as bs
+    import src.browser.browser_session as bs
     # дефолт читается из конфига с фолбэком 'system' — проверяем фолбэк-значение в коде
     import inspect
     src = inspect.getsource(bs._ensure_page)
@@ -75,7 +75,7 @@ def test_default_backend_is_system_chrome():
 
 def test_background_focus_helpers_safe_offmac(monkeypatch):
     """Фоновый режим: захват/возврат фокуса не падают и no-op вне macOS."""
-    import src.browser_session as bs
+    import src.browser.browser_session as bs
     monkeypatch.setattr(bs.platform, "system", lambda: "Linux")
     bs._capture_front()      # no-op, без исключений
     bs._restore_front()
@@ -84,7 +84,7 @@ def test_background_focus_helpers_safe_offmac(monkeypatch):
 
 def test_background_default_on():
     """По умолчанию фоновый режим ВКЛ (окно не лезет на экран)."""
-    import src.browser_session as bs
+    import src.browser.browser_session as bs
     import inspect
     assert "browser_background" in inspect.getsource(bs._background)
     # _call оборачивает возврат фокуса
@@ -94,8 +94,8 @@ def test_background_default_on():
 def test_routing_prefers_extension_when_connected(monkeypatch):
     """browser_* идут в расширение (твой браузер), если оно подключено; иначе — playwright."""
     import asyncio
-    import src.browser_bridge as br
-    import src.browser_session as bs
+    import src.browser.browser_bridge as br
+    import src.browser.browser_session as bs
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "bc4", "src/skills/browser_control/browser_control.py")
@@ -113,7 +113,7 @@ def test_routing_prefers_extension_when_connected(monkeypatch):
 
 
 def test_bridge_token_and_server_boot():
-    from src import browser_bridge as br
+    from src.browser import browser_bridge as br
     br.ensure_server()
     assert len(br.token()) >= 16
     assert br._thread is not None and br._thread.is_alive()
@@ -122,8 +122,8 @@ def test_bridge_token_and_server_boot():
 def test_no_extension_returns_install_hint_not_sandbox(monkeypatch):
     """Физический веб без расширения → просьба поставить, НЕ песочное окно/подпроцесс."""
     import asyncio
-    import src.browser_bridge as br
-    import src.browser_session as bs
+    import src.browser.browser_bridge as br
+    import src.browser.browser_session as bs
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "bc5", "src/skills/browser_control/browser_control.py")
@@ -135,7 +135,7 @@ def test_no_extension_returns_install_hint_not_sandbox(monkeypatch):
     # session НЕ должен вызываться при дефолтном backend=extension
     def _boom(*a, **k): raise AssertionError("песочное окно не должно открываться")
     monkeypatch.setattr(bs, "open_url", _boom)
-    from src import cli_config
+    from src.config import cli_config
     monkeypatch.setattr(cli_config, "get_cli", lambda k, d=None: None)  # backend=extension (деф)
     out = asyncio.run(m.browser_open.ainvoke({"url": "music.yandex.ru"}))
     assert "НУЖНО РАСШИРЕНИЕ" in out and "extension/" in out
@@ -144,8 +144,8 @@ def test_no_extension_returns_install_hint_not_sandbox(monkeypatch):
 def test_window_backend_opt_in_uses_session(monkeypatch):
     """Power-user явно выбрал окно (cli.browser_backend='window') → playwright-сессия."""
     import asyncio
-    import src.browser_bridge as br
-    import src.browser_session as bs
+    import src.browser.browser_bridge as br
+    import src.browser.browser_session as bs
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "bc6", "src/skills/browser_control/browser_control.py")
@@ -154,7 +154,7 @@ def test_window_backend_opt_in_uses_session(monkeypatch):
     monkeypatch.setattr(br, "connected", lambda: False)
     monkeypatch.setattr(br, "ensure_server", lambda: None)
     monkeypatch.setattr(bs, "open_url", lambda url: f"window:{url}")
-    from src import cli_config
+    from src.config import cli_config
     monkeypatch.setattr(cli_config, "get_cli", lambda k, d=None: "window" if k == "browser_backend" else None)
     out = asyncio.run(m.browser_open.ainvoke({"url": "music.yandex.ru"}))
     assert out == "window:https://music.yandex.ru" or out.startswith("window:")
@@ -163,7 +163,7 @@ def test_window_backend_opt_in_uses_session(monkeypatch):
 def test_closed_browser_launches_and_waits(monkeypatch):
     """Закрытый браузер + просьба → агент поднимает браузер, ждёт расширение, потом действие."""
     import asyncio
-    import src.browser_bridge as br
+    import src.browser.browser_bridge as br
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "bc7", "src/skills/browser_control/browser_control.py")
@@ -179,7 +179,7 @@ def test_closed_browser_launches_and_waits(monkeypatch):
     monkeypatch.setattr(br, "wait_connected", lambda t=12.0: state["connected"])
     async def _open(url): return f"ext:{url}"
     monkeypatch.setattr(br, "open_url", _open)
-    from src import cli_config
+    from src.config import cli_config
     monkeypatch.setattr(cli_config, "get_cli", lambda k, d=None: None)
     out = asyncio.run(m.browser_open.ainvoke({"url": "music.yandex.ru"}))
     assert state["launched"] == 1 and out.startswith("ext:")  # подняли браузер → действие
@@ -188,7 +188,7 @@ def test_closed_browser_launches_and_waits(monkeypatch):
 def test_bridge_chat_handler_roundtrip():
     """Чат из расширения прогоняется через зарегистрированный обработчик графа."""
     import asyncio
-    from src import browser_bridge as br
+    from src.browser import browser_bridge as br
 
     async def _handler(text): return f"ответ на: {text}"
     br.set_chat_handler(_handler)
@@ -201,7 +201,7 @@ def test_act_does_not_lie_about_playback(monkeypatch):
     """act не заявляет «играет», если ни один тул не подтвердил воспроизведение."""
     import asyncio
     from langchain_core.messages import AIMessage, ToolMessage
-    import src.agent as A
+    import src.graph.agent as A
 
     async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         ai = AIMessage(content="", tool_calls=[{"name": "browser_click", "args": {"item": 3}, "id": "1"}])
@@ -226,7 +226,7 @@ def test_act_accepts_confirmed_playback(monkeypatch):
     """С подтверждением «ЗВУК ИГРАЕТ» в результате тула — успех принимается."""
     import asyncio
     from langchain_core.messages import AIMessage, ToolMessage
-    import src.agent as A
+    import src.graph.agent as A
 
     async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         ai = AIMessage(content="", tool_calls=[{"name": "browser_media", "args": {"action": "play"}, "id": "1"}])

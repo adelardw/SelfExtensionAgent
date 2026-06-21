@@ -2,7 +2,7 @@
 import time
 
 from src.media import AUDIO_EXTS, IMAGE_EXTS, TEXT_EXTS, attachment_context
-from src.progress import ProgressView
+from src.interface.progress import ProgressView
 
 
 def test_attachment_context_text_inline(tmp_path):

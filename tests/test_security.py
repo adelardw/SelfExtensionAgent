@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from src.utils_validation import validate_skill_code
+from src.tools.utils_validation import validate_skill_code
 
 
 def _bad(code: str) -> list[str]:
@@ -107,7 +107,7 @@ def test_create_skill_security_gate(tmp_skills, monkeypatch):
 def test_hitl_deny_by_default_and_allow_with_confirmer():
     from langchain_core.tools import tool
 
-    from src import hitl
+    from src.runtime import hitl
 
     @tool
     def open_app(name: str) -> str:

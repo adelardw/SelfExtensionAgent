@@ -44,8 +44,8 @@ dependencies = [
 ]
 
 [project.scripts]
-sea = "src.cli:main_cli"
-self-extension-agent = "src.cli:main_cli"
+sea = "src.interface.cli:main_cli"
+self-extension-agent = "src.interface.cli:main_cli"
 
 [build-system]
 requires = ["hatchling"]

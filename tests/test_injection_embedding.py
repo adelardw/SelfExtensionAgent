@@ -7,7 +7,7 @@
 """
 import itertools
 
-from src.semantic_signals import _ContrastiveSignal
+from src.graph.semantic_signals import _ContrastiveSignal
 from src.improve import safety
 
 
@@ -69,7 +69,7 @@ def test_corpus_off_by_default(tmp_path, monkeypatch):
 def test_fail_open_is_visible(monkeypatch):
     """#1: без эмбеддера детект инъекций отключается (fail-open) — но НЕ молча: degradation.note,
     чтобы отключение security-контроля было видно в /diagnose."""
-    from src import degradation
+    from src.runtime import degradation
 
     class _Off:
         enabled = False

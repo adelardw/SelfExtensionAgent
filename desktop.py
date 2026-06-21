@@ -31,7 +31,7 @@ def _free_port() -> int:
 def _serve(port: int) -> None:
     import uvicorn
 
-    from src.server import app
+    from src.interface.server import app
     uvicorn.run(app, host=HOST, port=port, log_level="warning")
 
 
@@ -64,13 +64,13 @@ class _Api:
 def main() -> None:
     # УПАКОВАННОЕ приложение: при запуске из Launchpad/Dock cwd='/' (read-only) → относительные
     # data/, config.local.yml падают. Переходим в writable per-user папку ДО старта сервера/импортов.
-    from src.config_paths import bootstrap_frozen
+    from src.config.config_paths import bootstrap_frozen
     bootstrap_frozen()
     try:
         import webview
     except ImportError:
         raise SystemExit("pywebview не установлен. Поставь: uv sync --group gui "
-                         "(или: открой http://127.0.0.1:8000/ после `uvicorn src.server:app`)")
+                         "(или: открой http://127.0.0.1:8000/ после `uvicorn src.interface.server:app`)")
 
     port = _free_port()
     threading.Thread(target=_serve, args=(port,), daemon=True).start()

@@ -181,7 +181,7 @@ def _security_gate(code: str) -> tuple[bool, str]:
     """
     if os.getenv("AGENT_ALLOW_RISKY_SKILLS") == "1":
         return True, "OK (гейт отключён env)"
-    from ..utils_validation import validate_skill_code
+    from src.tools.utils_validation import validate_skill_code
 
     ok, issues = validate_skill_code(code)
     if ok:
@@ -512,7 +512,7 @@ def _load_skill_module(name: str, py_file: Path) -> tuple[object | None, str]:
     if not _trusted_skill(name):
         meta = _merged_registry().get(name, {})
         if meta.get("imported"):
-            from ..utils_validation import validate_module_level
+            from src.tools.utils_validation import validate_module_level
             ok, issues = validate_module_level(code)
             if not ok:
                 return None, "Module-level gate: " + "; ".join(issues)
@@ -663,7 +663,7 @@ def get_relevant_skills_for_prompt(query: str, top: int = TOOLSEARCH_TOP) -> str
     if not registry or len(registry) < TOOLSEARCH_THRESHOLD:
         return get_skills_for_prompt.invoke({})  # это @tool, не функция
 
-    from ..retrieval import bm25_rank
+    from src.search.retrieval import bm25_rank
 
     names, docs, sections = [], [], []
     for name, meta in registry.items():
@@ -819,7 +819,7 @@ def get_all_loaded_skill_tools(names: Optional[list[str]] = None) -> list:
             print(f"[SkillManager] Skipped '{name}': {reason}")
             continue
 
-        from ..hitl import needs_confirmation, wrap_with_confirmation
+        from src.runtime.hitl import needs_confirmation, wrap_with_confirmation
 
         guard = needs_confirmation(name)
         sandbox = _should_sandbox(name, meta)   # недоверенный → вызов в подпроцесс-песочнице (#2)

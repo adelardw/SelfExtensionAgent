@@ -1,5 +1,5 @@
 """Вычислительный слой: исполнение Python в песочнице. Офлайн, без LLM."""
-from src.compute import make_compute_tool
+from src.runtime.compute import make_compute_tool
 from src.utils import run_python_sandboxed
 
 

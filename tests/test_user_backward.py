@@ -2,7 +2,7 @@
 import pytest
 from langchain_core.runnables import RunnableLambda
 
-from src.structured_outputs import UserLesson, UserLessons
+from src.llm.structured_outputs import UserLesson, UserLessons
 
 
 @pytest.fixture
@@ -32,8 +32,8 @@ def test_per_user_backward_writes_personal_fewshots(store, tmp_path, monkeypatch
         def with_structured_output(self, schema):
             return RunnableLambda(lambda _x: lessons)
 
-    monkeypatch.setattr("src.llm.chat", lambda *a, **k: FakeLLM())
-    monkeypatch.setattr("src.llm.provider", lambda: "openrouter")
+    monkeypatch.setattr("src.llm.llm.chat", lambda *a, **k: FakeLLM())
+    monkeypatch.setattr("src.llm.llm.provider", lambda: "openrouter")
 
     _seed_failures(store, "alice", 3)
 
@@ -55,7 +55,7 @@ def test_per_user_backward_writes_personal_fewshots(store, tmp_path, monkeypatch
 def test_per_user_backward_skips_when_too_few(store, tmp_path, monkeypatch):
     monkeypatch.setattr("src.improve.prompt_store.USER_FEWSHOTS_FILE", tmp_path / "uf.json")
     monkeypatch.setenv("OPEN_ROUTER_API_KEY", "test")
-    monkeypatch.setattr("src.llm.provider", lambda: "openrouter")
+    monkeypatch.setattr("src.llm.llm.provider", lambda: "openrouter")
     _seed_failures(store, "carol", 1)
     from src.improve.graph_learn import graph_backward_user
     res = graph_backward_user(store, "carol", min_batch=3)

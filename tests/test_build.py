@@ -11,7 +11,7 @@ needs_key = pytest.mark.skipif(
 
 @needs_key
 def test_agent_module_imports_and_graph_builds():
-    from src.agent import build_graph  # noqa: PLC0415
+    from src.graph.agent import build_graph  # noqa: PLC0415
 
     graph = build_graph()
     assert graph is not None
@@ -22,7 +22,7 @@ def test_agent_module_imports_and_graph_builds():
 
 @needs_key
 def test_researcher_subagent_builds():
-    from src.subagents import get_subagent_tools  # noqa: PLC0415
+    from src.graph.subagents import get_subagent_tools  # noqa: PLC0415
 
     tools = get_subagent_tools(["researcher"])
     assert len(tools) == 1

@@ -21,12 +21,12 @@ from omegaconf import OmegaConf
 from pydantic import BaseModel, Field
 
 from ..memory import MemoryStore
-from ..prompts import OPTIMIZABLE_PROMPTS
+from src.llm.prompts import OPTIMIZABLE_PROMPTS
 from . import prompt_store
 from .optimizer import build_optimizer
 from .safety import filter_learnable
 
-from ..llm import chat
+from src.llm.llm import chat
 
 _cfg = OmegaConf.load("config.yml")
 _MODEL = _cfg.get("model", {}).get("name", "gpt-4o-mini")

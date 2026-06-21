@@ -1,7 +1,7 @@
 """/compact + статус-бар контекста + COMPACT.md (кумулятивный). Offline (без LLM)."""
 import pytest
 
-import src.compact as cp
+import src.interface.compact as cp
 
 
 @pytest.fixture

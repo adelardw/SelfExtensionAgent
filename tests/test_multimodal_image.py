@@ -3,7 +3,7 @@ import base64
 import os
 import tempfile
 
-import src.agent as A
+import src.graph.agent as A
 
 _PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M8AAAMBAQDJ/1eYAAAAAElFTkSuQmCC")
@@ -38,7 +38,7 @@ def test_human_msg_reads_state_image_paths():
 
 def test_vision_supported_flag_override(monkeypatch):
     """vision_supported: явный флаг vision_direct перебивает запомненные модальности."""
-    import src.llm as L
+    import src.llm.llm as L
 
     monkeypatch.setattr(L, "_cli_override", lambda k, d=None: True if k == "vision_direct" else d)
     assert L.vision_supported() is True
@@ -49,7 +49,7 @@ def test_vision_supported_flag_override(monkeypatch):
 def test_modalities_from_openrouter_and_cache(monkeypatch):
     """Модальности берутся из OpenRouter /models; vision_supported читает ЗАПОМНЕННЫЙ кэш модели."""
     import json
-    import src.llm as L
+    import src.llm.llm as L
 
     payload = {"data": [
         {"id": "google/gemini-x", "architecture": {"input_modalities": ["text", "image", "audio"]}},

@@ -58,7 +58,7 @@ def _agent_patch(ins: dict) -> str:
                        capture_output=True, timeout=300)
         subprocess.run(["git", "checkout", commit], cwd=work, capture_output=True, timeout=60)
 
-        import src.agent as A
+        import src.graph.agent as A
         from langgraph.checkpoint.memory import MemorySaver
 
         graph = A.build_graph(MemorySaver())

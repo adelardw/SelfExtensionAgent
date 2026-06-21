@@ -5,8 +5,9 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from src import hitl, interaction, semantics
-from src.semantics import parse_assent
+from src.runtime import hitl
+from src.interface import interaction, semantics
+from src.interface.semantics import parse_assent
 
 
 @pytest.fixture(autouse=True)
@@ -141,7 +142,7 @@ def test_plain_yes_and_bool_compat():
 
 # ── CLI-конфиг: local поверх базового, запись только в local ────────────────
 def test_cli_config_merge_and_persist(monkeypatch, tmp_path):
-    from src import cli_config as cc
+    from src.config import cli_config as cc
     base = tmp_path / "config.yml"
     base.write_text("agent:\n  habit_k: 3\ncli:\n  provider: openrouter\n", encoding="utf-8")
     monkeypatch.setattr(cc, "BASE", base)

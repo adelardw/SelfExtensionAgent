@@ -11,7 +11,7 @@ needs_key = pytest.mark.skipif(
 
 @needs_key
 def test_heavy_routing():
-    from src.agent import (
+    from src.graph.agent import (
         MAX_REVISIONS,
         route_after_goal,
         route_after_reflexion,
@@ -44,7 +44,7 @@ def test_heavy_routing():
 
 @needs_key
 def test_review_node_in_graph():
-    from src.agent import build_graph
+    from src.graph.agent import build_graph
 
     nodes = set(build_graph().get_graph().nodes)
     assert "review" in nodes
@@ -82,7 +82,7 @@ def test_llm_tiers():
     чтобы тест не падал при смене моделей в конфиге."""
     from omegaconf import OmegaConf
 
-    from src.llm import model_for
+    from src.llm.llm import model_for
 
     cfg = OmegaConf.load("config.yml")
     assert model_for("fast") == cfg.model.name

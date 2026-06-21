@@ -1,6 +1,6 @@
 """Согласованность реестра обучаемых промптов и карты OPTIMIZABLE."""
 from src.improve.graph_learn import OPTIMIZABLE
-from src.prompts import OPTIMIZABLE_PROMPTS, step_execution_system_prompt
+from src.llm.prompts import OPTIMIZABLE_PROMPTS, step_execution_system_prompt
 
 
 def test_optimizable_roles_have_defaults():

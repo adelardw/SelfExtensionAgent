@@ -15,7 +15,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from ..llm import chat
+from src.llm.llm import chat
 from ..memory import MemoryStore, build_embedder
 
 TASKS = json.loads((Path(__file__).parent / "tasks.json").read_text(encoding="utf-8"))
@@ -101,7 +101,7 @@ def _chart(baseline: dict, improved: dict) -> str:
 
 async def experiment() -> dict:
     """baseline → оптимизация промпта по TRAIN-failures → re-eval → дельта на TEST + график."""
-    import src.agent as A
+    import src.graph.agent as A
     from src.improve import prompt_store, SelfLearningPipe
 
     # изоляция: временная память + временный ParamStore (не пачкаем боевые)

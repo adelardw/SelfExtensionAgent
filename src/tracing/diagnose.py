@@ -48,7 +48,7 @@ def diagnose(memory_store=None, user_id: str = "default", since_hours: float = 2
     # Тихие деградации (broad-except fallback'и) этого процесса — делаем НАБЛЮДАЕМЫМИ (долг #5):
     # частые reflexion_failed/decompose_failed/step_validation_skipped = системный сбой, агент
     # молча тупеет (напр. кончился ключ эмбеддера), а не падает.
-    from .. import degradation
+    from src.runtime import degradation
     degr = degradation.snapshot()
     if degr:
         findings.append(f"Тихие деградации (fallback'и) за процесс: {degr} "

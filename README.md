@@ -418,7 +418,7 @@ sea key | provider | config              # configure key/provider (global) — s
 sea --version | --help
 # other surfaces:
 .venv/bin/python bot.py                  # Telegram bot
-uvicorn src.server:app --port 8000       # HTTP API (the GUI talks to this)
+uvicorn src.interface.server:app --port 8000       # HTTP API (the GUI talks to this)
 python desktop.py                        # native desktop window (uv sync --group gui)
 #   packaged desktop: dist/SEA.app (build_binary.py --app) → Launchpad
 ```
@@ -997,7 +997,7 @@ sea key | provider | config              # настройка ключа/про�
 sea --version | --help
 # другие поверхности:
 .venv/bin/python bot.py                  # Telegram-бот
-uvicorn src.server:app --port 8000       # HTTP API (с ним говорит GUI)
+uvicorn src.interface.server:app --port 8000       # HTTP API (с ним говорит GUI)
 python desktop.py                        # нативное десктоп-окно (uv sync --group gui)
 #   упакованный десктоп: dist/SEA.app (build_binary.py --app) → Launchpad
 ```

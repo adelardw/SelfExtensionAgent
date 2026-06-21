@@ -68,7 +68,7 @@ needs_key = pytest.mark.skipif(
 def test_decompose_zero_llm_on_high_sim_recipe(monkeypatch, tmp_path):
     """sim ≥ 0.7 → план из рецепта БЕЗ LLM-вызова decompose (артефакт ЗАМЕНЯЕТ работу)."""
     import asyncio
-    import src.agent as A
+    import src.graph.agent as A
 
     s = MemoryStore(str(tmp_path / "memory.db"))
     rid = s.add_recipe("u1", Q, ["file_operations"], PLAN)

@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-from src import clarify
+from src.interface import clarify
 
 
 @pytest.fixture(autouse=True)
@@ -83,7 +83,7 @@ def test_ask_user_tool_records_to_ledger():
     reason="нужен API-ключ (llm на импорте agent)",
 )
 def test_routing_clarify_gate():
-    from src.agent import route_after_goal
+    from src.graph.agent import route_after_goal
 
     assert route_after_goal({"mode": "deliberate", "needs_clarify_gate": True}) == "clarify_gate"
     assert route_after_goal({"mode": "deliberate", "needs_clarify_gate": False}) == "router"
@@ -95,7 +95,7 @@ def test_routing_clarify_gate():
 def test_ask_user_options_fullwidth_pipe():
     """Модель разделила варианты полноширинной «｜» — живой тест слепил их в один маркер."""
     import asyncio
-    from src import clarify
+    from src.interface import clarify
 
     seen = {}
     def fake_clarifier(items):

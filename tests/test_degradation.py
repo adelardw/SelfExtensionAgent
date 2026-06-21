@@ -2,7 +2,7 @@
 Видимость тихих деградаций (долг ревью #5): broad-except fallback'и зовут degradation.note(),
 общий счётчик виден через snapshot()/total() и всплывает в /diagnose.
 """
-from src import degradation
+from src.runtime import degradation
 
 
 def test_note_counts_and_resets():

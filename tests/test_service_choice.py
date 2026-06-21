@@ -13,7 +13,7 @@ needs_key = pytest.mark.skipif(
 def test_act_prompt_has_service_choice_rules():
     """Инварианты act-промпта: выбор сервиса (память → сам → назвать в итоге) и
     подсказка вариантов; необратимое — только через ask_user."""
-    from src.prompts import act_system_prompt
+    from src.llm.prompts import act_system_prompt
     for marker in ("ВЫБОР СЕРВИСА", "ПОДСКАЗЫВАЙ ВАРИАНТЫ", "ask_user"):
         assert marker in act_system_prompt, f"потеряно правило: {marker}"
 
@@ -22,7 +22,7 @@ def test_extraction_prompt_learns_service_preference():
     """Контур замкнут: extraction знает категорию «сервисные предпочтения» (явные и
     неявные — агент выбрал, юзер не возразил)."""
     text = "".join(str(m.prompt.template) for m in
-                   __import__("src.prompts", fromlist=["memory_extraction_prompt"])
+                   __import__("src.llm.prompts", fromlist=["memory_extraction_prompt"])
                    .memory_extraction_prompt.messages)
     assert "СЕРВИСНЫЕ ПРЕДПОЧТЕНИЯ" in text
     assert "сервис: <домен>" in text
@@ -46,7 +46,7 @@ def test_research_is_headless_play_is_physical():
     ЧТЕНИЕ/анализ/поиск → ТОЛЬКО headless web_search (физ-вкладка не открывается, фокус не
     крадётся). ВОСПРОИЗВЕДЕНИЕ/действие на сайте → физ-руки (browser_control). Гейт рук, не
     маршрутизация режима."""
-    from src.agent import _skills_for_act, _PHYSICAL_SKILLS
+    from src.graph.agent import _skills_for_act, _PHYSICAL_SKILLS
     research = _skills_for_act("найди обзоры наушников и перечисли варианты")
     assert "web_search" in research
     assert not (_PHYSICAL_SKILLS & set(research))  # анализ — без физ-навыков (без кражи фокуса)
@@ -56,7 +56,7 @@ def test_research_is_headless_play_is_physical():
 
 def test_reflexion_prompt_routes_browse_to_act():
     """Принцип browse=act и grounding-честность зашиты в reflexion-промпт (не в регулярку)."""
-    from src.prompts import reflexion_prompt
+    from src.llm.prompts import reflexion_prompt
     text = "".join(str(m.prompt.template) for m in reflexion_prompt.messages)
     assert "BROWSE = тоже act" in text
     assert "grounding" in text.lower()
@@ -65,11 +65,11 @@ def test_reflexion_prompt_routes_browse_to_act():
 def test_validator_flags_hallucination_semantically():
     """Ложный отказ «нет доступа», мета-заглушку и ложь о завершении ловит финальный LLM-валидатор
     СЕМАНТИЧЕСКИ (флаги схемы + инструкция в промпте, любой язык) — вместо русско-центричных регэкспов."""
-    from src.structured_outputs import ValidationResult
+    from src.llm.structured_outputs import ValidationResult
     f = ValidationResult.model_fields
     for flag in ("false_refusal", "meta_stub", "false_completion"):
         assert flag in f and f[flag].default is False
-    from src.prompts import validation_prompt
+    from src.llm.prompts import validation_prompt
     text = "".join(str(m.prompt.template) for m in validation_prompt.messages)
     assert "false_refusal" in text and "meta_stub" in text
     # false_completion опирается на структурный сигнал run_status (incomplete/complete)
@@ -80,7 +80,7 @@ def test_paywall_embedding_contrastive_mechanism():
     """paywall — embedding-классификатор (любой язык), не регэксп: контраст pos/neg seed'ов.
     Подставной эмбеддер (без сети): текст ближе к pos-seed'ам → True, к neg → False; нет
     эмбеддера → False (не блокируем play по догадке)."""
-    from src.semantic_signals import _PaywallEmbed
+    from src.graph.semantic_signals import _PaywallEmbed
 
     # paywall-маркеры из pos-seed'ов (любой язык) → вектор [1,0]; иначе → [0,1]. cosine разводит.
     _PAY = ("subscri", "suscrip", "подписк", "member", "멤버", "войдите", "登录", "订阅",
@@ -109,7 +109,7 @@ def test_paywall_embedding_contrastive_mechanism():
 
 def test_degenerate_repetition_detected():
     """Анти-галлюцинация: вырожденный повтор («I'm Sorry» ×58) ловится как мусор."""
-    from src.agent import _is_degenerate
+    from src.graph.agent import _is_degenerate
     assert _is_degenerate("\n".join(f"{i}. I'm Sorry (I'm Sorry) (I'm Sorry)" for i in range(58)))
     # нормальный разнообразный список — НЕ вырожденный
     tracks = ["Purple Hearts In Her Eyes — Sewerslvt", "everything theory — suicore",
@@ -121,7 +121,7 @@ def test_degenerate_repetition_detected():
 @needs_key
 def test_service_domain_extraction():
     """Домен сервиса достаётся из снапшотов browser_* (location.href в шапке)."""
-    from src.agent import _service_domain
+    from src.graph.agent import _service_domain
     snap = ('Страница: "Imagine Dragons" · https://music.yandex.ru/search?text=x\n'
             "  [0] button: Слушать")
     assert _service_domain(snap) == "music.yandex.ru"
@@ -136,7 +136,7 @@ def test_act_confirmed_play_mentions_service(monkeypatch):
     площадки, extraction копит предпочтение."""
     import asyncio
     from langchain_core.messages import AIMessage
-    import src.agent as A
+    import src.graph.agent as A
 
     async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
         ai = AIMessage(content="", tool_calls=[
@@ -177,7 +177,7 @@ def test_skill_md_has_payment_boundary():
 
 def test_anti_typosquat_url_correction():
     """Безопасность: близкий-но-другой домен (тайпсквоттинг) правится на ТОЧНЫЙ пользовательский."""
-    from src import browser_bridge as br
+    from src.browser import browser_bridge as br
     br.set_user_domains("закажи суши с сайта https://niyama.ru/ любой набор")
     assert br.safe_url("https://niama.ru/menu") == "https://niyama.ru/menu"   # тайпсквот → точный
     assert br.safe_url("https://niyama.ru/cart") == "https://niyama.ru/cart"  # точный — без изменений
@@ -188,6 +188,6 @@ def test_anti_typosquat_url_correction():
 
 def test_router_blocks_skill_creation_for_browser():
     """Орк-фикс: физический веб → use_skills (browser_control), НИКОГДА create_skill (+uv-инсталл)."""
-    from src.prompts import router_prompt
+    from src.llm.prompts import router_prompt
     text = "".join(str(m.prompt.template) for m in router_prompt.messages)
     assert "ФИЗИЧЕСКИЙ ВЕБ" in text and "НИКОГДА 'create_skill'" in text

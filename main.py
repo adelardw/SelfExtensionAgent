@@ -32,7 +32,7 @@ def _frozen_bootstrap() -> None:
     положить туда дефолтный config.yml из бандла (иначе относительные data/, config.local.yml падают
     при запуске с read-only cwd, напр. из Launchpad). ДОЛЖЕН отработать ДО тяжёлых импортов (они
     грузят config.yml/создают data/). Из исходников — no-op. Общая логика с desktop.py."""
-    from src.config_paths import bootstrap_frozen
+    from src.config.config_paths import bootstrap_frozen
     bootstrap_frozen()
 
 
@@ -41,25 +41,25 @@ _frozen_bootstrap()  # до импорта src.agent (он читает config.y
 # Мгновенный фидбек: тяжёлые импорты (langchain/langgraph/модели/навыки) занимают пару
 # секунд — показываем это сразу, чтобы старт не выглядел зависшим.
 with console.status("[cyan]🔥 Прогрев агента (первый запуск дольше — грузятся модели и навыки)…"):
-    from src.agent import config, memory_store, rebuild_llms
+    from src.graph.agent import config, memory_store, rebuild_llms
     # ЭКСПЕРИМЕНТ (флаг experimental.composer): мета-контроллер компонует примитивы
     # вместо выбора 1 из 6 режимов. Изолировано в src/agent_experimental.py; рабочий граф
     # используется по умолчанию.
     if config.get("experimental", {}).get("composer"):
-        from src.agent_experimental import build_graph
+        from src.graph.agent_experimental import build_graph
         console.print("[yellow]⚗  experimental.composer: ON — мета-контроллер примитивов[/]")
     else:
-        from src.agent import build_graph
-    from src.clarify import set_clarifier
-    from src.hitl import set_confirmer
-    from src.llm import active_summary, set_provider
+        from src.graph.agent import build_graph
+    from src.interface.clarify import set_clarifier
+    from src.runtime.hitl import set_confirmer
+    from src.llm.llm import active_summary, set_provider
     from src.media import (AUDIO_EXTS, DOC_EXTS, IMAGE_EXTS, TEXT_EXTS,
                            attachment_context, transcribe_audio)
-    from src.knowledge_base import (add_document_async, add_session_file, create_folder,
+    from src.data.knowledge_base import (add_document_async, add_session_file, create_folder,
                                     list_kb, clear_session, search_kb_async)
-    from src.progress import stream_with_progress
+    from src.interface.progress import stream_with_progress
     from src.tracing import diagnose, trace_store
-    from src.usage import TokenTracker, add_alltime, cost_of, load_alltime
+    from src.llm.usage import TokenTracker, add_alltime, cost_of, load_alltime
 
 # Ссылка на активный спиннер прогресса. Запрос ввода (HITL-подтверждение, уточнения)
 # ДОЛЖЕН останавливать спиннер: Rich Live владеет терминалом и затирает строку ввода,
@@ -158,13 +158,13 @@ async def make_checkpointer():
 
 
 # Океан-спиннер (бегущая волна) для индикации размышления — регистрируем один раз на процесс.
-from src import cli_art as _cli_art
+from src.interface import cli_art as _cli_art
 _OCEAN_SPINNER = _cli_art.register_ocean_spinner()
 
 
 def banner() -> None:
-    from src import hitl
-    from src.cli_config import get_cli
+    from src.runtime import hitl
+    from src.config.cli_config import get_cli
 
     legend = "  ".join(f"[{st}]{lbl}[/]" for lbl, st in MODE_STYLE.values())
     work = WORK_LABEL.get(hitl.work_mode(), hitl.work_mode())
@@ -186,7 +186,7 @@ def banner() -> None:
     from rich.align import Align
     from rich.console import Group
     from rich.table import Table
-    from src import cli_art
+    from src.interface import cli_art
     cli_art.shimmer_logo(console, transient=True)  # перелив проигрывается и ГАСНЕТ
     # ВЫСОТА ПАНЕЛИ = высоте [лого + Ика] (явное требование юзера). expand=True → на всю ширину
     # терминала + рефлоу. Текст внутри ВЫРОВНЕН ПО ЦЕНТРУ (Align middle), чтобы пустота не висела
@@ -299,7 +299,7 @@ def _k(n: int) -> str:
 
 
 def cmd_model(args: list[str]) -> None:
-    from src.cli_config import set_cli
+    from src.config.cli_config import set_cli
 
     if not args:
         console.print(f"Активно: [cyan]{active_summary()}[/]")
@@ -449,7 +449,7 @@ async def _repl_clarify(items: list[dict]) -> list[str]:
     резюме ответов и САБМИТ (Enter — отправить, номер — поправить ответ).
     В auto-режиме агент автономен целиком: вопросы не задаются, развилки решает сам
     (разумные допущения, в финале пометит «исходил из того, что…»)."""
-    from src import hitl
+    from src.runtime import hitl
     if hitl.full_auto():
         console.print("[dim]⚡ auto: уточнения не задаю — беру разумные допущения[/]")
         return []
@@ -488,7 +488,7 @@ def _fmt_age(ts: float) -> str:
 
 def cmd_chats(user_id: str, favorites_only: bool = False) -> list[dict]:
     """Показать список чатов (тредов) и вернуть его — номер строки = выбор для /chats N."""
-    from src import chat_store
+    from src.interface import chat_store
     rows = chat_store.list_threads(user_id, limit=30, favorites_only=favorites_only)
     if not rows:
         console.print("[dim]Пока нет сохранённых чатов. Начни диалог — он появится тут.[/]")
@@ -515,8 +515,8 @@ async def _compress_thread(thread_id: str) -> str | None:
     """Сжать полную историю треда в плотное саммари-индекс (память для продолжения),
     сохранить в chat_store; полная история в messages остаётся (саммари = индекс на неё)."""
     from langchain_core.messages import SystemMessage, HumanMessage
-    from src import chat_store
-    from src.agent import llm
+    from src.interface import chat_store
+    from src.graph.agent import llm
     msgs = chat_store.get_messages(thread_id)
     if len(msgs) < 4:
         return None
@@ -535,8 +535,8 @@ async def _compress_thread(thread_id: str) -> str | None:
 async def _do_compact(thread_id: str, chat_history: list, auto: bool = False) -> tuple[int, list]:
     """/compact: сжать сессию в COMPACT.md (репрезентативно, кумулятивно), оставив последний
     скоуп. Возвращает (новый счётчик контекста, новый chat_history)."""
-    from src import chat_store, compact as _cp
-    from src.agent import llm
+    from src.interface import chat_store, compact as _cp
+    from src.graph.agent import llm
     msgs = chat_store.get_messages(thread_id)
     if len(msgs) < 2 and len(chat_history) < 2:
         console.print("[dim]Контекст ещё мал для сжатия.[/]")
@@ -566,9 +566,9 @@ async def _do_sync() -> None:
     """/sync: перестроить SEA.md из накопленного COMPACT.md (+ свежий скан репо), сверка.
     develop.md НЕ перезаписываем (курируемый) — дописываем отметку сверки."""
     import time
-    from src import compact as _cp
-    from src.agent import llm
-    from src.sea_workspace import scan_repo
+    from src.interface import compact as _cp
+    from src.graph.agent import llm
+    from src.runtime.sea_workspace import scan_repo
     compact_text = _cp.read_compact()
     if not compact_text.strip():
         console.print("[dim]COMPACT.md пуст — сначала /compact (сжать контекст), затем /sync.[/]")
@@ -617,7 +617,7 @@ async def cmd_kb(args: list[str], user_id: str) -> None:
         # Граф стоит денег (LLM-извлечение сущностей на каждый чанк) — прикидываем цену и
         # спрашиваем ДО запуска (HITL). Отказ ≠ отмена: документ ляжет в бесплатный BM25.
         use_graph = False
-        from src.lightrag_engine import estimate_index_cost, lightrag_available
+        from src.data.lightrag_engine import estimate_index_cost, lightrag_available
         if lightrag_available():
             from src.media import read_file
             text = await asyncio.to_thread(read_file, path, 200_000)
@@ -625,7 +625,7 @@ async def cmd_kb(args: list[str], user_id: str) -> None:
             console.print(f"[yellow]⚖ граф LightRAG: ~{est['chunks']} чанков, "
                           f"~{est['calls']} LLM-вызовов, ≈ ${est['usd']:.3f}[/]")
             ans = await _paused_input("Индексировать в граф? (да / нет — тогда только бесплатный BM25): ")
-            from src.semantics import parse_assent
+            from src.interface.semantics import parse_assent
             use_graph = parse_assent(ans)[0] is True
         if use_graph:
             console.print("[dim]индексирую в граф LightRAG…[/]")
@@ -649,14 +649,14 @@ _FORCE_MODES = ("fast", "reason", "act", "deliberate", "heavy")
 async def cmd_config() -> None:
     """Панель настроек CLI: видно текущий режим работы, меняется по номеру, персистится
     в config.local.yml (мердж поверх config.yml) и применяется сразу."""
-    from src import hitl
-    from src.cli_config import get_cli, set_cli
+    from src.runtime import hitl
+    from src.config.cli_config import get_cli, set_cli
 
     while True:
         force = (get_cli("force_mode") or "").strip() or "auto"
         force_lbl = "авто — агент решает сам" if force == "auto" else MODE_STYLE.get(force, (force,))[0]
         allow = list(get_cli("allow") or [])
-        from src.llm import api_key_source
+        from src.llm.llm import api_key_source
         base_url = get_cli("base_url") or "openrouter (по умолчанию)"
         rows = [
             f"[cyan]1[/]. Модель: [bold]{active_summary()}[/]",
@@ -695,7 +695,7 @@ async def cmd_config() -> None:
                 console.print(f"   режим: {mode or 'auto'} [dim](сохранено)[/]")
         elif pick == "4":
             raw = (await _paused_input("   очистить все гранты? (да/нет) › ")).strip()
-            from src.semantics import parse_assent
+            from src.interface.semantics import parse_assent
             if parse_assent(raw)[0] is True:
                 set_cli("allow", [])
                 hitl.clear_grants()
@@ -708,8 +708,8 @@ async def cmd_config() -> None:
 async def cmd_provider_settings() -> None:
     """Настройки провайдера: API-ключ и endpoint (base_url) редактируются ИЗ интерфейса и
     персистятся в config.local.yml. Живая валидация ключа. env-ключ имеет приоритет."""
-    from src.cli_config import get_cli, set_cli
-    from src.llm import api_key_source, validate_credentials
+    from src.config.cli_config import get_cli, set_cli
+    from src.llm.llm import api_key_source, validate_credentials
 
     while True:
         base_url = get_cli("base_url") or "https://openrouter.ai/api/v1 (по умолчанию)"
@@ -768,8 +768,8 @@ async def main():
     set_clarifier(_repl_clarify)
     # CLI-настройки из config.local.yml (мердж поверх config.yml): модель, auto-режим,
     # гранты «да, всегда» — всё, что менялось из CLI, применяется автоматически.
-    from src import hitl
-    from src.cli_config import get_cli
+    from src.runtime import hitl
+    from src.config.cli_config import get_cli
     prov = get_cli("provider")
     if prov == "ollama":
         set_provider("ollama", get_cli("model"))
@@ -782,7 +782,7 @@ async def main():
     # Мост к браузерному расширению (агент в ТВОЁМ браузере). Токен — для разовой
     # настройки расширения (side panel).
     try:
-        from src import browser_bridge
+        from src.browser import browser_bridge
         browser_bridge.ensure_server()
         await asyncio.sleep(0.4)  # дать серверу привязать порт перед сообщением
         if browser_bridge._serving:
@@ -792,13 +792,13 @@ async def main():
             console.print(f"[dim]   Расширение (физический веб + чат из браузера): "
                           f"chrome://extensions → Developer mode → Load unpacked → папка "
                           f"extension/ ; токен в боковую панель:[/] [cyan]{browser_bridge.token()}[/]")
-            from src.cli_config import set_cli as _sc
+            from src.config.cli_config import set_cli as _sc
             _sc("browser_bridge_seen", True)
     except Exception as e:  # noqa: BLE001
         print(f"[bridge] не поднялся: {e}")
     async with make_checkpointer() as checkpointer:
         graph = build_graph(checkpointer)
-        from src import chat_store
+        from src.interface import chat_store
         thread_id = str(uuid.uuid4())
         user_id = "local"
         chat_history: list[dict] = []
@@ -813,7 +813,7 @@ async def main():
         ext_history: list[dict] = []  # НАКОПИТЕЛЬНАЯ история панели (как в REPL) — контекст не теряется
 
         async def _ext_chat(text: str) -> str:
-            from src.cli_config import get_cli as _gc
+            from src.config.cli_config import get_cli as _gc
             tracker = TokenTracker()  # расход токенов чата расширения — виден в панели И в CLI
             res = await graph.ainvoke(
                 {"query": text, "user_id": user_id, "session_id": ext_thread,
@@ -847,7 +847,7 @@ async def main():
             # Статус режима у правого края строки ввода. ЗАКРЫТУЮ рамку вокруг ЖИВОГО ввода в
             # line-mode сделать нельзя (низ рисуется только после Enter; bottom_toolbar ломал
             # raw-режим) → для настоящего бокса нужен full-screen TUI (Application/Textual, TODO).
-            from src import hitl as _h
+            from src.runtime import hitl as _h
             m = _h.work_mode()
             col = {"auto": "ansiyellow", "auto-accept": "ansigreen",
                    "manual": "ansiblue", "plan": "ansimagenta"}.get(m, "ansigray")
@@ -927,7 +927,7 @@ async def main():
                 continue
             if low in ("/init", "init"):
                 # Bootstrap воркспейса прямо из REPL (паритет с `sea init` из шелла; как /init у claude).
-                from src.sea_workspace import init as _sea_init
+                from src.runtime.sea_workspace import init as _sea_init
                 created = _sea_init()
                 if created:
                     console.print("[green]✓ Воркспейс инициализирован:[/]\n  " + "\n  ".join(created))
@@ -940,8 +940,8 @@ async def main():
             if low in ("/config", "/settings", "config"):
                 await cmd_config(); continue
             if low.startswith("/auto"):
-                from src import hitl
-                from src.cli_config import set_cli
+                from src.runtime import hitl
+                from src.config.cli_config import set_cli
                 arg = (query.split()[1:] or ["auto"])[0].lower()
                 m = {"off": "manual", "0": "manual", "выкл": "manual", "ask": "manual",
                      "accept": "auto-accept", "edit": "auto-accept", "edit-auto": "auto-accept",
@@ -958,7 +958,7 @@ async def main():
             if low.startswith("/model"):
                 cmd_model(query.split()[1:]); continue
             if low.startswith("/backend"):
-                from src.cli_config import get_cli, set_cli
+                from src.config.cli_config import get_cli, set_cli
                 arg = (query.split()[1:] or [""])[0].lower()
                 if arg in ("extension", "puppeteer", "hybrid", "window"):
                     set_cli("browser_backend", arg)
@@ -1001,7 +1001,7 @@ async def main():
                         spent = tracker.total - pre_in - pre_out
                         status.update(f"[cyan]{label}[/] [dim]· 🧮 {_k(spent)} tok[/]")
 
-                    from src.cli_config import get_cli as _get_cli
+                    from src.config.cli_config import get_cli as _get_cli
                     # В auto агент автономен ЦЕЛИКОМ: тип мышления выбирает сам (фиксация
                     # из /config действует только в ручном режиме).
                     _force = "" if hitl.full_auto() else (_get_cli("force_mode") or "")
@@ -1034,7 +1034,7 @@ async def main():
                 console.print(f"[dim]🧮 токены: {_k(di)} in + {_k(do)} out = {_k(di+do)} "
                               f"(~${cost_of(di, do):.4f}) · сессия {_k(tracker.total)} · /usage[/]")
                 # /compact: статус-бар занятости контекста (кумулятив сессии) + авто-сжатие на 1M.
-                from src import compact as _cp
+                from src.interface import compact as _cp
                 _ctx_tokens += _cp.estimate_tokens(query) + _cp.estimate_tokens(answer)
                 console.print(_cp.context_status(_ctx_tokens))
                 if _cp.should_auto_compact(_ctx_tokens):
@@ -1051,15 +1051,15 @@ async def run_once(task: str, auto: bool = False) -> int:
     Уточнения → разумные допущения (clarifier не регистрируется); подтверждения — по
     конфигу/грантам, --auto включает auto-accept на этот запуск. Ответ — в stdout,
     exit code 0/1 — решена ли задача (для пайплайнов)."""
-    from src import hitl
-    from src.cli_config import get_cli
+    from src.runtime import hitl
+    from src.config.cli_config import get_cli
 
     hitl.load_grants(get_cli("allow") or [])
     # Мост браузера поднимаем и в автоматизированном пути: расширение успевает подключиться за
     # время прогона, и агент может (а) играть музыку/видео, (б) ФОНОВО открыть итоговую ссылку
     # после анализа (критерий «сам открыть наиболее подходящую вкладку»). Идемпотентно.
     try:
-        from src import browser_bridge
+        from src.browser import browser_bridge
         browser_bridge.ensure_server()
     except Exception:  # noqa: BLE001
         pass

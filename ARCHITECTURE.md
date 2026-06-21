@@ -176,7 +176,7 @@ channel they confirm through, and how they stream progress.
   scans the repo into `SEA.md`. From the project root the agent picks up convention files —
   `SEA.md` (instructions), `MEMORY.md` (project memory index), `MCP.md` (user MCP registry),
   `SKILL.md` (external skills) — via `src/context_files.py`.
-- **Desktop** — `desktop.py` spawns `uvicorn src.server:app` in a daemon thread and opens a native
+- **Desktop** — `desktop.py` spawns `uvicorn src.interface.server:app` in a daemon thread and opens a native
   OS window (`pywebview`, system webview, no Electron) at `http://127.0.0.1:<port>/`. The server
   builds the **same graph** and serves `/` (web UI), `/chat`→`/run/{id}` (background run via
   `astream`, per-node progress), the extension chat endpoint, and HITL over the web
@@ -196,7 +196,7 @@ edit/bash) is a global capability; run-budget is task-aware (code/action tasks g
 
 ## CLI commands
 
-- `uvicorn src.server:app` — API (chat/diagnose/memory/traces).
+- `uvicorn src.interface.server:app` — API (chat/diagnose/memory/traces).
 - `python -m src.improve --graph` — backward over the graph (credit assignment + per-node optimization).
 - `python -m src.tracing` — self-diagnosis.
 - `python -m src.maintenance` — dependency auto-update.
@@ -416,7 +416,7 @@ HITL подтверждают и как стримят прогресс.
   репо в `SEA.md`. Из корня проекта агент подцепляет файлы-конвенции — `SEA.md` (инструкции),
   `MEMORY.md` (индекс проектной памяти), `MCP.md` (реестр MCP), `SKILL.md` (внешние навыки) — через
   `src/context_files.py`.
-- **Десктоп** — `desktop.py` поднимает `uvicorn src.server:app` в daemon-потоке и открывает нативное
+- **Десктоп** — `desktop.py` поднимает `uvicorn src.interface.server:app` в daemon-потоке и открывает нативное
   окно ОС (`pywebview`, системный webview, без Electron) на `http://127.0.0.1:<port>/`. Сервер
   строит **тот же граф** и отдаёт `/` (web-UI), `/chat`→`/run/{id}` (фоновый прогон через `astream`,
   прогресс по нодам), чат-эндпоинт расширения и HITL через веб (`_server_clarifier`/`_server_confirmer`).
@@ -435,7 +435,7 @@ edit/bash) — глобальная способность; бюджет про�
 
 ## CLI команды
 
-- `uvicorn src.server:app` — API (chat/diagnose/memory/traces).
+- `uvicorn src.interface.server:app` — API (chat/diagnose/memory/traces).
 - `python -m src.improve --graph` — backward по графу (credit assignment + per-node оптимизация).
 - `python -m src.tracing` — самодиагностика.
 - `python -m src.maintenance` — авто-апдейт зависимостей.

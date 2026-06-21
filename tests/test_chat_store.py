@@ -8,7 +8,7 @@ import pytest
 @pytest.fixture()
 def cs(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_CHATS_DB", str(tmp_path / "chats.db"))
-    import src.chat_store as m
+    import src.interface.chat_store as m
     importlib.reload(m)        # пере-инициализировать с временной БД
     m._conn = None
     yield m

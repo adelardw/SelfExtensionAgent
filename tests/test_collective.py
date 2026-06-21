@@ -2,7 +2,7 @@
 защиты от отравы/чужих профилей. Офлайн, без LLM."""
 import pytest
 
-from src import collective
+from src.search import collective
 from src.memory.store import MemoryStore
 
 Q = "собери еженедельный отчёт по продажам из excel в pdf"

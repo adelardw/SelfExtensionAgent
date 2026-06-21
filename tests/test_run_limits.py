@@ -1,6 +1,6 @@
 """Бюджет прогона ПО ТИПУ ЗАДАЧИ (полировка ядра): код/агентные задачи получают ×mult,
 простой research — базовый. КЛЮЧЕВОЕ: research НЕ трогается → GAIA не регрессирует by construction."""
-import src.agent as a
+import src.graph.agent as a
 
 
 def test_research_keeps_base_budget():

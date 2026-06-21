@@ -2,7 +2,7 @@
 (аддитивно), после init пишет/читает решения. Offline."""
 import pytest
 
-import src.sea_workspace as sw
+import src.runtime.sea_workspace as sw
 
 
 @pytest.fixture

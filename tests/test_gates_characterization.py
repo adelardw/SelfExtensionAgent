@@ -7,8 +7,8 @@
 """
 import itertools
 
-from src.semantic_signals import is_degenerate, is_paywall, _PaywallEmbed, _PAYWALL_POS
-from src.agent import _strip_ungrounded_urls
+from src.graph.semantic_signals import is_degenerate, is_paywall, _PaywallEmbed, _PAYWALL_POS
+from src.graph.agent import _strip_ungrounded_urls
 
 # 60 различных слов БЕЗ цифр (is_degenerate срезает цифры, иначе word0..word59 → одно «word»)
 _VARIED = " ".join("".join(p) for p in itertools.islice(itertools.product("abcdefgh", repeat=2), 60))
@@ -72,14 +72,14 @@ class _MembershipEmb:
 
 
 def test_is_error_page_contrast():
-    from src.semantic_signals import _ContrastiveSignal, _ERROR_POS, _ERROR_NEG
+    from src.graph.semantic_signals import _ContrastiveSignal, _ERROR_POS, _ERROR_NEG
     det = _ContrastiveSignal(_ERROR_POS, _ERROR_NEG, embedder=_MembershipEmb(_ERROR_POS, _ERROR_NEG))
     assert det.fires(_ERROR_POS[0], 0.55, 0.05) is True      # «404 not found» → ошибка
     assert det.fires(_ERROR_NEG[0], 0.55, 0.05) is False     # «now playing» → не ошибка
 
 
 def test_is_media_playing_contrast():
-    from src.semantic_signals import _ContrastiveSignal, _MEDIA_POS, _MEDIA_NEG
+    from src.graph.semantic_signals import _ContrastiveSignal, _MEDIA_POS, _MEDIA_NEG
     det = _ContrastiveSignal(_MEDIA_POS, _MEDIA_NEG, embedder=_MembershipEmb(_MEDIA_POS, _MEDIA_NEG))
     assert det.fires(_MEDIA_POS[1], 0.55, 0.05) is True       # «звук играет» → играет
     assert det.fires(_MEDIA_NEG[0], 0.55, 0.05) is False      # «paused» → не играет

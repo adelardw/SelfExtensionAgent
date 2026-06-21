@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-import src.knowledge_base as KB
+import src.data.knowledge_base as KB
 
 
 @pytest.fixture(autouse=True)
 def _force_bm25(monkeypatch):
     # Офлайн: форсируем BM25-фолбэк (LightRAG требует сети/ключа). Граф-путь тестируется живьём.
-    import src.lightrag_engine as LR
+    import src.data.lightrag_engine as LR
     monkeypatch.setattr(LR, "lightrag_available", lambda: False)
 
 
@@ -108,7 +108,7 @@ def test_raw_search_structured_none(monkeypatch, tmp_path):
 def test_autorag_cheap_path_skips_graph(monkeypatch, tmp_path):
     """use_graph=False (авто-впрыск recall на каждый запрос) не дёргает LightRAG вовсе."""
     import asyncio
-    import src.lightrag_engine as LR
+    import src.data.lightrag_engine as LR
     monkeypatch.setattr(KB, "_KB_ROOT", tmp_path / "kb")
 
     async def _boom(*a, **kw):
@@ -121,7 +121,7 @@ def test_autorag_cheap_path_skips_graph(monkeypatch, tmp_path):
 
 def test_add_without_graph_skips_lightrag(monkeypatch, tmp_path):
     """use_graph=False (юзер отказался платить): документ в BM25, LR.insert не дёргается."""
-    import src.lightrag_engine as LR
+    import src.data.lightrag_engine as LR
     monkeypatch.setattr(KB, "_KB_ROOT", tmp_path / "kb")
 
     async def _boom(*a, **kw):
@@ -135,6 +135,6 @@ def test_add_without_graph_skips_lightrag(monkeypatch, tmp_path):
 
 
 def test_estimate_index_cost_scales():
-    from src.lightrag_engine import estimate_index_cost
+    from src.data.lightrag_engine import estimate_index_cost
     small, big = estimate_index_cost("раз " * 200), estimate_index_cost("раз " * 20000)
     assert small["usd"] > 0 and big["usd"] > small["usd"] and big["chunks"] > small["chunks"]

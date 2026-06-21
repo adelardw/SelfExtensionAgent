@@ -3,7 +3,7 @@ import asyncio
 
 from langchain_core.runnables import RunnableLambda
 
-from src.research import (FactCheck, ResearchPlan, _URL_RE, agentic_research,
+from src.data.research import (FactCheck, ResearchPlan, _URL_RE, agentic_research,
                           make_deep_research_tool)
 
 
@@ -36,7 +36,7 @@ def test_agentic_research_chains_and_verifies(monkeypatch):
     fast = _Fast()
     # prompt | fast  → RunnableSequence; .ainvoke вызовет fast.ainvoke
     fast.ainvoke = fast._ainvoke
-    monkeypatch.setattr("src.research.chat", lambda *a, **k: fast)
+    monkeypatch.setattr("src.data.research.chat", lambda *a, **k: fast)
 
     # search/browse — подменяем сам объект тула фейком с .invoke (без сети)
     class _FakeTool:

@@ -21,8 +21,8 @@ from collections import Counter
 from omegaconf import OmegaConf
 
 from ..memory import MemoryStore
-from ..prompts import backward_prompt
-from ..structured_outputs import NodeGradients
+from src.llm.prompts import backward_prompt
+from src.llm.structured_outputs import NodeGradients
 from ..tracing import trace_store
 from .pipe import SelfLearningPipe
 
@@ -42,7 +42,7 @@ NODE_DESC = {
 
 def _backward_gradients(blamed: list[str], failures_text: str):
     """ОДИН LLM-вызов: textual gradients по виноватым нодам, рассуждая вдоль forward-цепочек."""
-    from ..llm import chat, provider
+    from src.llm.llm import chat, provider
 
     if provider() == "openrouter" and not (os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")):
         return []
@@ -215,9 +215,9 @@ def graph_backward_user(memory_store: MemoryStore, user_id: str, min_batch: int 
     """
     import os as _os
 
-    from ..llm import chat, provider
-    from ..prompts import user_backward_prompt
-    from ..structured_outputs import UserLessons
+    from src.llm.llm import chat, provider
+    from src.llm.prompts import user_backward_prompt
+    from src.llm.structured_outputs import UserLessons
     from .prompt_store import add_user_fewshot
     from .safety import is_unsafe_to_learn
 

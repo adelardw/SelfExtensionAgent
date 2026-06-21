@@ -17,7 +17,7 @@ from typing import Optional, Protocol
 
 from omegaconf import OmegaConf
 
-from ..llm import chat, model_for, _base_and_key
+from src.llm.llm import chat, model_for, _base_and_key
 
 _cfg = OmegaConf.load("config.yml")
 

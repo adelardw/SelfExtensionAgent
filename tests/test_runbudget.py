@@ -1,5 +1,5 @@
 """Токен-бюджет прогона + маршрутные предохранители от runaway."""
-from src import runbudget
+from src.runtime import runbudget
 
 
 def test_budget_accumulates_and_resets():
@@ -41,7 +41,7 @@ def test_callback_counts_token_usage():
 
 
 def test_route_after_step_stops_on_token_budget(monkeypatch):
-    import src.agent as A
+    import src.graph.agent as A
 
     monkeypatch.setattr(A, "MAX_RUN_TOKENS", 5000)
     monkeypatch.setattr(A, "MAX_STEPS_PER_RUN", 99)
@@ -54,7 +54,7 @@ def test_route_after_step_stops_on_token_budget(monkeypatch):
 
 
 def test_route_after_step_continues_within_budget(monkeypatch):
-    import src.agent as A
+    import src.graph.agent as A
 
     monkeypatch.setattr(A, "MAX_RUN_TOKENS", 120000)
     monkeypatch.setattr(A, "MAX_STEPS_PER_RUN", 8)
@@ -66,7 +66,7 @@ def test_route_after_step_continues_within_budget(monkeypatch):
 
 
 def test_step_budget_caps_count(monkeypatch):
-    import src.agent as A
+    import src.graph.agent as A
 
     monkeypatch.setattr(A, "MAX_RUN_TOKENS", 10**9)
     monkeypatch.setattr(A, "MAX_STEPS_PER_RUN", 3)

@@ -1,7 +1,7 @@
 """Трек B: память-как-tool — search_memory + recall_history (drill-back). Офлайн."""
 import pytest
 
-from src.memory_tools import make_memory_tools
+from src.memory.memory_tools import make_memory_tools
 
 
 @pytest.fixture
@@ -22,7 +22,7 @@ def test_tools_built():
 
 def test_temporary_memory_scratchpad():
     from src.memory.store import MemoryStore
-    from src.memory_tools import clear_scratch
+    from src.memory.memory_tools import clear_scratch
     import tempfile
     s = MemoryStore(tempfile.mktemp(suffix=".db"))
     tools = {t.name: t for t in make_memory_tools(s, "u1")}

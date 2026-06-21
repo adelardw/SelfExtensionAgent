@@ -20,7 +20,7 @@ import threading
 from pathlib import Path
 from typing import Optional
 
-from ..retrieval import bm25_rank
+from src.search.retrieval import bm25_rank
 
 _ROOT = Path("data/project_memory")        # типизированные заметки (агент сюда пишет)
 _INDEX = Path("MEMORY.md")                  # индекс — КОРНЕВОЙ файл-конвенция (как SEA.md/SKILL.md)

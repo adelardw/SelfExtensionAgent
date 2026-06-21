@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.agent import build_graph  # noqa: E402
+from src.graph.agent import build_graph  # noqa: E402
 
 DOCS = Path(__file__).resolve().parent.parent / "docs"
 

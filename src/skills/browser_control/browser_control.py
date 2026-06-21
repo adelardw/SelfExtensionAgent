@@ -12,19 +12,19 @@ from langchain_core.tools import tool
 
 
 def _bridge():
-    from src import browser_bridge
+    from src.browser import browser_bridge
     return browser_bridge
 
 
 def _session():
-    from src import browser_session
+    from src.browser import browser_session
     return browser_session
 
 
 def _install_hint() -> str:
     """Физический веб требует расширения (агент в ТВОЁМ браузере). Нет его → просим
     поставить, НЕ открываем песочное окно (это не «твой мир», юзер это отверг)."""
-    from src import browser_bridge
+    from src.browser import browser_bridge
     return (
         "[НУЖНО РАСШИРЕНИЕ] Чтобы действовать в ТВОЁМ браузере (твои логины, твои вкладки), "
         "поставь расширение агента ОДИН раз: chrome://extensions → Developer mode → "
@@ -37,7 +37,7 @@ def _install_hint() -> str:
 
 def _backend() -> str:
     try:
-        from src.cli_config import get_cli
+        from src.config.cli_config import get_cli
         return (get_cli("browser_backend") or "extension").lower()
     except Exception:  # noqa: BLE001
         return "extension"
@@ -73,7 +73,7 @@ async def _route(op: str, *args):
         return await getattr(br, op)(*args)
     backend = "extension"
     try:
-        from src.cli_config import get_cli
+        from src.config.cli_config import get_cli
         backend = (get_cli("browser_backend") or "extension").lower()
     except Exception:  # noqa: BLE001
         pass

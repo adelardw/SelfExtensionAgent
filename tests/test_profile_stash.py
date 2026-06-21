@@ -114,6 +114,6 @@ def test_stash_fuzzy_name_resolve(stash):
 # ── thrash-маркер отказа HITL ───────────────────────────────────────────
 
 def test_refusal_marker_constant():
-    from src.hitl import REFUSAL_MARK
+    from src.runtime.hitl import REFUSAL_MARK
 
     assert REFUSAL_MARK and "ОТКЛОНЕНО" in REFUSAL_MARK

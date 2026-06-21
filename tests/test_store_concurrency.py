@@ -77,7 +77,7 @@ def test_thread_local_close_does_not_affect_other_threads():
 
 def test_intent_save_atomic_under_concurrency(monkeypatch):
     """Параллельные _save из фоновых потоков: читатель всегда видит ЦЕЛЫЙ JSON, без .tmp-мусора."""
-    import src.intent as intent
+    import src.graph.intent as intent
 
     d = Path(tempfile.mkdtemp())
     monkeypatch.setattr(intent, "CODEBOOK_FILE", d / "cb.json")

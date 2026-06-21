@@ -5,7 +5,8 @@ import json
 
 import pytest
 
-from src import hitl, interaction
+from src.runtime import hitl
+from src.interface import interaction
 from src.memory.store import MemoryStore
 
 UID = "test-user"

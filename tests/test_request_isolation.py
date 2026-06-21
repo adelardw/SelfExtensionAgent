@@ -5,7 +5,8 @@ run/user). Это тот тип теста, который однопоточн�
 """
 import asyncio
 
-from src import run_context, runbudget, hitl, browser_bridge
+from src.runtime import run_context, runbudget, hitl
+from src.browser import browser_bridge
 
 
 def test_hitl_grants_isolated_per_user():
@@ -68,8 +69,8 @@ def test_browser_domains_visible_across_nodes_within_request():
 def test_grant_persist_gated_to_operator(monkeypatch):
     """#5: рантайм-«да, всегда» КЛИЕНТА сервера НЕ персистится глобально (утечка per-user→global
     после рестарта). Персист — привилегия оператора (uid='', REPL/desktop)."""
-    from src import hitl
-    import src.cli_config as cc
+    from src.runtime import hitl
+    import src.config.cli_config as cc
     persisted: list = []
     monkeypatch.setattr(cc, "set_cli", lambda k, v: persisted.append((k, v)))
     monkeypatch.setattr(cc, "get_cli", lambda k: [])

@@ -80,7 +80,7 @@ def test_run_bash_dry_run(monkeypatch):
 async def test_run_bash_respects_work_mode_via_hitl(repo, monkeypatch):
     """ТРЕБОВАНИЕ ЮЗЕРА: bash — с разрешением и зависит от мода. Через hitl.wrap_with_confirmation."""
     monkeypatch.delenv("AGENT_DRY_RUN", raising=False)
-    import src.hitl as hitl
+    import src.runtime.hitl as hitl
     wrapped_bash = hitl.wrap_with_confirmation(code.run_bash, "code")
     wrapped_glob = hitl.wrap_with_confirmation(code.glob_files, "code")
 

@@ -27,9 +27,9 @@ warnings.filterwarnings("ignore")
 
 SCENARIO_TIMEOUT = 300  # сек на сценарий (5 мин) — стоп-кран от зависших веб/LLM-вызовов
 
-from src.agent import build_graph
-from src.llm import chat
-from src.usage import TokenTracker, cost_of
+from src.graph.agent import build_graph
+from src.llm.llm import chat
+from src.llm.usage import TokenTracker, cost_of
 
 # ── Сценарии повседневного использования (Mac) ────────────────────────
 # expect_mode — допустимые режимы; expect_tool — подстрока, которую ждём в

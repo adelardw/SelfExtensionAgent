@@ -1,7 +1,7 @@
 """Ядро цели «надёжный поисковик»: запросы про реальные внешние факты (адреса/сайты/цены/
 где купить/как оформить/лучшие в городе) заземляются веб-поиском, синтез строго из находок,
 выдуманные URL вырезаются, анализ — headless (без кражи фокуса). Офлайн (без сети/LLM)."""
-import src.agent as A
+import src.graph.agent as A
 
 
 def test_grounding_floor_catches_factual_queries():
@@ -32,9 +32,9 @@ def test_grounding_floor_skips_pure_reasoning():
 
 def test_search_query_reformulation_chain_exists():
     """Сырой разговорный запрос → фокусный поисковый (магазины, не форумы) — есть цепочка."""
-    import src.agent as AA
+    import src.graph.agent as AA
     assert AA.search_query_chain is not None
-    from src.prompts import search_query_prompt
+    from src.llm.prompts import search_query_prompt
     text = "".join(str(m.prompt.template) for m in search_query_prompt.messages)
     assert "интернет-магазин" in text and "госуслуги" in text  # типы источников зашиты
 

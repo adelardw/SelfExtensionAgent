@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-import src.hitl as hitl
+import src.runtime.hitl as hitl
 
 
 # ── SEC-1: auto-accept не снимает подтверждение с run_bash/edit_file ──────────────────────
@@ -88,7 +88,7 @@ def test_is_dangerous_defaults():
 # ── SEC-4: collective редактит plan + profile, не только query ────────────────────────────
 
 def test_redact_struct_redacts_plan_leaves():
-    import src.collective as collective
+    import src.search.collective as collective
     plan = [{"goal": "скачать инвойсы для john@acme.com", "done_check": "ok"},
             {"goal": "позвонить +1-555-123-4567", "timeout": 30}]
     safe = collective._redact_struct(plan)
@@ -189,7 +189,7 @@ def test_notify_message_is_escaped(monkeypatch):
 # ── CON-2: cli_config.set_cli атомарен + сохраняет существующие ключи ──────────────────────
 
 def test_set_cli_atomic_preserves(tmp_path, monkeypatch):
-    import src.cli_config as cc
+    import src.config.cli_config as cc
     monkeypatch.setattr(cc, "LOCAL", tmp_path / "config.local.yml")
     monkeypatch.setattr(cc, "BASE", tmp_path / "config.yml")
     cc.set_cli("api_key", "secret-123")

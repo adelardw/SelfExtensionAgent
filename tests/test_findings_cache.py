@@ -53,7 +53,7 @@ def test_findings_survive_turn_and_isolated_by_thread():
 
 def test_reflexion_prompt_has_findings_reuse_rule():
     """Промпт reflexion должен явно учить ронять режим при наличии находок (downgrade)."""
-    from src.prompts import reflexion_prompt
+    from src.llm.prompts import reflexion_prompt
 
     text = str(reflexion_prompt)
     assert "Уже проработано" in text and "ЛЁГКИЙ режим" in text
@@ -61,7 +61,7 @@ def test_reflexion_prompt_has_findings_reuse_rule():
 
 def test_relevant_findings_picks_semantically_closest():
     """Из коллекции находок recall впрыскивает СЕМАНТИЧЕСКИ близкие к запросу (top-k), не все."""
-    from src.agent import _relevant_findings
+    from src.graph.agent import _relevant_findings
 
     coll = [
         {"query": "repo", "summary": "REPO-FINDINGS", "emb": [1.0, 0.0, 0.0]},
@@ -76,7 +76,7 @@ def test_relevant_findings_picks_semantically_closest():
 
 
 def test_relevant_findings_below_gate_and_fallbacks():
-    from src.agent import _relevant_findings
+    from src.graph.agent import _relevant_findings
 
     coll = [{"query": "x", "summary": "X", "emb": [1.0, 0.0]}]
     # ортогональный запрос (sim=0 < gate) → ничего не впрыскиваем (не шумим)

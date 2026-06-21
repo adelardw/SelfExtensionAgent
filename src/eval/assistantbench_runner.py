@@ -78,8 +78,8 @@ def _load(n: int, difficulty: str = "") -> list[dict]:
 
 
 async def run(n: int = 6, difficulty: str = "") -> None:
-    from src.agent import build_graph
-    from src.usage import TokenTracker, cost_of
+    from src.graph.agent import build_graph
+    from src.llm.usage import TokenTracker, cost_of
 
     tasks = _load(n, difficulty)
     graph = build_graph()

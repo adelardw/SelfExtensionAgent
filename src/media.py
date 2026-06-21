@@ -20,7 +20,7 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage
 
-from .llm import chat
+from src.llm.llm import chat
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".heic"}
 AUDIO_EXTS = {".ogg", ".oga", ".mp3", ".wav", ".m4a", ".aiff", ".flac"}

@@ -4,7 +4,7 @@ import random
 
 import pytest
 
-from src import bandit
+from src.search import bandit
 from src.memory.store import MemoryStore
 
 UID = "test-user"

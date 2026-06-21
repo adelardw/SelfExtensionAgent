@@ -3,7 +3,7 @@
 Offline, без сети/LLM."""
 import pytest
 
-import src.context_files as cf
+import src.runtime.context_files as cf
 
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def test_mcp_registry_merges_into_client(root, monkeypatch):
         "    args: [mcp-server-mydata]\n    keywords: [квазар]\n    trusted: true\n```\n",  # ЯВНЫЙ trusted (новый дефолт — без него не доверен)
         encoding="utf-8",
     )
-    import src.mcp_client as mc
+    import src.data.mcp_client as mc
     # чистый старт реестра (идемпотентный флаг)
     monkeypatch.setattr(mc, "_registry_loaded", False)
     monkeypatch.setattr(mc, "TRUSTED_SERVERS", dict(mc.TRUSTED_SERVERS))

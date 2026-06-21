@@ -79,7 +79,7 @@ _INJ_CORPUS = Path(os.getenv("AGENT_INJECTION_CORPUS") or "data/injection_corpus
 def _detector():
     global _INJ_DETECTOR
     if _INJ_DETECTOR is None:
-        from ..semantic_signals import _ContrastiveSignal
+        from src.graph.semantic_signals import _ContrastiveSignal
         _INJ_DETECTOR = _ContrastiveSignal(_INJ_POS, _INJ_NEG)
     return _INJ_DETECTOR
 
@@ -109,7 +109,7 @@ def _note_offline() -> None:
         return
     _offline_noted = True
     try:
-        from ..degradation import note
+        from src.runtime.degradation import note
         note("injection_filter_offline", "нет эмбеддера → детект инъекций отключён (fail-open)")
     except Exception:  # noqa: BLE001
         pass

@@ -1,7 +1,7 @@
 """Картинки в чате: image-поиск отдаёт markdown, anti-URL фильтр их не вырезает."""
 import json
 
-import src.agent as A
+import src.graph.agent as A
 import src.tools.image_search as IS
 
 

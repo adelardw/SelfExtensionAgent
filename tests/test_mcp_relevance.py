@@ -2,8 +2,8 @@
 import asyncio
 import re
 
-import src.mcp_client as MC
-from src.mcp_client import _relevance
+import src.data.mcp_client as MC
+from src.data.mcp_client import _relevance
 
 
 def test_relevance_scores_by_overlap():

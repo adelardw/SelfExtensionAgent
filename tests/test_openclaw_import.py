@@ -77,7 +77,7 @@ def test_import_creates_skill_and_registry(tmp_skills):
 
 
 def test_imported_skill_under_hitl(tmp_skills):
-    from src import hitl
+    from src.runtime import hitl
     from src.tools import skill_creation as sc
 
     oci.import_openclaw_skill(_make_source(tmp_skills))
@@ -89,7 +89,7 @@ def test_imported_skill_under_hitl(tmp_skills):
 def test_wrapper_allowlist_blocks_foreign_bin(tmp_skills, monkeypatch):
     import os
 
-    from src import hitl
+    from src.runtime import hitl
     from src.tools import skill_creation as sc
 
     monkeypatch.setenv("AGENT_DRY_RUN", "1")

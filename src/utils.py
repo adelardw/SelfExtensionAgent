@@ -1,5 +1,5 @@
 from .tools.skill_creation import SKILLS_DIR, _skill_base  # _skill_base: L4 project-навыки
-from .schemas import GeneralGraphState
+from src.graph.schemas import GeneralGraphState
 import importlib
 import json
 import os

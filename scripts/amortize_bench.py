@@ -30,7 +30,7 @@ DEFAULT_TASKS = [
 
 
 async def run_pass(graph, tasks: list[str], user_id: str, label: str) -> dict:
-    from src.usage import TokenTracker, cost_of
+    from src.llm.usage import TokenTracker, cost_of
 
     total = {"in": 0, "out": 0, "sec": 0.0, "conf": [], "per_task": []}
     for i, q in enumerate(tasks, 1):
@@ -60,7 +60,7 @@ async def run_pass(graph, tasks: list[str], user_id: str, label: str) -> dict:
 
 
 async def main() -> None:
-    from src.agent import build_graph
+    from src.graph.agent import build_graph
 
     tasks = DEFAULT_TASKS
     if len(sys.argv) > 1:

@@ -2,7 +2,7 @@
 держатся полными; tool_call_id и парность сохраняются (структура не рвётся)."""
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from src.agent import _mask_old_tool_msgs
+from src.graph.agent import _mask_old_tool_msgs
 
 
 def _build(n: int) -> list:
