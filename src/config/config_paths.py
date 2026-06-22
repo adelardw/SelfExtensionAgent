@@ -16,10 +16,10 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# Пакетный дефолт config.yml. config_paths.py лежит в <root>/src/ → <root>/config.yml. Для editable —
-# это корень репо; для wheel — корень site-packages (config.yml кладётся туда через force-include в
-# pyproject). Так один и тот же путь валиден и для editable, и для установленного пакета.
-_PKG_DEFAULT = Path(__file__).resolve().parent.parent / "config.yml"
+# Пакетный дефолт config.yml. config_paths.py лежит в <root>/src/config/ → <root>/config.yml. Для
+# editable — это корень репо; для wheel — корень site-packages (config.yml кладётся туда через
+# force-include в pyproject). Так один и тот же путь валиден и для editable, и для установленного пакета.
+_PKG_DEFAULT = Path(__file__).resolve().parent.parent.parent / "config.yml"  # config→src→root
 
 
 def base_config_path() -> Path:

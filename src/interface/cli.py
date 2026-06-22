@@ -47,7 +47,7 @@ def _version() -> str:
     try:
         import tomllib
         from pathlib import Path
-        for base in (Path(__file__).resolve().parent.parent, Path.cwd()):
+        for base in (Path(__file__).resolve().parent.parent.parent, Path.cwd()):  # interface→src→root
             p = base / "pyproject.toml"
             if p.exists():
                 return tomllib.loads(p.read_text(encoding="utf-8"))["project"]["version"]
