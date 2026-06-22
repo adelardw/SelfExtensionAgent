@@ -658,7 +658,8 @@ class SeaTUI(App):
                 runbudget.reset()
                 res = await self.graph.ainvoke(
                     {"query": text, "user_id": "local", "session_id": self._ext_thread,
-                     "force_mode": "", "chat_history": self._ext_history + [{"role": "user", "content": text}]},
+                     "force_mode": "", "interactive": True,  # TUI: доводим без «продолжи»
+                     "chat_history": self._ext_history + [{"role": "user", "content": text}]},
                     config={"configurable": {"thread_id": self._ext_thread}, "recursion_limit": 50,
                             "callbacks": [tracker]})
                 ans = res.get("final_answer", "") or "(empty answer)"

@@ -162,6 +162,12 @@ MAX_RUN_TOKENS: int = int(os.getenv("AGENT_MAX_RUN_TOKENS") or config.agent.get(
 # Wall-clock дедлайн прогона: heavy в eval упирался в 5 мин (медленно молотил). Стоп
 # по времени ИЛИ по токенам — что раньше. Держим заметно ниже 5 мин ради UX.
 MAX_RUN_SECONDS: float = float(os.getenv("AGENT_MAX_RUN_SECONDS") or config.agent.get("max_run_seconds", 150))
+# ── ИНТЕРАКТИВ (desktop/TUI): доводим без «продолжи», но с деградацией под расход. eval/one-shot
+# этого НЕ получают (тугой бюджет). soft → переход в лёгкую оркестрацию; hard → абсолютный
+# предохранитель (доводим с честной пометкой). См. _is_interactive/_degrade_level/route_after_step.
+INTERACTIVE_UNLIMITED: bool = config.agent.get("interactive_unlimited", True)
+MAX_RUN_SECONDS_HARD: float = float(os.getenv("AGENT_MAX_RUN_SECONDS_HARD") or config.agent.get("max_run_seconds_hard", 1200))
+MAX_STEPS_HARD: int = int(os.getenv("AGENT_MAX_STEPS_HARD") or config.agent.get("max_steps_hard", 40))
 CAP_RESEARCH_TIMEOUT: float = config.agent.get("cap_research_timeout", 30)  # потолок веб-поиска способа
 STEP_DEADLINE_CAP: float = config.agent.get("step_deadline_cap", 45)  # макс. секунд на ОДИН шаг (анти-монополия)
 RESEARCH_STEP_DEADLINE: float = config.agent.get("research_step_deadline", 90)  # веб-research не ретраится → больше времени на multi-hop
@@ -200,6 +206,20 @@ def _run_limits(state) -> tuple[int, float]:
     agentic = any(any(h in s for h in _AGENTIC_SKILL_HINTS) for s in sel)
     mult = AGENTIC_BUDGET_MULT if agentic else 1.0
     return int(MAX_RUN_TOKENS * mult), MAX_RUN_SECONDS * mult
+
+
+def _is_interactive(state) -> bool:
+    """Интерактивный сёрфейс (desktop/TUI): доводим задачу до конца БЕЗ «продолжи». План сам
+    ограничен (≤MAX_SUBTASKS подшагов + капы ретраев + анти-зацикливание), поэтому «безлимит» здесь
+    = «не рубить естественно-конечный план искусственной стеной 150с/8 шагов», а не runaway. Цена
+    зажата размером плана + дешёвым каскадом ярусов. Ставится клиентом флагом state['interactive'].
+    eval/one-shot — False → тугой бюджет (установка проекта). Абсолютный предохранитель — *_HARD."""
+    return bool(state.get("interactive")) and INTERACTIVE_UNLIMITED
+
+
+def _wall_seconds(state) -> float:
+    """Wall-clock потолок для дедлайнов шага: интерактив → абсолютный hard, иначе мягкий."""
+    return MAX_RUN_SECONDS_HARD if _is_interactive(state) else MAX_RUN_SECONDS
 
 
 # Множитель ЖЁСТКОГО обрыва ВНУТРИ шага (arm) над мягким (между-нодовым) потолком. Смысл:
@@ -282,7 +302,12 @@ def rebuild_llms() -> None:
     # Когнитивные ноды (goal/reflexion/decompose/fast_answer/reason) строятся через
     # _override_system → их промпты обучаемы (см. graph_learn).
     step_validation_chain = step_validation_prompt | llm.with_structured_output(StepOutcome)
-    synth_chain = synthesize_prompt | llm
+    # КАСКАД ЯРУСОВ: легвóрк (поиск/чтение/шаги) — дёшево (fast/code); ФИНАЛЬНАЯ СБОРКА «из кучи в
+    # нормальное» — УМНАЯ модель (deep) на УЖЕ СЖАТОМ дистилляте (step_results распилены по-шагам,
+    # сырьё отброшено → вход ограничен → дорого не выходит, один вызов). Ярус настраивается.
+    synth_llm = {"fast": llm, "code": code_llm, "deep": deep_llm}.get(
+        config.agent.get("synthesis_model", "deep"), deep_llm)
+    synth_chain = synthesize_prompt | synth_llm
     act_finalize_chain = act_finalize_prompt | llm  # чистая финализация act из РЕЗУЛЬТАТОВ
     search_query_chain = search_query_prompt | llm  # запрос юзера → фокусный поисковый запрос
     skill_retention_chain = skill_retention_prompt | llm.with_structured_output(SkillRetention)
@@ -1879,7 +1904,10 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # сам ограничен по времени → даём ему БОЛЬШЕ (полный multi-hop: 3-4 под-вопроса),
     # обычным шагам — STEP_DEADLINE_CAP (анти-монополия). Wall-clock всё равно общий потолок.
     _cap = RESEARCH_STEP_DEADLINE if _is_web else STEP_DEADLINE_CAP
-    step_deadline = min(_cap, max(15.0, _run_limits(state)[1] - runbudget.elapsed()))
+    # Wall для остатка: интерактив → абсолютный hard (шаги не голодают после 150с, план доводится),
+    # eval/one-shot → тугой мягкий потолок. Шаг всё равно ≤_cap (анти-монополия одного шага).
+    _wall = _wall_seconds(state) if _is_interactive(state) else _run_limits(state)[1]
+    step_deadline = min(_cap, max(15.0, _wall - runbudget.elapsed()))
     msgs: list = []
     # ЖЁСТКИЙ обрыв ВНУТРИ шага против интра-степ ВЗРЫВА (живой баг: один research-шаг → ~1М
     # токенов). Вооружаем НЕ на 1.0× бюджета, а на ×STEP_HARD_CUT_MULT (см. _step_hard_limits):
@@ -1964,9 +1992,22 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
     выполнен…») вместо ответа на запрос (GAIA это вскрыл).
     """
     results = state.get("step_results", [])
-    results_text = "\n\n".join(
-        f"[Шаг {i+1}] {r['goal']}\n{r['result']}" for i, r in enumerate(results)
-    ) or "(шаги не дали результата)"
+    # ГАРАНТИЯ КОМПРЕССИИ входа умного яруса (deep): шаги распилены, но контентный шаг мог дать
+    # большой вывод → капаем на шаг и суммарно, чтобы вход в дорогую модель всегда был ограничен
+    # (один дешёвый вызов на сжатом дистилляте — суть каскада, «уложиться в контекст»).
+    _PER, _TOTAL = 3000, 15000
+    _parts, _acc = [], 0
+    for i, r in enumerate(results):
+        body = (r.get("result") or "")
+        if len(body) > _PER:
+            body = body[:_PER] + " …[обрезано]"
+        chunk = f"[Шаг {i+1}] {r['goal']}\n{body}"
+        if _acc + len(chunk) > _TOTAL:
+            _parts.append("…[остальные шаги опущены для компактности]")
+            break
+        _parts.append(chunk)
+        _acc += len(chunk)
+    results_text = "\n\n".join(_parts) or "(шаги не дали результата)"
 
     resp = await synth_chain.ainvoke({
         "query": state["query"],
@@ -2068,7 +2109,14 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # Структурный сигнал «прогон оборван/незавершён» — судье для флага false_completion (ловит
     # ложь о завершении семантически, любой язык, вместо русско-центричного регэкспа в synthesize).
     _subs = state.get("subtasks", []) or []
-    _cut = runbudget.exhausted(*_run_limits(state))
+    # «Оборван» — по АБСОЛЮТНОМУ предохранителю в интерактиве (мягкий 150с там не рубит), иначе по
+    # тугому бюджету. Так в интерактиве caveat «не довёл» возникает ТОЛЬКО при реальной патологии
+    # (hard), а не при нормальном долгом плане.
+    if _is_interactive(state):
+        _cut = (runbudget.elapsed() >= MAX_RUN_SECONDS_HARD
+                or state.get("steps_executed", 0) >= MAX_STEPS_HARD)
+    else:
+        _cut = runbudget.exhausted(*_run_limits(state))
     incomplete = _cut or any(s.get("status") not in ("done", "blocked") for s in _subs)
 
     payload = {
@@ -2124,14 +2172,22 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # (ретрай не «дозавершит» — прогон уже исчерпан). Заменяет регэксп «добавил|заказал…» в synthesize.
     if flag_false_completion and incomplete:
         done = [s["goal"] for s in _subs if s.get("status") == "done"]
-        why = "бюджет прогона исчерпан" if _cut else "не все шаги завершены"
         # Честная ПОМЕТКА вперёд (юзер не примет за «сделано»/side-effect), но СОДЕРЖАТЕЛЬНЫЙ черновик
         # НЕ выбрасываем: для контентных задач («напиши стратегию/текст») синтез-ответ И ЕСТЬ результат,
         # пусть и частичный. Раньше отдавали голую отписку «нет результата» — юзер терял черновик.
         draft = (state.get("final_answer") or "").strip()
-        caveat = (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным, проверь. "
-                  + (f"Успел: {'; '.join(done[:4])}. " if done else "")
-                  + "Скажи «продолжи» — доведу с места остановки.")
+        if _is_interactive(state):
+            # Интерактив: «продолжи»-стопа нет (план доводим). Сюда попали ТОЛЬКО при абсолютном
+            # предохранителе (патология) → доводим по максимуму, честно метим непокрытое, БЕЗ «продолжи».
+            why = "уперся в предохранитель прогона" if _cut else "часть шагов не закрылась"
+            caveat = (f"⚠ Довёл по максимуму, но не на 100% ({why}) — проверь. "
+                      + (f"Готово: {'; '.join(done[:4])}. " if done else "")
+                      + "Скажи, что доработать.")
+        else:
+            why = "бюджет прогона исчерпан" if _cut else "не все шаги завершены"
+            caveat = (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным, проверь. "
+                      + (f"Успел: {'; '.join(done[:4])}. " if done else "")
+                      + "Скажи «продолжи» — доведу с места остановки.")
         # СОДЕРЖАТЕЛЬНЫЙ черновик (контентная задача — «напиши стратегию/текст») отдаём ПОД пометкой:
         # сам ответ И ЕСТЬ результат, пусть частичный. Короткий/мета — это скорее ложный side-effect-
         # claim («добавил в корзину») → НЕ сохраняем (только честная пометка).
@@ -2485,7 +2541,18 @@ def route_after_sgr_create(state: GeneralGraphState) -> str:
 
 def route_after_step(state: GeneralGraphState) -> str:
     """Шаговый цикл: остались подшаги (или идёт ретрай) → step_executor, иначе → synthesize.
-    Глобальный предохранитель: исчерпан бюджет шагов на прогон → принудительно synthesize."""
+    ИНТЕРАКТИВ (desktop/TUI): НЕ рубим на 150с/8 шагов — даём естественно-конечному плану доработать
+    (он сам ≤MAX_SUBTASKS + капы ретраев + анти-зацикливание), стоп только по АБСОЛЮТНОМУ
+    предохранителю (анти-патология) → нет «продолжи». EVAL/one-shot: тугой бюджет как раньше."""
+    if _is_interactive(state):
+        if (runbudget.elapsed() >= MAX_RUN_SECONDS_HARD
+                or state.get("steps_executed", 0) >= MAX_STEPS_HARD):
+            print(f"[Budget] абсолютный предохранитель ({runbudget.elapsed():.0f}с / "
+                  f"{state.get('steps_executed', 0)} шагов) — собираю что есть")
+            return "synthesize"
+        if state.get("current_step", 0) < len(state.get("subtasks", [])):
+            return "step_executor"
+        return "synthesize"
     _tl, _sl = _run_limits(state)
     if state.get("steps_executed", 0) >= MAX_STEPS_PER_RUN or runbudget.exhausted(_tl, _sl):
         print(f"[Budget] стоп: шаги={state.get('steps_executed', 0)}/{MAX_STEPS_PER_RUN}, "

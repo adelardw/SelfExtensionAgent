@@ -117,6 +117,7 @@ async def _build_graph_async() -> None:
                 with run_context.request_scope(f"ext-{uuid.uuid4().hex}", "local"):  # изоляция per-request
                     r = await _graph.ainvoke(
                         {"query": text, "user_id": "local", "session_id": "extension",
+                         "interactive": True,  # desktop/extension: доводим без «продолжи»
                          "chat_history": hist + [{"role": "user", "content": text}]},
                         config={"configurable": {"thread_id": "extension"}, "recursion_limit": 50})
                 ans = r.get("final_answer", "") or "(пустой ответ)"
@@ -309,6 +310,7 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                  "force_mode": cli_config.get_cli("force_mode") or "",
                  "image_paths": image_paths,  # картинки — напрямую в мультимодальную модель
                  "has_attachments": bool(files),  # свежие вложения → recall не подменяет их findings'ами
+                 "interactive": True,  # desktop: доводим план без «продолжи» (план самоограничен)
                  "chat_history": history + [{"role": "user", "content": inp.query}]},
                 config={"configurable": {"thread_id": tid}, "recursion_limit": 50,
                         "callbacks": [tracker, trace_cb]},

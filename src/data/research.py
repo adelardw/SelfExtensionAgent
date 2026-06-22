@@ -25,6 +25,12 @@ from pydantic import BaseModel, Field
 from src.llm.llm import chat
 from src.runtime import run_context
 
+# Ярус ФИНАЛЬНОЙ сборки research (тот же ключ, что у graph-synthesize): умная модель на сжатом
+# дистилляте (верифицированные факты + evidence ≤6000), а не дешёвый fast. Легвóрк остаётся fast.
+from src.config.config_paths import base_config_path as _bcp
+from omegaconf import OmegaConf as _OC
+_SYNTH_ROLE = str(_OC.load(str(_bcp())).agent.get("synthesis_model", "deep"))
+
 _URL_RE = re.compile(r"https?://[^\s)\]]+")
 
 
@@ -223,13 +229,21 @@ async def agentic_research(question: str, max_subq: int = 4, max_sources: int = 
     if len(verified) < len(facts):
         ev = "\n\n".join(f"[{f['subq']}]\n{f.get('evidence', '')}" for f in facts if f.get("evidence"))
         evidence_blob = ev[:6000] or "(находок нет)"
-    run_context.research_emit(f"🧩 синтез: подтверждено {len(verified)}/{len(facts)} · {time.monotonic() - _t0:.0f}s")
+    run_context.research_emit(f"🧩 синтез ({_SYNTH_ROLE}): подтверждено {len(verified)}/{len(facts)} · {time.monotonic() - _t0:.0f}s")
     try:
-        ans = await (_synth_prompt | fast).ainvoke(
+        # УМНЫЙ ярус собирает финал из сжатого дистиллята (факты + evidence ≤6000 симв.). Дешёвый
+        # fast — фолбэк, если умная модель недоступна/упала (не валим research из-за яруса сборки).
+        smart = chat(_SYNTH_ROLE, 0)
+        ans = await (_synth_prompt | smart).ainvoke(
             {"question": question, "facts": facts_text, "evidence": evidence_blob})
         answer = ans.content if hasattr(ans, "content") else str(ans)
     except Exception:  # noqa: BLE001
-        answer = facts_text
+        try:
+            ans = await (_synth_prompt | fast).ainvoke(
+                {"question": question, "facts": facts_text, "evidence": evidence_blob})
+            answer = ans.content if hasattr(ans, "content") else str(ans)
+        except Exception:  # noqa: BLE001
+            answer = facts_text
     return {"answer": answer, "facts": facts, "verified": len(verified), "total": len(facts)}
 
 
