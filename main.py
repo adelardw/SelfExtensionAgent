@@ -1086,6 +1086,9 @@ async def run_once(task: str, auto: bool = False) -> int:
             clear_session(sid)
     answer = result.get("final_answer", "")
     print(answer or "(пустой ответ)")
+    from src.runtime import run_context as _rc  # файлы, произведённые агентом (export_table) → путь
+    for _a in _rc.artifacts():
+        print(f"📎 Файл сохранён: {_a['path']}")
     ok = bool(answer) and not result.get("user_blocked") and result.get("validation_passed", True)
     return 0 if ok else 1
 

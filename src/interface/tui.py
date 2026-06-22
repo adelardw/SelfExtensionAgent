@@ -661,7 +661,11 @@ class SeaTUI(App):
                      "force_mode": "", "chat_history": self._ext_history + [{"role": "user", "content": text}]},
                     config={"configurable": {"thread_id": self._ext_thread}, "recursion_limit": 50,
                             "callbacks": [tracker]})
-                return res.get("final_answer", "") or "(empty answer)"
+                ans = res.get("final_answer", "") or "(empty answer)"
+                arts = run_context.artifacts()  # файлы, произведённые агентом → показать путь
+                if arts:
+                    ans += "\n\n" + "\n".join(f"📎 Файл сохранён: {a['path']}" for a in arts)
+                return ans
         try:
             fut = asyncio.run_coroutine_threadsafe(_run(), self._agent_loop)
             ans = await asyncio.wrap_future(fut)

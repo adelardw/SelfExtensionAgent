@@ -73,7 +73,7 @@ from src.runtime import run_context
 # Всё остальное (web/research/link/browser/KB/session/repo-read/MCP/pdf) → taint → гейт python_exec.
 _INTERNAL_SAFE_TOOLS = {
     "python_exec", "current_datetime", "ask_user", "search_memory", "recall_history",
-    "note_to_self", "remember_project", "stash_view", "stash_aggregate",
+    "note_to_self", "remember_project", "stash_view", "stash_aggregate", "export_table",
 }
 from src.graph import intent
 from src.search import collective
@@ -99,6 +99,7 @@ from src.runtime import context_files
 from src.data.research import make_deep_research_tool, agentic_research
 from src.tools.image_search import make_image_search_tool
 from src.runtime.compute import make_compute_tool, make_datetime_tool
+from src.runtime.artifacts import make_export_tool
 from src.media import make_pdf_vision_tool, image_data_url
 from src.data.knowledge_base import (
     make_kb_tool, kb_has_docs, search_kb_raw,
@@ -1783,6 +1784,10 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # Часы: точные текущие дата/время в любом часовом поясе. Без него модель на «сколько времени»
     # уходила в веб и советовала сайты-часы (120с, ноль пользы). Универсален → доступен всегда.
     tools.append(make_datetime_tool())
+    # Экспорт-файл: «дай excel/csv/таблицу/файл» → СКАЧИВАЕМЫЙ .xlsx, а не CSV-текст в чат (живой
+    # дефект: на «дай excel» агент вываливал CSV с «скопируйте»). Доступен всегда — формат запроса
+    # «дай файл» универсален. Доставку (кнопка/путь) делает сервер/CLI из run_context.artifacts.
+    tools.append(make_export_tool())
     # Vision-чтение фигур в PDF — ТОЛЬКО когда в задаче реально есть PDF (анти-bloat
     # контекста: не вешать на каждый шаг тул, который без файла бесполезен).
     _ctx = (state.get("query", "") + " " + state.get("memory_context", "")).lower()

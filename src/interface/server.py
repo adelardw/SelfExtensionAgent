@@ -47,7 +47,7 @@ app = FastAPI(title="Self-Extension Agent", version="0.2.0")
 
 # GUI — собранный React/Vite-фронт (frontend/dist). Тонкий клиент + мозг: сервер отдаёт
 # статику, она говорит с /chat. Собрать: `cd frontend && npm install && npm run build`.
-_DIST = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"  # interface→src→root
 if (_DIST / "assets").is_dir():
     app.mount("/assets", StaticFiles(directory=_DIST / "assets"), name="assets")
 
@@ -335,6 +335,9 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                     rlog = run_context.research_log()  # шаги дисциплинированного research (intra-node)
                     if rlog:
                         run["research_log"] = rlog
+                    arts = run_context.artifacts()  # файлы, произведённые агентом для отдачи
+                    if arts:  # наружу — без серверного path (утечка ФС), только id/name/nrows/kind
+                        run["artifacts"] = [{k: a.get(k) for k in ("id", "name", "nrows", "kind")} for a in arts]
         answer = state.get("final_answer", "")
         chat_store.record_turn(tid, inp.user_id, inp.query, answer)
         t = chat_store.get_thread(tid)
@@ -343,6 +346,7 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                          "tools_used": list(trace_cb.tools), "rationale": state.get("mode_rationale", ""),
                          "findings_used": bool(state.get("findings_used")), "timings": dict(run.get("timings", {})),
                          "research_log": run.get("research_log", []),
+                         "artifacts": run.get("artifacts", []),
                          "n_attached": run.get("n_attached", 0), "n_images": run.get("n_images", 0),
                          "attach": run.get("attach", []),
                          "tokens": tracker.total, "tokens_in": tracker.input, "tokens_out": tracker.output,
@@ -387,6 +391,7 @@ def run_status(run_id: str) -> dict:
               "mode": run.get("mode", ""), "rationale": run.get("rationale", ""),
               "findings_used": run.get("findings_used", False), "timings": run.get("timings", {}),
               "research_log": run.get("research_log", []),
+              "artifacts": run.get("artifacts", []),
               "n_attached": run.get("n_attached", 0), "n_images": run.get("n_images", 0),
               "attach": run.get("attach", [])}
     if st == "waiting":
@@ -397,6 +402,18 @@ def run_status(run_id: str) -> dict:
     if st == "error":
         return {"status": "error", "error": run["error"], "steps": run["steps"]}
     return {"status": "running", "progress": run["progress"], "steps": run["steps"], **_trace}
+
+
+@app.get("/artifact/{artifact_id}")
+def get_artifact(artifact_id: str):
+    """Отдать произведённый агентом файл (xlsx/csv) на скачивание. id жёстко валидируется внутри
+    resolve_artifact (только hex, путь строго в artifacts/<id>/ → анти-traversal)."""
+    from src.runtime.artifacts import resolve_artifact
+    from fastapi import HTTPException
+    p = resolve_artifact(artifact_id)
+    if not p or not p.exists():
+        raise HTTPException(status_code=404, detail="artifact not found")
+    return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
 
 
 @app.post("/run/{run_id}/respond")

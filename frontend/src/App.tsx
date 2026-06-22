@@ -8,7 +8,8 @@ import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, Ch
 marked.setOptions({ gfm: true, breaks: true })
 
 type Thread = { thread_id: string; title: string; favorite?: number }
-type Msg = { role: "user" | "assistant"; content: string }
+type Artifact = { id: string; name: string; nrows?: number; kind?: string }
+type Msg = { role: "user" | "assistant"; content: string; artifacts?: Artifact[] }
 type Cfg = { provider?: string; base_url?: string; api_key_source?: string; active?: string;
   model?: string; code_model?: string; deep_model?: string; work_mode?: string; force_mode?: string;
   searxng_url?: string; model_modalities?: string[]; bridge_connected?: boolean; bridge_token?: string; bridge_port?: number }
@@ -138,7 +139,9 @@ export default function App() {
   }
 
   const setLastAssistant = (content: string) =>
-    setMsgs(m => { const c = [...m]; if (c.length) c[c.length - 1] = { role: "assistant", content }; return c })
+    setMsgs(m => { const c = [...m]; if (c.length) c[c.length - 1] = { ...c[c.length - 1], role: "assistant", content }; return c })
+  const setLastArtifacts = (artifacts: Artifact[]) =>
+    setMsgs(m => { const c = [...m]; if (c.length) c[c.length - 1] = { ...c[c.length - 1], artifacts }; return c })
   const streamAnswer = (full: string) => new Promise<void>(res => {
     const total = full.length, per = Math.max(1, Math.ceil(total / Math.min(total || 1, 90)))
     let n = 0
@@ -167,7 +170,7 @@ export default function App() {
         if (d.pending?.type === "confirm") { setPending({ run_id, confirm: d.pending.text }); return }
         setProgress(d.progress || ""); continue
       }
-      if (d.status === "done") { setProgress(""); if (typeof d.tokens === "number") setTokens(d.tokens); if (typeof d.cost === "number") setCost(d.cost); await streamAnswer(d.answer || "(empty)"); if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads(); setBusy(false); return }
+      if (d.status === "done") { setProgress(""); if (typeof d.tokens === "number") setTokens(d.tokens); if (typeof d.cost === "number") setCost(d.cost); await streamAnswer(d.answer || "(empty)"); if (Array.isArray(d.artifacts) && d.artifacts.length) setLastArtifacts(d.artifacts); if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads(); setBusy(false); return }
       if (d.status === "error") { setProgress(""); setLastAssistant("⚠ error: " + (d.error || "")); setBusy(false); return }
       setProgress(""); setLastAssistant("⚠ run not found (server restarted?)"); setBusy(false); return
     }
@@ -405,6 +408,18 @@ export default function App() {
                       {m.content === "…" || m.content === ""
                         ? <Working steps={steps} current={progress} />
                         : <Markdown html={md(m.content)} />}
+                      {m.artifacts && m.artifacts.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {m.artifacts.map(a => (
+                            <a key={a.id} href={`/artifact/${a.id}`} download={a.name}
+                               className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-[13px] font-medium no-underline transition-colors"
+                               style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>
+                              <span>↓</span><span>{a.name}</span>
+                              {typeof a.nrows === "number" && <span style={{ opacity: 0.7 }}>· {a.nrows} rows</span>}
+                            </a>
+                          ))}
+                        </div>
+                      )}
                     </motion.div>
                   )
                 ))}

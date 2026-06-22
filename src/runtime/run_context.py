@@ -75,6 +75,29 @@ def research_log() -> list:
 register_cleanup(lambda rid: _research.pop(rid, None))
 
 
+# ── АРТЕФАКТЫ: файлы, произведённые агентом для ОТДАЧИ пользователю (xlsx/csv/…) ──
+# Агент пишет файл нативным тулом (export_table) → регистрирует МЕТА сюда (id/имя/путь). Сервер
+# после стрима копирует список в персистентный run-словарь (как research_log) → GUI рисует кнопку
+# «скачать» (GET /artifact/{id}); CLI/TUI печатает сохранённый путь. Сами ФАЙЛЫ переживают cleanup
+# (лежат в artifacts/<id>/), чистится лишь реестр контекста. Скоуп по run_id.
+_artifacts: dict[str, list] = {}
+
+
+def artifact_emit(meta: dict) -> None:
+    """Зарегистрировать произведённый файл (meta: id/name/path/...) для отдачи пользователю."""
+    lst = _artifacts.setdefault(current_run_id() or "_default", [])
+    # дедуп по id: повторный экспорт того же файла (доп. лист) обновляет запись, не дублирует
+    lst[:] = [m for m in lst if m.get("id") != meta.get("id")]
+    lst.append(meta)
+
+
+def artifacts() -> list:
+    return list(_artifacts.get(current_run_id() or "_default", []))
+
+
+register_cleanup(lambda rid: _artifacts.pop(rid, None))
+
+
 @contextmanager
 def request_scope(run_id: str, user_id: str = ""):
     """Изолировать запрос по run_id (+ user_id). Оборачивать вызов графа на границе сервера/бота."""
