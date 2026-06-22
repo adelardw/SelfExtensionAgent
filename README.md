@@ -41,7 +41,7 @@ with quality rising 78%→98%** (`scripts/amortize_bench.py`).
 
 ## Architecture
 
-The **real LangGraph forward graph** — the exact node/edge topology from `src/agent.py`, with
+The **real LangGraph forward graph** — the exact node/edge topology from `src/graph/agent.py`, with
 **every node annotated by what it does and how** (**solid** = `add_edge`, **dashed** =
 `add_conditional_edges`). Entry points (REPL · Telegram · Desktop/Web GUI · Chrome extension ·
 FastAPI) feed the graph; nodes are colour-coded by role (memory · routing · skills · thinking ·
@@ -115,7 +115,7 @@ and characterization tests pinning the anti-hallucination + embedding-injection 
   carry; config `agent.bandit_prior`). The heavy end-to-end review is **earned** by runtime
   evidence (artifact is large + multi-step + has a rubric), not guessed upfront — the "up"
   misclass into heavy is the most expensive, so we pay for review on demand.
-- **Universal intent router (any language)** (`src/intent.py`) — front-of-pipeline signals (needs
+- **Universal intent router (any language)** (`src/graph/intent.py`) — front-of-pipeline signals (needs
   web grounding / physical browser / media playback) are decided by an embedding-kNN "route
   codebook", not Russian-lexicon regexes: multilingual (es/de/fr/… caught via embeddings); the
   routing regexes are **removed** — the classifier alone decides, in any language (output-parsing
@@ -194,7 +194,7 @@ and characterization tests pinning the anti-hallucination + embedding-injection 
 - **Skills** — creates new skills with smoke tests (skill library), protects the core ones,
   auto-syncs the registry.
 - **ToolSearch** — as the library grows, the selector doesn't get the WHOLE registry but a BM25
-  retrieval of the top-relevant skills for the query (`src/retrieval.py`). Scales tool choice.
+  retrieval of the top-relevant skills for the query (`src/search/retrieval.py`). Scales tool choice.
 - **MCP — discover/connect/use** — `discover_mcp` (official registry) + a trusted catalog; on a
   capability gap the agent finds and (with confirmation, or automatically in eval mode
   `AGENT_UNLEASH`) connects an MCP server and solves the task with it.
@@ -231,7 +231,7 @@ and characterization tests pinning the anti-hallucination + embedding-injection 
 
 Three real layers — not prompt instructions:
 
-1. **AST gate on code writes** (`src/utils_validation.py`). Any code the LLM saves as a skill
+1. **AST gate on code writes** (`src/tools/utils_validation.py`). Any code the LLM saves as a skill
    (`create_skill`/`update_skill_tools`) goes through AST analysis: `subprocess`, `os.system`,
    `eval`/`exec`/`__import__`, `ctypes`, `importlib`, `shutil.rmtree` are forbidden — including
    aliases (`import subprocess as sp`, `from os import system as s`) and getattr bypass
@@ -239,7 +239,7 @@ Three real layers — not prompt instructions:
 2. **Smoke-test sandbox** (`src/utils.py: run_tool_sandboxed`). A generated tool runs in a
    SEPARATE process with resource limits (CPU, memory, file size) and a hard kill timeout — never
    in the agent's process.
-3. **Human-in-the-loop** (`src/hitl.py`, config `agent.require_confirmation`). Side-effect tools
+3. **Human-in-the-loop** (`src/runtime/hitl.py`, config `agent.require_confirmation`). Side-effect tools
    of skills (`skills.confirm`: device/app/ax/phone) require explicit human confirmation: REPL —
    `y/N` in the terminal, Telegram — inline buttons; where there's no confirmation channel (HTTP
    server) — **deny by default**. Plus an independent `AGENT_DRY_RUN`.
@@ -250,7 +250,7 @@ Three real layers — not prompt instructions:
    in a tool *body* is fine — it's under HITL + a binary allowlist — but not at import time);
    **everything else** (orphan/generated on disk) — the full AST gate. Loaded modules are cached by
    mtime, so skills aren't re-`exec`'d on every step.
-5. **Dangerous-tool checkpoint survives `auto-accept`** (`src/hitl.py: _is_dangerous`, config
+5. **Dangerous-tool checkpoint survives `auto-accept`** (`src/runtime/hitl.py: _is_dangerous`, config
    `skills.dangerous`). A tool command can come from an LLM steered by web-content injection, so
    irreversible/shell tools (`run_bash`, `edit_file`) and any imported skill are NOT silently
    executed by the convenience default (`auto-accept`): only full `auto` (an explicit autonomy
@@ -620,7 +620,7 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
 
 ## Архитектура
 
-**Реальный forward-граф LangGraph** — точная топология нод/рёбер из `src/agent.py`, где
+**Реальный forward-граф LangGraph** — точная топология нод/рёбер из `src/graph/agent.py`, где
 **каждая нода подписана: что и как в ней происходит** (**сплошная** = `add_edge`, **пунктир** =
 `add_conditional_edges`). Сверху — entrypoints (REPL · Telegram · Desktop/Web GUI · Chrome-расширение ·
 FastAPI), входящие в граф; ноды раскрашены по роли (память · роутинг · навыки · мышление · ревью).
@@ -691,7 +691,7 @@ concurrency/изоляция-тесты (per-request run_context, HITL-гран�
   которых нет в few-shots; конфиг `agent.bandit_prior`). Тяжёлый сквозной ревью
   **ЗАРАБАТЫВАЕТСЯ** рантайм-evidence (артефакт большой+многошаговый+rubric), а не угадывается
   наперёд — мисс-класс «вверх» в heavy самый дорогой, поэтому платим за ревью по факту.
-- **Универсальный роутер интентов (любой язык)** (`src/intent.py`) — сигналы фронта (нужен
+- **Универсальный роутер интентов (любой язык)** (`src/graph/intent.py`) — сигналы фронта (нужен
   привязка к веб-источникам / физический браузер / воспроизведение / контроль плеера) определяет embedding-kNN
   «кодбук маршрутов», а не регулярные выражения по русскому лексикону. **Регэкспы routing'а УДАЛЕНЫ** —
   сигналы (`_needs_web_grounding` / `_wants_physical_browser` / `_is_play_intent`) теперь
@@ -775,7 +775,7 @@ concurrency/изоляция-тесты (per-request run_context, HITL-гран�
 - **Навыки** — создаёт новые навыки со smoke-тестами (skill library), защищает базовые,
   авто-синхронизирует реестр.
 - **ToolSearch** — при росте библиотеки селектор не получает ВЕСЬ реестр, а BM25-retrieval
-  топ-релевантных навыков под запрос (`src/retrieval.py`). Масштабирует выбор инструментов.
+  топ-релевантных навыков под запрос (`src/search/retrieval.py`). Масштабирует выбор инструментов.
 - **MCP — поиск/подключение/использование** — `discover_mcp` (официальный реестр) +
   доверенный каталог; на capability-gap агент находит и (с подтверждением, либо авто в
   eval-режиме `AGENT_UNLEASH`) подключает MCP-сервер и решает им задачу.
@@ -812,7 +812,7 @@ concurrency/изоляция-тесты (per-request run_context, HITL-гран�
 
 Три реальных слоя — не промпт-инструкции:
 
-1. **AST-гейт на записи кода** (`src/utils_validation.py`). Любой код, который LLM
+1. **AST-гейт на записи кода** (`src/tools/utils_validation.py`). Любой код, который LLM
    сохраняет как навык (`create_skill`/`update_skill_tools`), проходит AST-анализ:
    запрещены `subprocess`, `os.system`, `eval`/`exec`/`__import__`, `ctypes`,
    `importlib`, `shutil.rmtree` — включая алиасы (`import subprocess as sp`,
@@ -821,7 +821,7 @@ concurrency/изоляция-тесты (per-request run_context, HITL-гран�
 2. **Песочница smoke-теста** (`src/utils.py: run_tool_sandboxed`). Сгенерированный
    tool исполняется в ОТДЕЛЬНОМ процессе с resource-лимитами (CPU, память, размер
    файлов) и жёстким kill-таймаутом — никогда в процессе агента.
-3. **Human-in-the-loop** (`src/hitl.py`, config `agent.require_confirmation`).
+3. **Human-in-the-loop** (`src/runtime/hitl.py`, config `agent.require_confirmation`).
    Тулы side-effect навыков (`skills.confirm`: device/app/ax/phone) требуют явного
    подтверждения человеком: REPL — `y/N` в терминале, Telegram — inline-кнопки;
    где канала подтверждения нет (HTTP-сервер) — **deny by default**. Плюс
@@ -833,7 +833,7 @@ concurrency/изоляция-тесты (per-request run_context, HITL-гран�
    в *теле* тула ок — он под HITL + allowlist бинарей, — но не при импорте); **прочее**
    (orphan/сгенерированное на диске) — полный AST-гейт. Загруженные модули кэшируются по mtime —
    навыки не ре-`exec`'аются на каждом шаге.
-5. **Чекпойнт опасных тулов переживает `auto-accept`** (`src/hitl.py: _is_dangerous`, конфиг
+5. **Чекпойнт опасных тулов переживает `auto-accept`** (`src/runtime/hitl.py: _is_dangerous`, конфиг
    `skills.dangerous`). Команда тула может прийти от LLM под инъекцией из веб-контента, поэтому
    необратимые/шелл-тулзы (`run_bash`, `edit_file`) и любой импортированный скилл НЕ исполняются
    молча удобным дефолтом (`auto-accept`): чекпойнт снимает только полный `auto` (явный opt-in в

@@ -8,7 +8,7 @@ is the backward pass over that trace.
 
 ![Architecture](docs/architecture.en.svg)
 
-> The real LangGraph forward graph (exact node/edge topology from `src/agent.py`; **solid** =
+> The real LangGraph forward graph (exact node/edge topology from `src/graph/agent.py`; **solid** =
 > `add_edge`, **dashed** = `add_conditional_edges`), each node annotated with what it does. Source:
 > [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py) → editable
 > [`docs/architecture.en.drawio`](docs/architecture.en.drawio) → SVG. The same graph is described
@@ -101,6 +101,23 @@ There are TWO routings, at different levels. The intent router does NOT pick the
 | Maintenance | `maintenance/dep_update.py` | safe auto-update of dependencies with health-check and rollback |
 | Interfaces | **`cli.py`/`tui.py` (full-screen Textual TUI — default `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (native window via pywebview), packaged **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` is now one-shot/scripting only (REPL replaced by the TUI). | shared graph + shared memory. The GUI runs each turn as a background run with **live progress** (per-node steps via `astream`), **interactive clarify** (Q/A multiselect card over `/run/{id}/respond`) and confirm, native file attach (`/attach_local`) + mic (server-side ffmpeg), thread history, and a settings panel (provider/models/key, work/thinking mode, extension token). Key/provider set from CLI (`sea key`) into a global user config; the packaged app runs in `~/Library/Application Support/SEA`. Brain stays Python; thin client + brain. |
 
+## Repository layout (`src/`)
+
+Modules are grouped into domain packages; imports are absolute (`src.<pkg>.<mod>`):
+
+- **`graph/`** — the LangGraph agent + scaffolding: `agent`, `agent_experimental`, `schemas`, `subagents`, `intent`, `semantic_signals`
+- **`llm/`** — model layer: `llm`, `prompts`, `structured_outputs`, `usage`
+- **`interface/`** — human-facing I/O: `tui`, `cli`, `cli_art`, `server`, `chat_store`, `progress`, `compact`, `clarify`, `interaction`, `semantics`
+- **`browser/`** — `browser_bridge`, `browser_session`
+- **`data/`** — external data / RAG / MCP: `research`, `knowledge_base`, `lightrag_engine`, `mcp_client`
+- **`search/`** — retrieval + amortization loops: `retrieval`, `bandit`, `collective`, `habits`
+- **`runtime/`** — run infra: `run_context`, `runbudget`, `degradation`, `hitl`, `compute`, `sea_workspace`, `context_files`
+- **`config/`** — `config_paths`, `core_config`, `cli_config`
+- existing: **`memory/`** (+`memory_tools`), **`tools/`** (+`utils_validation`, `skills_import`), **`improve/`**, **`eval/`**, **`tracing/`**, **`external/`**, **`maintenance/`**, **`skills/`**
+- top-level: `media.py`, `utils.py`, plus root `main.py` (one-shot/REPL) and `desktop.py`
+
+Entry points: `sea` → `src.interface.cli:main_cli`; desktop server → `uvicorn src.interface.server:app`.
+
 ## Architectural principle: the amortized agent
 
 For known patterns (ReAct, plan-execute, multi-agent) the marginal cost per task is
@@ -170,12 +187,12 @@ best-practice installation with the source profile's fingerprint; to similar use
 `build_graph()` is the single brain; the surfaces differ only in how they take input, which HITL
 channel they confirm through, and how they stream progress.
 
-- **CLI (`sea`)** — terminal, **project-rooted**. `src/cli.py::main_cli` is a thin entry: `sea
+- **CLI (`sea`)** — terminal, **project-rooted**. `src/interface/cli.py::main_cli` is a thin entry: `sea
   --version|--help|init` answer instantly **without** loading the agent (the heavy warmup lives at
   `main.py` module level); REPL / one-shot lazily import `main`. `sea init` scaffolds `.sea/` and
   scans the repo into `SEA.md`. From the project root the agent picks up convention files —
   `SEA.md` (instructions), `MEMORY.md` (project memory index), `MCP.md` (user MCP registry),
-  `SKILL.md` (external skills) — via `src/context_files.py`.
+  `SKILL.md` (external skills) — via `src/runtime/context_files.py`.
 - **Desktop** — `desktop.py` spawns `uvicorn src.interface.server:app` in a daemon thread and opens a native
   OS window (`pywebview`, system webview, no Electron) at `http://127.0.0.1:<port>/`. The server
   builds the **same graph** and serves `/` (web UI), `/chat`→`/run/{id}` (background run via
@@ -234,7 +251,7 @@ edit/bash) is a global capability; run-budget is task-aware (code/action tasks g
 - **play_media ↔ media_control overlap** — the two are semantically close, so ~20% of play lands in control (route_eval play_media 80%); kept on purpose because a pause misfiring into auto-play is worse than play losing only its deterministic nudge.
 - The syscall sandbox is optional and depends on bwrap/firejail; a full gVisor/container per smoke is the next level.
 - Working with ALREADY-OPEN windows (keystroke/scroll/AX, phone/adb) — macOS only so far; a cross-platform UI-automation layer is next.
-- Orchestration = picking 1 of 6 fixed mode-templates (fast/reason/act/deliberate/heavy/clarify), each a baked-in node pipeline; the escalation ladder (act→deliberate→earned-heavy) is the only runtime deviation. NEXT (not "chain several whole modes" — that's still templates): dissolve modes into atomic cognitive PRIMITIVES (recall/reason/tool-act/verify/decompose/reflect) and let a meta-controller COMPOSE them per task from intermediate results (router-picks-1-of-N → planner-assembles-a-compute-graph). Modes would then be just frequent baked patterns, not the only options. **Being prototyped behind a flag in `src/agent_experimental.py` (experimental, isolated from the working graph).**
+- Orchestration = picking 1 of 6 fixed mode-templates (fast/reason/act/deliberate/heavy/clarify), each a baked-in node pipeline; the escalation ladder (act→deliberate→earned-heavy) is the only runtime deviation. NEXT (not "chain several whole modes" — that's still templates): dissolve modes into atomic cognitive PRIMITIVES (recall/reason/tool-act/verify/decompose/reflect) and let a meta-controller COMPOSE them per task from intermediate results (router-picks-1-of-N → planner-assembles-a-compute-graph). Modes would then be just frequent baked patterns, not the only options. **Being prototyped behind a flag in `src/graph/agent_experimental.py` (experimental, isolated from the working graph).**
 - **Cross-turn history rewrite** — within-step masking is done (above), but rewriting the message history ACROSS turns stays out: it's owned by LangGraph `create_agent` and a rewrite there is a fragile hack.
 - **LightRAG** works for the user's KB documents (`knowledge_base.py`); for GLOBAL memory (episodes/facts) it's GraphRAG-lite — **typed edges already exist** (`memory_edges.relation`: `similar` fact↔fact by cosine, `derived` episode→fact) and **multi-hop traversal exists** (`_graph_boost` spreading-activation over `graph_hops`, config-gated to 1), on top of recency+relevance+importance + TurboVec-ANN. Still the next level vs full LightRAG: **LLM-extracted semantic relation types** (entities+relations, not just structural similar/derived) and a dedicated **graph-query retrieval mode** (today the graph only re-weights recall, it isn't a standalone retriever).
 - Amortization: n=4 statistics (a series with medians is needed); LLM-abstraction of a pattern (strip a specific user's particulars) before collective promotion (privacy in a multi-user deploy); inheriting strong MCPs via a before/after comparison.
@@ -250,7 +267,7 @@ backward pass по этому трейсу.
 
 ![Архитектура](docs/architecture.svg)
 
-> Реальный forward-граф LangGraph (точная топология нод/рёбер из `src/agent.py`; **сплошная** =
+> Реальный forward-граф LangGraph (точная топология нод/рёбер из `src/graph/agent.py`; **сплошная** =
 > `add_edge`, **пунктир** = `add_conditional_edges`), каждая нода подписана — что в ней происходит.
 > Источник: [`scripts/gen_agent_graph.py`](scripts/gen_agent_graph.py) → редактируемая
 > [`docs/architecture.drawio`](docs/architecture.drawio) → SVG. Тот же граф пошагово описан ниже.
@@ -342,6 +359,23 @@ START
 | Обслуживание | `maintenance/dep_update.py` | безопасный авто-апдейт зависимостей с health-check и откатом |
 | Интерфейсы | **`cli.py`/`tui.py` (полноэкранный Textual TUI — дефолтный `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (нативное окно через pywebview), упакованный **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` — теперь только one-shot/скрипты (REPL заменён TUI). | общий граф + общая память. GUI гонит каждый ход как фоновый прогон с **живым прогрессом** (шаги по узлам через `astream`), **интерактивным clarify** (Q/A-мультиселект через `/run/{id}/respond`) и подтверждением, нативное прикрепление файлов (`/attach_local`) + микрофон (ffmpeg на сервере), история тредов, панель настроек (провайдер/модели/ключ, режимы, токен расширения). Ключ/провайдер из CLI (`sea key`) в глобальный конфиг; упакованное приложение работает в `~/Library/Application Support/SEA`. Мозг — Python; тонкий клиент + мозг. |
 
+## Раскладка репозитория (`src/`)
+
+Модули сгруппированы в доменные подпакеты; импорты абсолютные (`src.<pkg>.<mod>`):
+
+- **`graph/`** — граф LangGraph + обвязка: `agent`, `agent_experimental`, `schemas`, `subagents`, `intent`, `semantic_signals`
+- **`llm/`** — модельный слой: `llm`, `prompts`, `structured_outputs`, `usage`
+- **`interface/`** — человеко-facing I/O: `tui`, `cli`, `cli_art`, `server`, `chat_store`, `progress`, `compact`, `clarify`, `interaction`, `semantics`
+- **`browser/`** — `browser_bridge`, `browser_session`
+- **`data/`** — внешние данные / RAG / MCP: `research`, `knowledge_base`, `lightrag_engine`, `mcp_client`
+- **`search/`** — retrieval + контуры амортизации: `retrieval`, `bandit`, `collective`, `habits`
+- **`runtime/`** — рантайм-инфра: `run_context`, `runbudget`, `degradation`, `hitl`, `compute`, `sea_workspace`, `context_files`
+- **`config/`** — `config_paths`, `core_config`, `cli_config`
+- существующие: **`memory/`** (+`memory_tools`), **`tools/`** (+`utils_validation`, `skills_import`), **`improve/`**, **`eval/`**, **`tracing/`**, **`external/`**, **`maintenance/`**, **`skills/`**
+- верхний уровень: `media.py`, `utils.py`, плюс корневые `main.py` (one-shot/REPL) и `desktop.py`
+
+Точки входа: `sea` → `src.interface.cli:main_cli`; desktop-сервер → `uvicorn src.interface.server:app`.
+
 ## Архитектурный принцип: амортизированный агент
 
 У известных паттернов (ReAct, plan-execute, multi-agent) предельная стоимость задачи
@@ -410,12 +444,12 @@ best-practice инсталляции с отпечатком профиля ис
 `build_graph()` — единый мозг; поверхности отличаются только тем, как берут ввод, каким каналом
 HITL подтверждают и как стримят прогресс.
 
-- **CLI (`sea`)** — терминальная, **project-rooted**. `src/cli.py::main_cli` — лёгкий вход: `sea
+- **CLI (`sea`)** — терминальная, **project-rooted**. `src/interface/cli.py::main_cli` — лёгкий вход: `sea
   --version|--help|init` отвечают мгновенно **без** загрузки агента (тяжёлый прогрев — на уровне
   модуля `main.py`); REPL / one-shot лениво импортируют `main`. `sea init` создаёт `.sea/` и сканит
   репо в `SEA.md`. Из корня проекта агент подцепляет файлы-конвенции — `SEA.md` (инструкции),
   `MEMORY.md` (индекс проектной памяти), `MCP.md` (реестр MCP), `SKILL.md` (внешние навыки) — через
-  `src/context_files.py`.
+  `src/runtime/context_files.py`.
 - **Десктоп** — `desktop.py` поднимает `uvicorn src.interface.server:app` в daemon-потоке и открывает нативное
   окно ОС (`pywebview`, системный webview, без Electron) на `http://127.0.0.1:<port>/`. Сервер
   строит **тот же граф** и отдаёт `/` (web-UI), `/chat`→`/run/{id}` (фоновый прогон через `astream`,
@@ -473,7 +507,7 @@ edit/bash) — глобальная способность; бюджет про�
 - **Размен play_media ↔ media_control** — лейблы семантически близки, поэтому ~20% play уходит в control (route_eval play_media 80%); оставлено намеренно: «пауза», сорвавшаяся в авто-плей, хуже, чем play, теряющий лишь детерминированный нудж.
 - Syscall-песочница опциональна и зависит от наличия bwrap/firejail; полноценный gVisor/контейнер на каждый smoke — следующий уровень.
 - Работа с УЖЕ ОТКРЫТЫМИ окнами (keystroke/scroll/AX, phone/adb) — пока только macOS; кроссплатформенный UI-automation слой — дальше.
-- Оркестрация = выбор 1 из 6 фикс-режимов-шаблонов (fast/reason/act/deliberate/heavy/clarify), каждый — запечённый конвейер нод; лестница эскалации (act→deliberate→earned-heavy) — единственное рантайм-отклонение. ДАЛЬШЕ (НЕ «склеить несколько целых режимов» — это всё те же шаблоны): разобрать режимы на атомарные когнитивные ПРИМИТИВЫ (recall/reason/tool-act/verify/decompose/reflect) и дать мета-контроллеру КОМПОНОВАТЬ их под задачу из промежуточных результатов (роутер-выбирает-1-из-N → планировщик-собирает-граф-вычисления). Режимы тогда — просто частые запечённые паттерны, а не единственные варианты. **Прототипируется за флагом в `src/agent_experimental.py` (экспериментально, изолировано от рабочего графа).**
+- Оркестрация = выбор 1 из 6 фикс-режимов-шаблонов (fast/reason/act/deliberate/heavy/clarify), каждый — запечённый конвейер нод; лестница эскалации (act→deliberate→earned-heavy) — единственное рантайм-отклонение. ДАЛЬШЕ (НЕ «склеить несколько целых режимов» — это всё те же шаблоны): разобрать режимы на атомарные когнитивные ПРИМИТИВЫ (recall/reason/tool-act/verify/decompose/reflect) и дать мета-контроллеру КОМПОНОВАТЬ их под задачу из промежуточных результатов (роутер-выбирает-1-из-N → планировщик-собирает-граф-вычисления). Режимы тогда — просто частые запечённые паттерны, а не единственные варианты. **Прототипируется за флагом в `src/graph/agent_experimental.py` (экспериментально, изолировано от рабочего графа).**
 - **Переписывание истории между ходами** — маскинг внутри шага сделан (выше), но переписывание истории сообщений МЕЖДУ ходами остаётся за бортом: ею владеет LangGraph `create_agent`, и переписывание там = хрупкий хак.
 - **LightRAG** работает для БЗ документов юзера (`knowledge_base.py`); для ГЛОБАЛЬНОЙ памяти (эпизоды/факты) — GraphRAG-lite: **типизированные рёбра УЖЕ есть** (`memory_edges.relation`: `similar` fact↔fact по cosine, `derived` episode→fact) и **multi-hop обход есть** (`_graph_boost` spreading-activation на `graph_hops`, в конфиге пока 1), поверх recency+relevance+importance + TurboVec-ANN. Реально «следующий уровень» vs полный LightRAG: **LLM-извлечённые семантические типы связей** (entities+relations, а не только структурные similar/derived) и отдельный **графовый retrieval-режим** (сейчас граф лишь пере-взвешивает recall, а не самостоятельный ретривер).
 - Амортизация: статистика n=4 (нужна серия с медианами); LLM-обобщение паттерна (убрать частности конкретного юзера) перед коллективным промоушеном (privacy в мульти-юзер деплое); наследование сильных MCP через before/after-сравнение.
