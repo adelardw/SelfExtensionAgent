@@ -56,8 +56,19 @@ def scenario(monkeypatch):
     from pathlib import Path
     monkeypatch.setattr(SC, "_skill_base", lambda n: Path(base) / n)
     applied = {}
-    monkeypatch.setattr(SC, "update_skill_tools",
-                        lambda n, code: applied.update(name=n, code=code) or "обновлён")
+
+    # update_skill_tools — это @tool (StructuredTool): рушится на ПРЯМОМ вызове, работает через
+    # .invoke. Мок повторяет это поведение → регрессия-страж против бага, что живая валидация поймала
+    # (репейр звал его напрямую → 'StructuredTool object is not callable', починка не применялась).
+    class _FakeTool:
+        def __call__(self, *a, **k):
+            raise TypeError("'StructuredTool' object is not callable")
+
+        def invoke(self, d):
+            applied.update(name=d.get("name"), code=d.get("tool_code"))
+            return "обновлён"
+
+    monkeypatch.setattr(SC, "update_skill_tools", _FakeTool())
 
     def set_llm(code: str):
         class _R:

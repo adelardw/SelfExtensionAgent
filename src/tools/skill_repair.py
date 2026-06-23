@@ -116,8 +116,10 @@ async def repair_tool(tool_name: str) -> dict:
         skill_health.mark_repaired(tool_name, success=False)
         return {"ok": False, "skill": skill, "reason": f"smoke не прошёл: {str(smoke_out)[:120]}"}
 
-    # 4) применяем боевым путём (тот же гейт ещё раз внутри) + помечаем здоровье
-    msg = update_skill_tools(skill, new_code)
+    # 4) применяем боевым путём (тот же гейт ещё раз внутри) + помечаем здоровье. update_skill_tools —
+    # это @tool (StructuredTool) → зовём через .invoke, НЕ напрямую (живая валидация поймала: прямой
+    # вызов = 'StructuredTool object is not callable', починка считалась/проходила smoke, но не применялась).
+    msg = update_skill_tools.invoke({"name": skill, "tool_code": new_code})
     skill_health.mark_repaired(tool_name, success=True)
     return {"ok": True, "skill": skill, "reason": f"починен и прошёл smoke ({str(msg)[:60]})"}
 
