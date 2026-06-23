@@ -42,6 +42,7 @@ from src import media
 from src.graph.agent import build_graph, memory_store, rebuild_llms
 from src.improve import graph_backward
 from src.tracing import diagnose, trace_store
+from src.tools import skill_health, skill_repair
 
 app = FastAPI(title="Self-Extension Agent", version="0.2.0")
 
@@ -257,6 +258,16 @@ class _TraceCb(BaseCallbackHandler):
                 self.tools[idx]["sec"] = round(time.monotonic() - t0, 1)
 
 
+async def _heal_bg() -> None:
+    """Фоновая самопочинка деградировавших навыков после прогона (best-effort, не трогает ответ)."""
+    try:
+        res = await skill_repair.heal_degraded()
+        for r in res:
+            print(f"[self-heal] {r.get('skill')}: {'✓' if r.get('ok') else '✗'} {r.get('reason')}", flush=True)
+    except Exception as e:  # noqa: BLE001
+        print(f"[self-heal] фон упал: {type(e).__name__}: {e}", flush=True)
+
+
 async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
     """Фоновый прогон через astream: прогресс по узлам → run['progress'], а clarify/confirm
     всплывают в _RUNS[run_id] и ждут клиента."""
@@ -354,6 +365,11 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
                          "tokens": tracker.total, "tokens_in": tracker.input, "tokens_out": tracker.output,
                          "cost": round(tracker.cost(), 4), "cached_rate": round(tracker.cache_hit_rate, 2)}
         run["status"] = "done"
+        # САМОПОЧИНКА навыков В ФОНЕ (не в графе → нет user-latency): если за прогон навык
+        # деградировал (серия сбоев одного класса), чиним после ответа. Loop сервера живёт → задача
+        # доработает. Ошибки самопочинки не трогают ответ (фон, best-effort).
+        if skill_health.degraded():
+            asyncio.create_task(_heal_bg())
     except Exception as e:  # noqa: BLE001
         run["error"] = f"{type(e).__name__}: {e}"
         run["status"] = "error"
@@ -681,7 +697,10 @@ def post_settings(s: SettingsIn) -> dict:
 
 @app.get("/diagnose")
 def diag(user_id: str = "local") -> dict:
-    return diagnose(memory_store, user_id)
+    d = diagnose(memory_store, user_id)
+    d["skill_health"] = skill_health.all_health()       # per-skill вызовы/сбои/статус
+    d["skills_degraded"] = skill_health.degraded()      # кандидаты на самопочинку
+    return d
 
 
 @app.get("/memory/facts")

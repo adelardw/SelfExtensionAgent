@@ -14,6 +14,8 @@ class GeneralGraphState(TypedDict):
                               # (image_url), а не через vision→текст-описание (точнее, без конфабуляций)
     has_attachments: bool     # в ЭТОМ сообщении есть свежие вложения → recall НЕ впрыскивает findings
     interactive: bool         # интерактивный сёрфейс (desktop/TUI): доводим без «продолжи» (план самоограничен); eval/one-shot=False → тугой бюджет
+    failed_trajectories: list # SE-Agent-lite РЕВИЗИЯ: подходы прошлых провалов [{approach, why_failed}] → decompose даёт ОРТОГОНАЛЬНЫЙ план
+    prior_findings: str       # SE-Agent-lite РЕКОМБИНАЦИЯ: верифицированные good-подшаги прошлой попытки → ретрай переиспользует, не переделывает
                               # (иначе агент «восстанавливает» старый анализ вместо чтения нового файла)
 
     # ── Memory (recall) ──

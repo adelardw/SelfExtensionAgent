@@ -107,6 +107,7 @@ from src.data.knowledge_base import (
 )
 from src.tracing import traced, new_run, current_run, trace_store, diagnose
 from src.tools import get_manager_tools, get_all_loaded_skill_tools, get_skill_runtime_prompts, sync_registry
+from src.tools import skill_health
 from src.tools.skill_creation import (
     get_skills_for_prompt,
     get_relevant_skills_for_prompt,
@@ -1422,6 +1423,23 @@ async def capability_research_node(state: GeneralGraphState) -> dict:
     return {"selected_skills": selected, "capability_gap": True, "capability_hint": hint, "mcp_servers": mcp_servers}
 
 
+def _revision_hint(state) -> str:
+    """SE-Agent-lite: блок для decompose из прошлых ПРОВАЛОВ (→ ортогональный план) и верифицированных
+    результатов (→ переиспользовать). Пусто, если первая попытка. Дёшево: текст, без LLM."""
+    fails = state.get("failed_trajectories") or []
+    if not fails:
+        return ""
+    lines = ["⚠ ПРОШЛЫЕ ПОПЫТКИ ПРОВАЛИЛИСЬ — дай ПРИНЦИПИАЛЬНО ИНОЙ (ортогональный) план, НЕ повторяй "
+             "то, что не сработало:"]
+    for t in fails[-3:]:
+        lines.append(f"  • подход: {t.get('approach', '?')} → провал: {t.get('why_failed', '?')}")
+    prior = (state.get("prior_findings") or "").strip()
+    if prior:
+        lines.append("УЖЕ УСТАНОВЛЕНО прошлой попыткой (верифицировано — ПЕРЕИСПОЛЬЗУЙ, НЕ переделывай "
+                     "эти подшаги, строй план вокруг недостающего):\n" + prior)
+    return "\n".join(lines)
+
+
 async def decompose_node(state: GeneralGraphState) -> dict:
     """
     Декомпозиция в смешанном формате: ризонинг, внутри которого рождается план
@@ -1446,7 +1464,13 @@ async def decompose_node(state: GeneralGraphState) -> dict:
     #   sim ≥ 0.7 (почти та же задача) → план берём ИЗ РЕЦЕПТА, БЕЗ LLM-вызова decompose;
     #   sim ниже → проверенный план как основа в capability_hint (как раньше).
     cap_hint = state.get("capability_hint", "Навык под задачу есть.")
-    if state.get("recipe_id"):
+    # SE-Agent-lite РЕВИЗИЯ+РЕКОМБИНАЦИЯ: если прошлые попытки провалились — впрыскиваем их в
+    # capability_hint (decompose его уже читает, без правки шаблона) → модель даёт ОРТОГОНАЛЬНЫЙ
+    # план и ПЕРЕИСПОЛЬЗУЕТ верифицированное. На ретрае рецепт-шорткат пропускаем (рецепт уже провалился).
+    _rev = _revision_hint(state)
+    if _rev:
+        cap_hint = _rev + "\n\n" + cap_hint
+    if state.get("recipe_id") and not state.get("failed_trajectories"):
         try:
             import json as _json
             from src.memory.store import _overlap as _sim
@@ -1597,7 +1621,8 @@ _DIRECT_ROUNDS = 6  # максимум раундов «вызов → инст�
 
 async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                        history: list | None = None, rounds_cap: int | None = None,
-                       max_nudges: int = 1, images=None) -> tuple[str, list]:
+                       max_nudges: int = 1, images=None,
+                       skill_tool_names: set | None = None) -> tuple[str, list]:
     """
     direct-шаг: лёгкая петля «вызов → инструменты» (≤_DIRECT_ROUNDS раундов, вывод сжат) —
     1–2 LLM-вызова в типовом случае. Тулы привязаны и в продолжениях: живой прогон показал,
@@ -1654,13 +1679,19 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                 continue
             seen_calls.add(sig)
             t = by_name.get(tc.get("name"))
+            _tname = tc.get("name")
             if t is None:
-                out = f"(нет инструмента {tc.get('name')})"
+                out = f"(нет инструмента {_tname})"
             else:
                 try:
                     out = await asyncio.wait_for(t.ainvoke(tc.get("args", {})), timeout=deadline)
+                    if skill_tool_names and _tname in skill_tool_names:  # навык отработал → здоров
+                        skill_health.record(_tname, ok=True)
                 except Exception as e:  # noqa: BLE001
                     out = f"(ошибка инструмента: {type(e).__name__}: {e})"
+                    if skill_tool_names and _tname in skill_tool_names:  # сбой навыка → учёт здоровья
+                        skill_health.record(_tname, ok=False, err=f"{type(e).__name__}: {e}",
+                                            args=tc.get("args", {}))
             s = out if isinstance(out, str) else str(out)
             s, _flag = await asyncio.to_thread(sanitize_tool_output, s, tc.get("name", "инструмент"))  # анти-инъекция (в потоке)
             if tc.get("name") not in _INTERNAL_SAFE_TOOLS:  # внешний контент → taint (гейт python_exec)
@@ -1922,7 +1953,11 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
         if (kind == "compose" or not tools) and not _is_web:
             output, msgs = await _exec_compose(system, step["goal"], step_deadline, images=_imgs)
         elif kind == "direct" and not _is_web:
-            output, msgs = await _exec_direct(system, step["goal"], tools, step_deadline, images=_imgs)
+            # имена тулов-НАВЫКОВ (для учёта здоровья: сбой навыка→degraded→самопочинка). Только
+            # навыки из реестра (не core python_exec/память/export) — у них есть код, который чинится.
+            _skill_names = {t.name for t in get_all_loaded_skill_tools(selected)}
+            output, msgs = await _exec_direct(system, step["goal"], tools, step_deadline,
+                                              images=_imgs, skill_tool_names=_skill_names)
         else:  # research, ИЛИ любой веб-шаг → agentic research (план→верификация→синтез)
             output, msgs = await _exec_research(system, step["goal"], tools, step_deadline)
         # Маркер отказа живёт в TOOL-сообщении, а финальное его перефразирует —
@@ -2007,6 +2042,11 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
             break
         _parts.append(chunk)
         _acc += len(chunk)
+    # РЕКОМБИНАЦИЯ: верифицированные результаты ПРОШЛЫХ попыток (если был ретрай) тоже идут в финал —
+    # успех одной траектории не теряется, даже если текущая попытка его не переделывала.
+    _prior = (state.get("prior_findings") or "").strip()
+    if _prior:
+        _parts.insert(0, f"[Установлено в прошлых попытках]\n{_prior[:3000]}")
     results_text = "\n\n".join(_parts) or "(шаги не дали результата)"
 
     resp = await synth_chain.ainvoke({
@@ -2209,12 +2249,26 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # Инкремент только когда реально уходим на полный ретрай (см. route_after_validation).
     bumped = retries + 1 if (not is_valid or confidence < RETRY_CONF) else retries
 
-    return {
+    out = {
         "validation_passed": is_valid,
         "confidence": confidence,
         "validation_feedback": feedback,
         "global_retries": bumped,
     }
+    # SE-Agent-lite: уходим на ПОЛНЫЙ ретрай → не просто перезапуск.
+    #  • РЕВИЗИЯ: запоминаем провалившийся подход (что пробовали + почему) → decompose даст
+    #    ОРТОГОНАЛЬНЫЙ план, а не повторит тупик (банальный retry застревает в локальном оптимуме).
+    #  • РЕКОМБИНАЦИЯ: верифицированные good-подшаги несём ВПЕРЁД (prior_findings) → новый план
+    #    переиспользует решённое, а не переделывает (успех одной попытки спасает другую).
+    if bumped > retries:
+        approach = "; ".join(s.get("goal", "") for s in _subs)[:300]
+        out["failed_trajectories"] = (state.get("failed_trajectories") or []) + [
+            {"approach": approach, "why_failed": (feedback or "")[:300]}]
+        good = [s for s in _subs if s.get("status") == "done" and str(s.get("result") or "").strip()]
+        prior = "\n".join(f"- {s['goal']}: {str(s['result'])[:300]}" for s in good)[:2000]
+        if prior:
+            out["prior_findings"] = prior
+    return out
 
 async def reflect_node(state: GeneralGraphState) -> dict:
     """
