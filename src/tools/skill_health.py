@@ -66,7 +66,7 @@ def _error_class(err_type: str) -> str:
 def record(name: str, ok: bool, err: str = "", err_type: str = "", args: dict | None = None) -> None:
     """Зафиксировать вызов навыка. ok=False → инкремент сбоев-подряд (по ТИПУ исключения err_type) +
     сохранить текст ошибки/аргументы (для регрессии починки). ok=True → сброс серии (навык снова жив).
-    err_type — `type(e).__name__`; если не задан, берём ведущий тип из 'Type: msg'."""
+    err_type — `type(e).__name__` (структурно); без него серия НЕ копится (не классифицируем вслепую)."""
     if not name:
         return
     with _LOCK:
@@ -81,16 +81,15 @@ def record(name: str, ok: bool, err: str = "", err_type: str = "", args: dict | 
                 h["status"] = "ok"  # снова заработал сам (внешний сервис ожил)
         else:
             h["failures"] = h.get("failures", 0) + 1
-            # тип исключения (структурно): из err_type, иначе ведущий 'Type:' из строки ошибки
-            raw_type = err_type or ((err or "").split(":", 1)[0].strip() if ":" in (err or "") else "")
-            cls = _error_class(raw_type)
-            # серия растёт, только если ТОТ ЖЕ класс — иначе это разные разовые сбои, не поломка
-            h["streak"] = (h.get("streak", 0) + 1) if cls == h.get("last_class") else 1
+            # класс сбоя — ТОЛЬКО по структурному типу исключения (никакого разбора текста). Нет типа
+            # → не классифицируем и серию НЕ копим (не деградируем вслепую на разнородных сбоях).
+            cls = _error_class(err_type) if err_type else None
+            h["streak"] = (h.get("streak", 0) + 1) if (cls and cls == h.get("last_class")) else 1
             h["last_error"] = (err or "")[:300]
-            h["last_class"] = cls
+            h["last_class"] = cls or ""
             if args is not None:
                 h["last_fail_args"] = args
-            if h["streak"] >= DEGRADE_AFTER:
+            if cls and h["streak"] >= DEGRADE_AFTER:
                 h["status"] = "degraded"
         data[name] = h
         _save(data)

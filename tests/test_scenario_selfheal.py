@@ -43,9 +43,9 @@ def scenario(monkeypatch):
     base = tempfile.mkdtemp()
     os.chdir(base)  # data/skill_health.json — сюда
     H.reset()
-    H.record("calc", ok=False, err="ZeroDivisionError: division by zero", args={"x": "5"})
-    H.record("calc", ok=False, err="ZeroDivisionError: division by zero", args={"x": "5"})
-    H.record("calc", ok=False, err="ZeroDivisionError: division by zero", args={"x": "5"})
+    for _ in range(3):
+        H.record("calc", ok=False, err="division by zero",
+                 err_type="ZeroDivisionError", args={"x": "5"})
     assert H.health("calc")["status"] == "degraded"
     # навык-владелец и его файл с битым кодом
     skill_dir = os.path.join(base, "scn_calc")

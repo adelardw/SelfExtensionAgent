@@ -56,13 +56,14 @@ def test_related_timeout_types_are_one_family(in_tmp):
     assert H.health("s")["status"] == "degraded"
 
 
-def test_error_type_parsed_from_string_fallback(in_tmp):
-    """Без явного err_type — тип берётся из ведущего 'Type:' строки (как форматит agent.py)."""
+def test_unclassified_failures_never_degrade(in_tmp):
+    """Без структурного err_type серия НЕ копится — не деградируем вслепую (никакого разбора текста)."""
     from src.tools import skill_health as H
     H.reset()
-    for _ in range(3):
-        H.record("s", ok=False, err="ZeroDivisionError: division by zero")
-    assert H.health("s")["status"] == "degraded"
+    for _ in range(5):
+        H.record("s", ok=False, err="some opaque error string")  # err_type не задан
+    assert H.health("s")["status"] == "ok"
+    assert H.health("s")["streak"] == 1
 
 
 def test_records_last_fail_args_for_regression(in_tmp):
