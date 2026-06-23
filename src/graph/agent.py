@@ -593,8 +593,14 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
     # synthesize дампит память и сочиняет адреса/сайты): запрос про конкретные внешние факты БЕЗ
     # физ-интента → ВСЕГДА act, где act_node идёт детерминированным грунтованным поиском (сам
     # ищет headless, синтез строго из находок). Анти-галлюцинация — жёсткое требование проекта.
+    # ИСКЛЮЧЕНИЕ для ФАЙЛ-ВЫВОДА: «собери в excel/выгрузи в csv» тоже про внешние факты, но act
+    # ФАЙЛ НЕ ДЕЛАЕТ (живой eval: уходил в act и отказывался «не могу создать файл»). Такой запрос →
+    # deliberate: там и грунтуется исследованием (анти-выдумку держат grounding-промпты synthesize),
+    # и экспортит файл export_table'ом. Сигнал — embedding-контраст (любой язык), не регэксп.
     _qe = state.get("query_emb") or None
-    if mode != "clarify" and _needs_web_grounding(state["query"], _qe) and not _wants_physical_browser(state["query"], _qe):
+    if (mode != "clarify" and _needs_web_grounding(state["query"], _qe)
+            and not _wants_physical_browser(state["query"], _qe)
+            and not _wants_file_output(state["query"])):
         if mode != "act":
             print(f"[Reflexion] нужны реальные внешние факты (адреса/цены/сайты/процедура) → "
                   f"{mode}→act (детерминированный грунтованный поиск, не выдумываю)")
@@ -675,7 +681,8 @@ _PHYSICAL_SKILLS = frozenset({
 # язык), degenerate — структурный счётчик уникальных слов. Ложный отказ «нет доступа» и
 # мета-заглушка теперь флагает финальный LLM-валидатор (validation_node), не список слов.
 from src.graph.semantic_signals import (is_degenerate as _is_degenerate, is_paywall as _is_paywall,
-                               is_error_page as _is_error_page, is_media_playing as _is_media_playing)
+                               is_error_page as _is_error_page, is_media_playing as _is_media_playing,
+                               wants_file_output as _wants_file_output)
 from src.browser.browser_session import MEDIA_PLAYING as _MEDIA_PLAYING
 
 

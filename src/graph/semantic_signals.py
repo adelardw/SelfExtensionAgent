@@ -31,7 +31,8 @@ from src.memory.embedder import cosine
 def _cfg_signals() -> dict:
     d = {"paywall_threshold": 0.58, "paywall_margin": 0.05,
          "error_threshold": 0.55, "error_margin": 0.05,
-         "media_threshold": 0.55, "media_margin": 0.05}
+         "media_threshold": 0.55, "media_margin": 0.05,
+         "fileout_threshold": 0.50, "fileout_margin": 0.04}
     try:
         from omegaconf import OmegaConf
         c = OmegaConf.load("config.yml").get("semantic_signals", {}) or {}
@@ -144,10 +145,32 @@ _MEDIA_NEG = [
     "track listing", "список треков", "добавить в плейлист", "video is paused", "остановлено",
 ]
 
+# ВЫВОД ДОЛЖЕН БЫТЬ ФАЙЛОМ: запрос требует ОТДАТЬ файл (excel/csv/выгрузка), а не текстовый ответ.
+# Нужен, чтобы анти-выдумка-пол (web_grounding→act) НЕ перебивал такие запросы в act (act файл не
+# делает) — они должны идти в deliberate (там и грунтуется исследованием, и экспортит файл).
+_FILEOUT_POS = [
+    "собери данные в excel файл", "выгрузи таблицу в csv", "дай результат файлом", "сохрани в excel",
+    "сделай excel с этими данными", "отдай файлом для скачивания", "сформируй отчёт в файле",
+    # смешанный паттерн «собери <данные/статистику за период> в excel-файл» (контент не должен
+    # размывать файл-интент — это всё равно запрос ОТДАТЬ файл):
+    "собери в один excel-файл статистику по годам", "собери показатели за несколько лет в excel файл",
+    "сделай excel таблицу с цифрами по годам и отдай файлом", "собери данные за 2019-2024 в excel файл",
+    "export the data to a spreadsheet file", "make me an excel/csv file to download",
+    "save the results as a downloadable file", "dame un archivo excel con los datos",
+    "データをエクセルファイルにまとめて", "собери в файл и дай скачать",
+]
+_FILEOUT_NEG = [
+    "какая была инфляция в 2023 году", "найди лучшие рестораны рядом", "сколько стоит этот товар",
+    "расскажи про машинное обучение", "переведи этот текст", "summarize this article",
+    "what is the capital of France", "объясни концепцию простыми словами", "напиши короткий ответ",
+    "включи музыку", "открой сайт", "какая сейчас погода",
+]
+
 # Синглтоны на процесс (кэш seed-эмбеддингов). cosine — из того же эмбеддера, что память/intent.
 _PAYWALL: Optional[_ContrastiveSignal] = None
 _ERROR: Optional[_ContrastiveSignal] = None
 _MEDIA: Optional[_ContrastiveSignal] = None
+_FILEOUT: Optional[_ContrastiveSignal] = None
 
 
 def _paywall_detector() -> _ContrastiveSignal:
@@ -171,6 +194,13 @@ def _media_detector() -> _ContrastiveSignal:
     return _MEDIA
 
 
+def _fileout_detector() -> _ContrastiveSignal:
+    global _FILEOUT
+    if _FILEOUT is None:
+        _FILEOUT = _ContrastiveSignal(_FILEOUT_POS, _FILEOUT_NEG)
+    return _FILEOUT
+
+
 def is_error_page(text: str) -> bool:
     """Страница-ошибка (404/«не найдена») — embedding-контраст, любой язык. На play-намерении
     нельзя заявлять воспроизведение, если под плеером страница-ошибка. Без эмбеддера → False."""
@@ -182,6 +212,14 @@ def is_media_playing(text: str) -> bool:
     структурный флаг MEDIA_PLAYING, его проверяют первым). Контраст POS «играет» vs NEG «пауза/
     список треков» — не путать с листингом. Без эмбеддера → False (act даёт честный статус)."""
     return _media_detector().fires(text or "", _SIG_CFG["media_threshold"], _SIG_CFG["media_margin"])
+
+
+def wants_file_output(query: str) -> bool:
+    """Запрос требует ОТДАТЬ ФАЙЛ (excel/csv/выгрузка), а не текстовый ответ — embedding-контраст
+    (любой язык, без регэкспов). Используется reflexion'ом, чтобы анти-выдумка-пол (web_grounding→
+    act) НЕ перебивал такой запрос в act: act файла не делает, нужен deliberate (грунтует
+    исследованием + экспортит). Без эмбеддера → False (тогда обычный путь)."""
+    return _fileout_detector().fires(query or "", _SIG_CFG["fileout_threshold"], _SIG_CFG["fileout_margin"])
 
 
 def is_paywall(text: str) -> bool:

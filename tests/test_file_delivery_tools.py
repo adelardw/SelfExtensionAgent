@@ -40,3 +40,14 @@ def test_write_file_blocks_path_traversal(in_tmp):
         write_file.invoke({"file_path": "../../etc/evil.csv", "content": "x"})
         m = run_context.artifacts()[0]
         assert "/" not in m["name"] and ".." not in m["name"]  # имя санитизировано
+
+
+def test_wants_file_output_detector():
+    """Embedding-сигнал «нужен файл-вывод» (исключает file-запросы из форса web_grounding→act)."""
+    from src.graph.semantic_signals import wants_file_output as w
+    # file-запросы (контент не размывает интент)
+    assert w("Собери в один Excel-файл годовую инфляцию в России за 2019-2024")
+    assert w("Выгрузи мои расходы в csv файл")
+    # чистые факты/действия — НЕ файл (не должны ложно уходить из act-грундинга)
+    assert not w("Какая была инфляция в России в 2023?")
+    assert not w("Найди лучшие рестораны рядом")
