@@ -1690,8 +1690,8 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                 except Exception as e:  # noqa: BLE001
                     out = f"(ошибка инструмента: {type(e).__name__}: {e})"
                     if skill_tool_names and _tname in skill_tool_names:  # сбой навыка → учёт здоровья
-                        skill_health.record(_tname, ok=False, err=f"{type(e).__name__}: {e}",
-                                            args=tc.get("args", {}))
+                        skill_health.record(_tname, ok=False, err=str(e),
+                                            err_type=type(e).__name__, args=tc.get("args", {}))
             s = out if isinstance(out, str) else str(out)
             s, _flag = await asyncio.to_thread(sanitize_tool_output, s, tc.get("name", "инструмент"))  # анти-инъекция (в потоке)
             if tc.get("name") not in _INTERNAL_SAFE_TOOLS:  # внешний контент → taint (гейт python_exec)

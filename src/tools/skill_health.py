@@ -44,24 +44,29 @@ def _save(data: dict) -> None:
     os.replace(tmp, p)  # atomic
 
 
-def _error_class(err: str) -> str:
-    """Грубый класс ошибки для «подряд ОДНОГО класса» (не лексикон-костыль, а тип сбоя):
-    timeout / http(4xx-5xx) / import / network / other. Достаточно для детекта системной поломки."""
-    e = (err or "").lower()
-    if "timeout" in e or "timed out" in e:
-        return "timeout"
-    if any(c in e for c in ("http", "404", "403", "500", "502", "503", "status code", "ssl")):
-        return "http"
-    if "import" in e or "module" in e or "no module" in e:
-        return "import"
-    if any(c in e for c in ("connection", "network", "resolve", "dns", "unreachable")):
-        return "network"
-    return "other"
+# Семейства родственных типов исключений (timeout/network/import/http) — чтобы напр. ReadTimeout и
+# ConnectTimeout считались ОДНИМ классом «сервис тормозит». Всё прочее группируется по САМОМУ типу
+# исключения (KeyError≠ValueError) — это структурная идентичность сбоя, НЕ подстрочное гадание по тексту.
+_TYPE_FAMILY = {
+    "TimeoutError": "timeout", "ReadTimeout": "timeout", "ConnectTimeout": "timeout", "timeout": "timeout",
+    "ConnectionError": "network", "ConnectionRefusedError": "network", "ConnectionResetError": "network",
+    "URLError": "network", "gaierror": "network", "NewConnectionError": "network",
+    "ImportError": "import", "ModuleNotFoundError": "import",
+    "HTTPError": "http", "HTTPStatusError": "http",
+}
 
 
-def record(name: str, ok: bool, err: str = "", args: dict | None = None) -> None:
-    """Зафиксировать вызов навыка. ok=False → инкремент сбоев-подряд + сохранить класс/аргументы
-    (для регрессии починки). ok=True → сброс серии (навык снова жив)."""
+def _error_class(err_type: str) -> str:
+    """Класс сбоя = ТИП исключения (структурно), с объединением родственных в семейство. По типу,
+    а не по подстрокам текста — `type(e).__name__` доступен в точке записи (agent.py)."""
+    t = (err_type or "").strip()
+    return _TYPE_FAMILY.get(t, t or "other")
+
+
+def record(name: str, ok: bool, err: str = "", err_type: str = "", args: dict | None = None) -> None:
+    """Зафиксировать вызов навыка. ok=False → инкремент сбоев-подряд (по ТИПУ исключения err_type) +
+    сохранить текст ошибки/аргументы (для регрессии починки). ok=True → сброс серии (навык снова жив).
+    err_type — `type(e).__name__`; если не задан, берём ведущий тип из 'Type: msg'."""
     if not name:
         return
     with _LOCK:
@@ -76,7 +81,9 @@ def record(name: str, ok: bool, err: str = "", args: dict | None = None) -> None
                 h["status"] = "ok"  # снова заработал сам (внешний сервис ожил)
         else:
             h["failures"] = h.get("failures", 0) + 1
-            cls = _error_class(err)
+            # тип исключения (структурно): из err_type, иначе ведущий 'Type:' из строки ошибки
+            raw_type = err_type or ((err or "").split(":", 1)[0].strip() if ":" in (err or "") else "")
+            cls = _error_class(raw_type)
             # серия растёт, только если ТОТ ЖЕ класс — иначе это разные разовые сбои, не поломка
             h["streak"] = (h.get("streak", 0) + 1) if cls == h.get("last_class") else 1
             h["last_error"] = (err or "")[:300]
