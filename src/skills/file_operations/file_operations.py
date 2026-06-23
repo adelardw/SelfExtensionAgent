@@ -16,12 +16,16 @@ def read_file(file_path: str) -> str:
 
 @tool
 def write_file(file_path: str, content: str) -> str:
-    """Записывает текст в файл. Если файл не существует, он будет создан."""
+    """Создаёт файл с содержимым ДЛЯ ПОЛЬЗОВАТЕЛЯ — он получит его скачиванием (GUI) или сохранённым
+    путём (терминал). Для отдачи любого текстового файла (csv/txt/md/json/код). file_path — желаемое
+    имя файла (например 'data.csv')."""
     try:
-        path = Path(file_path)
-        with open(path, 'w', encoding='utf-8') as file:
-            file.write(content)
-        return f"Файл {file_path} успешно записан."
+        # В канал доставки артефактов (не в случайный cwd): любой созданный файл доходит до юзера.
+        # Живой eval поймал: запись в cwd + «доставить нельзя» — структурно невозможна теперь.
+        from src.runtime.artifacts import save_artifact_file
+        m = save_artifact_file(file_path, content)
+        return (f"Файл '{m['name']}' создан и будет ДОСТАВЛЕН пользователю (скачиванием/путём). "
+                f"НЕ пиши, что доставить нельзя, и НЕ вставляй содержимое в ответ.")
     except Exception as e:
         return f"Ошибка при записи файла: {e}"
 

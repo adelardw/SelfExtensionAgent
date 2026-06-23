@@ -195,7 +195,7 @@ def stash_aggregate(name: str, field: str, op: str = "sum", group_by: str = "") 
 
 @tool
 def stash_export_csv(name: str) -> str:
-    """Export a stash as CSV text (for pasting into a spreadsheet).
+    """Export a stash as a DOWNLOADABLE file delivered to the user (not pasted text).
 
     Args:
         name: Stash name.
@@ -213,4 +213,8 @@ def stash_export_csv(name: str) -> str:
     w.writeheader()
     for r in rows:
         w.writerow(r)
-    return f"CSV стэша '{name}':\n{buf.getvalue()}"
+    # РЕАЛЬНЫЙ файл в канал доставки (не CSV-текст в ответ — это был старый дефект).
+    from src.runtime.artifacts import save_artifact_file
+    m = save_artifact_file(f"{name}.csv", buf.getvalue())
+    return (f"Стэш '{name}' выгружен в файл '{m['name']}' — будет доставлен пользователю "
+            f"(скачиванием/путём). НЕ вставляй CSV-текст в ответ.")

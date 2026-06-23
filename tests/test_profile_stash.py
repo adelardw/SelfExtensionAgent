@@ -80,9 +80,16 @@ def test_stash_invalid_json(stash):
 
 
 def test_stash_export_csv(stash):
+    # Теперь экспорт ОТДАЁТ ФАЙЛ (артефакт), а не CSV-текст в ответе (живой eval: текст = старый дефект).
+    from src.runtime import run_context, artifacts
     stash.stash_add.invoke({"name": "t", "row_json": '{"a":1,"b":2}'})
-    csv = stash.stash_export_csv.invoke({"name": "t"})
-    assert "a,b" in csv.replace(", ", ",") or ("a" in csv and "b" in csv)
+    with run_context.request_scope("stash-test", "local"):
+        msg = stash.stash_export_csv.invoke({"name": "t"})
+        assert "файл" in msg.lower() and "доставлен" in msg.lower()  # сообщает о доставке, не дублирует CSV
+        arts = run_context.artifacts()
+        assert len(arts) == 1
+        content = artifacts.resolve_artifact(arts[0]["id"]).read_text()
+        assert "a" in content and "b" in content and "1" in content  # данные реально в файле
 
 
 def test_stash_empty(stash):

@@ -98,6 +98,26 @@ def write_table(filename: str, columns: list, rows: list, sheet: str = "Sheet1")
     return meta
 
 
+def save_artifact_file(filename: str, content) -> dict:
+    """Зарегистрировать ПРОИЗВОЛЬНЫЙ файл (сырой текст/байты) как доставляемый артефакт — чтобы любой
+    файловый тул (write_file/stash_export_csv), а не только export_table, доходил до пользователя
+    кнопкой/путём. Пишет в artifacts/<id>/<имя> (контейнер, не cwd) + регистрирует. Живой eval
+    вскрыл: агент берёт write_file, пишет в cwd и говорит «доставить нельзя» — структурно убираем."""
+    aid = uuid.uuid4().hex
+    name = _safe_name(filename, default_ext=".txt")
+    adir = artifact_dir() / aid
+    adir.mkdir(parents=True, exist_ok=True)
+    path = adir / name
+    if isinstance(content, bytes):
+        path.write_bytes(content)
+    else:
+        path.write_text(str(content), encoding="utf-8")
+    meta = {"id": aid, "name": name, "path": str(path),
+            "nrows": str(content).count("\n") + 1 if not isinstance(content, bytes) else 0, "kind": path.suffix.lstrip(".") or "file"}
+    run_context.artifact_emit(meta)
+    return meta
+
+
 def resolve_artifact(artifact_id: str) -> Path | None:
     """id → путь к файлу для отдачи (GET /artifact/{id}). Жёсткая валидация id (анти-traversal):
     только hex, каталог artifacts/<id>/ должен существовать, отдаём единственный файл в нём."""

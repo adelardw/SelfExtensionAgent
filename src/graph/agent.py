@@ -897,6 +897,9 @@ async def act_node(state: GeneralGraphState) -> dict:
     if not tools:
         return {"mode": "deliberate"}  # нечем действовать напрямую — обычный путь
     tools.append(clarify.make_ask_user_tool())
+    # Экспорт-файл доступен и в act: «дай excel/csv/файл» приходит и сюда (живой eval: act-режим без
+    # export_table → агент врал «мои инструменты не поддерживают генерацию файлов»). Доставка — та же.
+    tools.append(make_export_tool())
     sys_text = act_system_prompt.format(
         memory_context=state.get("memory_context", "Память пуста."))
     history = _history_messages(state)  # реальные Human/AIMessage диалога (контекст «любую/да»)
