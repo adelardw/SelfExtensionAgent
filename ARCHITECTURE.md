@@ -99,7 +99,7 @@ There are TWO routings, at different levels. The intent router does NOT pick the
 | Security | `utils_validation.py` (AST gate, write + module-level), `tools/skill_creation.py` (load-time gate), `utils.py` (sandbox subprocess), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | generated code: AST bans + smoke in an isolated process (rlimits/kill); **load-time gate** (`_load_skill_module`): a skill is gated BEFORE `exec_module` (HITL gates the *call*, but module-level code runs at *import*) by a three-tier trust policy (core=as-is · imported=module-level AST · orphan/generated=full AST) + mtime cache (no re-exec per step); side-effect tools — confirmation, deny by default; **anti-injection in tool/MCP/search outputs** (`sanitize_tool_output`); **anti-PII floor** (`strip_ungrounded_pii` cuts fabricated emails, leaves numbers; `redact_pii` in collective patterns) — "do not disclose" is the twin of "do not fabricate"; **anti-hallucination gates catalogued in one decision table** (`docs/anti_hallucination_gates.md`, pinned by characterization tests); training bans (don't change architecture/prompts, don't learn from a jailbreak). **Honest ceiling**: AST = parity, not a sandbox |
 | External | `external/context.py` | A2A/MCP context in state (slot + plumbing) |
 | Maintenance | `maintenance/dep_update.py` | safe auto-update of dependencies with health-check and rollback |
-| Interfaces | **`cli.py`/`tui.py` (full-screen Textual TUI — default `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (native window via pywebview), packaged **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` is now one-shot/scripting only (REPL replaced by the TUI). | shared graph + shared memory. The GUI runs each turn as a background run with **live progress** (per-node steps via `astream`), **interactive clarify** (Q/A multiselect card over `/run/{id}/respond`) and confirm, native file attach (`/attach_local`) + mic (server-side ffmpeg), thread history, and a settings panel (provider/models/key, work/thinking mode, extension token). Key/provider set from CLI (`sea key`) into a global user config; the packaged app runs in `~/Library/Application Support/SEA`. Brain stays Python; thin client + brain. |
+| Interfaces | **`cli.py`/`tui.py` (full-screen Textual TUI — default `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (native window via pywebview), packaged **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` is now one-shot/scripting only (REPL replaced by the TUI). | shared graph + shared memory. The GUI runs each turn as a background run with **live progress** (per-node steps via `astream`), an **"⚡ answer now"** button (early finish from accumulated context, fast model), **file-download** buttons for produced artifacts, **interactive clarify** (Q/A multiselect card over `/run/{id}/respond`) and confirm, native file attach (`/attach_local`) + mic (server-side ffmpeg), thread history, and a settings panel (provider/models/key, work/thinking mode, extension token). Key/provider set from CLI (`sea key`) into a global user config; the packaged app runs in `~/Library/Application Support/SEA`. Brain stays Python; thin client + brain. |
 
 ## Repository layout (`src/`)
 
@@ -209,7 +209,17 @@ edits go through this — `plan` blocks, `manual` asks, `auto` runs; accept/reje
 **Skills are three-tier** (like memory): global/user (`src/skills/` + registry.json, cross-project,
 validated by the 3-stage SGR gate) · project (`.sea/skills/`, default for agent-created skills when
 a project is initialized) · external (`SKILL.md`). The `code` skill (glob/grep/tree/read +
-edit/bash) is a global capability; run-budget is task-aware (code/action tasks get more).
+edit/bash) is a global capability.
+
+**No run budget — natural completion + "answer now".** The run isn't cut by a time/token/step
+budget; the plan is self-limiting (≤`max_subtasks` + retry caps + `seen_calls` anti-loop), so it
+runs to its natural end (incl. long tasks). Early finish is the user's call: an **"⚡ answer now"**
+button (shown immediately during a run) → `POST /run/{id}/answer_now` → the graph synthesizes from the
+accumulated context with the **fast** model. The only auto-stop is an absolute anti-runaway step
+ceiling (pathology, not a budget). Kept as safety, not budget: the SDK client timeout + fetch
+timeouts (anti-infinite-hang). Files the agent produces are delivered as **downloadable artifacts**
+(`export_table`/`write_file` → `GET /artifact/{id}` + a GUI download button), never pasted as
+copy-this text.
 
 ## CLI commands
 
@@ -357,7 +367,7 @@ START
 | Безопасность | `utils_validation.py` (AST-гейт: запись + уровень модуля), `tools/skill_creation.py` (гейт загрузки), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | генерируемый код: AST-запреты + smoke в изолированном процессе (rlimits/kill); **гейт загрузки** (`_load_skill_module`): навык гейтится ПЕРЕД `exec_module` (HITL гейтит *вызов*, но module-level код идёт при *импорте*) по трёхуровневой модели доверия (core=как есть · imported=AST уровня модуля · orphan/сгенерированное=полный AST) + кэш по mtime (нет ре-exec на шаг); side-effect инструменты — подтверждение, deny by default; **защита от инъекций в выводах инструментов/MCP/поиска** (`sanitize_tool_output`); **гарантированная фильтрация PII** (`strip_ungrounded_pii` режет выдуманные email, числа не трогает; `redact_pii` в коллективных паттернах) — «не разглашать» = близнец «не выдумывать»; **анти-галлюцинационные гейты собраны в единую decision-таблицу** (`docs/anti_hallucination_gates.md`, закреплены характеризационными тестами); запреты обучения (не менять архитектуру/промпты, не учиться на взломе). **Честный потолок**: AST = паритет, не песочница |
 | Внешнее | `external/context.py` | контекст A2A/MCP в состоянии (слот + плумбинг) |
 | Обслуживание | `maintenance/dep_update.py` | безопасный авто-апдейт зависимостей с health-check и откатом |
-| Интерфейсы | **`cli.py`/`tui.py` (полноэкранный Textual TUI — дефолтный `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (нативное окно через pywebview), упакованный **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` — теперь только one-shot/скрипты (REPL заменён TUI). | общий граф + общая память. GUI гонит каждый ход как фоновый прогон с **живым прогрессом** (шаги по узлам через `astream`), **интерактивным clarify** (Q/A-мультиселект через `/run/{id}/respond`) и подтверждением, нативное прикрепление файлов (`/attach_local`) + микрофон (ffmpeg на сервере), история тредов, панель настроек (провайдер/модели/ключ, режимы, токен расширения). Ключ/провайдер из CLI (`sea key`) в глобальный конфиг; упакованное приложение работает в `~/Library/Application Support/SEA`. Мозг — Python; тонкий клиент + мозг. |
+| Интерфейсы | **`cli.py`/`tui.py` (полноэкранный Textual TUI — дефолтный `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (нативное окно через pywebview), упакованный **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` — теперь только one-shot/скрипты (REPL заменён TUI). | общий граф + общая память. GUI гонит каждый ход как фоновый прогон с **живым прогрессом** (шаги по узлам через `astream`), кнопкой **«⚡ Ответить сейчас»** (ранний финал по накопленному, быстрая модель), кнопками **скачивания** произведённых файлов, **интерактивным clarify** (Q/A-мультиселект через `/run/{id}/respond`) и подтверждением, нативное прикрепление файлов (`/attach_local`) + микрофон (ffmpeg на сервере), история тредов, панель настроек (провайдер/модели/ключ, режимы, токен расширения). Ключ/провайдер из CLI (`sea key`) в глобальный конфиг; упакованное приложение работает в `~/Library/Application Support/SEA`. Мозг — Python; тонкий клиент + мозг. |
 
 ## Раскладка репозитория (`src/`)
 
@@ -465,7 +475,17 @@ HITL подтверждают и как стримят прогресс.
 **Навыки трёхъярусны** (как память): глобальные/user (`src/skills/` + registry.json, кросс-проект,
 гейт 3-ступенчатой SGR-валидации) · проектные (`.sea/skills/`, дефолт для агент-создаваемых навыков
 в инициализированном проекте) · внешние (`SKILL.md`). Навык `code` (glob/grep/tree/read +
-edit/bash) — глобальная способность; бюджет прогона зависит от типа задачи (код/действия — больше).
+edit/bash) — глобальная способность.
+
+**Бюджета прогона НЕТ — естественное доведение + «ответить сейчас».** Прогон не режется по
+времени/токенам/шагам: план самоограничен (≤`max_subtasks` + капы ретраев + анти-зацикливание
+`seen_calls`) → доводится до естественного конца, в т.ч. ДОЛГИЕ задачи. Ранний выход — решение юзера:
+кнопка **«⚡ Ответить сейчас»** (видна сразу во время прогона) → `POST /run/{id}/answer_now` → граф
+собирает финал из накопленного контекста **быстрой** моделью. Единственный авто-стоп — абсолютный
+анти-runaway потолок шагов (патология, не бюджет). Оставлено как защита, не бюджет: SDK-таймаут
+клиента + фетч-таймауты (анти-зависание). Произведённые файлы доставляются как **скачиваемые
+артефакты** (`export_table`/`write_file` → `GET /artifact/{id}` + кнопка скачивания в GUI), а не
+текстом «скопируйте».
 
 ## CLI команды
 
