@@ -312,7 +312,9 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
             run.setdefault("timings", {})["Reading attachments"] = round(time.monotonic() - _att_t0, 1)
         history = chat_store.get_messages(tid, last=_HISTORY_LIMIT)
         state: dict = {}
-        with run_context.request_scope(f"chat-{uuid.uuid4().hex}", inp.user_id):  # изоляция per-request
+        _scope_id = f"chat-{uuid.uuid4().hex}"
+        run["scope_id"] = _scope_id  # для кнопки «ответить сейчас»: /answer_now ставит флаг по нему
+        with run_context.request_scope(_scope_id, inp.user_id):  # изоляция per-request
             tracker = usage.TokenTracker()  # ловит usage каждого LLM-вызова прогона (в десктопе их не было)
             trace_cb = _TraceCb()           # трейс тулов для интерпретируемости в UI
             _last_ts = time.monotonic()     # для тайминга по нодам (где реально уходит время)
@@ -432,6 +434,19 @@ def get_artifact(artifact_id: str):
     if not p or not p.exists():
         raise HTTPException(status_code=404, detail="artifact not found")
     return FileResponse(str(p), filename=p.name, media_type="application/octet-stream")
+
+
+@app.post("/run/{run_id}/answer_now")
+def answer_now(run_id: str) -> dict:
+    """Кнопка «ответить сейчас»: дать финал по УЖЕ накопленному контексту (быстрой моделью), не
+    дожидаясь конца. Бюджета нет → это и есть пользовательский ранний выход. Граф увидит флаг между
+    шагами и пойдёт в синтез. Особенно для ДОЛГИХ задач."""
+    run = _RUNS.get(run_id)
+    sid = run and run.get("scope_id")
+    if not sid:
+        return {"ok": False}
+    run_context.request_answer_now(sid)
+    return {"ok": True}
 
 
 @app.post("/run/{run_id}/respond")

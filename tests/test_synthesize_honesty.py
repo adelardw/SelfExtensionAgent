@@ -31,14 +31,14 @@ def test_validator_flags_false_completion(monkeypatch):
 
     monkeypatch.setattr(A, "validation_chain", _judge(false_completion=True))
     monkeypatch.setattr(A, "CONSENSUS_VALIDATION", False)
-    monkeypatch.setattr(A.runbudget, "exhausted", lambda *a, **k: True)  # прогон оборван бюджетом
+    # бюджет УБРАН → «оборван» теперь по нерешённым подшагам (status=partial), не по бюджету
     state = {"query": "закажи пиццу",
              "final_answer": "Я добавил в корзину пиццу с морепродуктами и одну любую пиццу.",
              "subtasks": [{"goal": "добавить пиццу", "status": "partial"}]}
     out = asyncio.run(A.validation_node(state))
     ans = out["final_answer"].lower()
-    assert "не довёл" in ans or "не довел" in ans   # честно, не «добавил»
-    assert "проверь" in ans
+    # честная пометка «не на 100%», а не «добавил» как факт (и без «не довёл по бюджету»)
+    assert "проверь" in ans and ("100%" in ans or "максимум" in ans)
     assert out["validation_passed"] is True
 
 

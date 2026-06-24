@@ -98,6 +98,27 @@ def artifacts() -> list:
 register_cleanup(lambda rid: _artifacts.pop(rid, None))
 
 
+# ── «ОТВЕТИТЬ СЕЙЧАС»: юзер просит ФИНАЛ по уже накопленному контексту (быстрой моделью), не дожидаясь
+# естественного конца. Замена БЮДЖЕТА: бюджет убран (план сам ограничен), ранний выход — РЕШЕНИЕ
+# ЮЗЕРА, не авто-рез. Флаг ставится ИЗВНЕ по scope-id (кнопка в GUI → эндпоинт), граф проверяет
+# answer_now() между шагами → идёт в synthesize. Скоуп по run_id.
+_answer_now: dict[str, bool] = {}
+
+
+def request_answer_now(run_id: str) -> None:
+    """Запросить немедленный финал для прогона run_id (зовётся ИЗ ДРУГОГО запроса — кнопка GUI)."""
+    if run_id:
+        _answer_now[run_id] = True
+
+
+def answer_now() -> bool:
+    """Нажата ли «ответить сейчас» для ТЕКущего прогона (проверяет граф между шагами)."""
+    return _answer_now.get(current_run_id() or "_default", False)
+
+
+register_cleanup(lambda rid: _answer_now.pop(rid, None))
+
+
 @contextmanager
 def request_scope(run_id: str, user_id: str = ""):
     """Изолировать запрос по run_id (+ user_id). Оборачивать вызов графа на границе сервера/бота."""

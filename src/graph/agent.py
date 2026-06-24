@@ -1944,11 +1944,11 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # Дедлайн шага: остаток бюджета, НО не больше потолка. Веб-research НЕ ретраится и
     # сам ограничен по времени → даём ему БОЛЬШЕ (полный multi-hop: 3-4 под-вопроса),
     # обычным шагам — STEP_DEADLINE_CAP (анти-монополия). Wall-clock всё равно общий потолок.
+    # БЕЗ wall-бюджета: шаг ограничен только своим _cap (анти-хэнг одного шага: STEP_DEADLINE_CAP /
+    # RESEARCH_STEP_DEADLINE), а не остатком общего времени. Прогон не рубится по времени — план
+    # доводится до конца; per-step cap лишь не даёт ОДНОМУ шагу висеть бесконечно (это не бюджет).
     _cap = RESEARCH_STEP_DEADLINE if _is_web else STEP_DEADLINE_CAP
-    # Wall для остатка: интерактив → абсолютный hard (шаги не голодают после 150с, план доводится),
-    # eval/one-shot → тугой мягкий потолок. Шаг всё равно ≤_cap (анти-монополия одного шага).
-    _wall = _wall_seconds(state) if _is_interactive(state) else _run_limits(state)[1]
-    step_deadline = min(_cap, max(15.0, _wall - runbudget.elapsed()))
+    step_deadline = _cap
     msgs: list = []
     # ЖЁСТКИЙ обрыв ВНУТРИ шага против интра-степ ВЗРЫВА (живой баг: один research-шаг → ~1М
     # токенов). Вооружаем НЕ на 1.0× бюджета, а на ×STEP_HARD_CUT_MULT (см. _step_hard_limits):
@@ -2065,12 +2065,12 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         "clarifications": clarify.format_ledger(),
         "step_results": results_text,
     }
-    # БЕЗ собственного таймаута — каждый LLM-вызов и так ограничен SDK-таймаутом клиента
-    # (config.llm_timeout, max_retries=1), шаги — дедлайнами, цикл — wall-бюджетом. Граф сам
-    # терминируется. Если синтез всё же упал (SDK-таймаут/сбой) — ниже guard подхватит лучший
-    # результат шага, чтобы НЕ потерять найденное (вместо пустого/ошибки).
+    # «ОТВЕТИТЬ СЕЙЧАС» → собираем финал БЫСТРОЙ моделью (fast) по накопленному — юзер не ждёт
+    # медленный умный ярус. Иначе обычный каскад-синтез (deep) на сжатом дистилляте. Без своего
+    # таймаута — LLM-вызов ограничен SDK-таймаутом клиента; упал → guard ниже подхватит лучший шаг.
+    _chain = (synthesize_prompt | llm) if run_context.answer_now() else synth_chain
     try:
-        resp = await synth_chain.ainvoke(_payload)
+        resp = await _chain.ainvoke(_payload)
     except Exception:  # noqa: BLE001
         degradation.note("synth_failed")
         resp = None
@@ -2168,14 +2168,10 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # Структурный сигнал «прогон оборван/незавершён» — судье для флага false_completion (ловит
     # ложь о завершении семантически, любой язык, вместо русско-центричного регэкспа в synthesize).
     _subs = state.get("subtasks", []) or []
-    # «Оборван» — по АБСОЛЮТНОМУ предохранителю в интерактиве (мягкий 150с там не рубит), иначе по
-    # тугому бюджету. Так в интерактиве caveat «не довёл» возникает ТОЛЬКО при реальной патологии
-    # (hard), а не при нормальном долгом плане.
-    if _is_interactive(state):
-        _cut = (runbudget.elapsed() >= MAX_RUN_SECONDS_HARD
-                or state.get("steps_executed", 0) >= MAX_STEPS_HARD)
-    else:
-        _cut = runbudget.exhausted(*_run_limits(state))
+    # БЮДЖЕТ УБРАН → «оборван» означает либо КНОПКУ юзера «ответить сейчас» (намеренный ранний финал
+    # по накопленному), либо абсолютный анти-runaway потолок шагов (патология). Не «бюджет/время».
+    _answer_now = run_context.answer_now()
+    _cut = _answer_now or state.get("steps_executed", 0) >= MAX_STEPS_HARD
     incomplete = _cut or any(s.get("status") not in ("done", "blocked") for s in _subs)
 
     payload = {
@@ -2235,18 +2231,17 @@ async def validation_node(state: GeneralGraphState) -> dict:
         # НЕ выбрасываем: для контентных задач («напиши стратегию/текст») синтез-ответ И ЕСТЬ результат,
         # пусть и частичный. Раньше отдавали голую отписку «нет результата» — юзер терял черновик.
         draft = (state.get("final_answer") or "").strip()
-        if _is_interactive(state):
-            # Интерактив: «продолжи»-стопа нет (план доводим). Сюда попали ТОЛЬКО при абсолютном
-            # предохранителе (патология) → доводим по максимуму, честно метим непокрытое, БЕЗ «продолжи».
-            why = "уперся в предохранитель прогона" if _cut else "часть шагов не закрылась"
-            caveat = (f"⚠ Довёл по максимуму, но не на 100% ({why}) — проверь. "
-                      + (f"Готово: {'; '.join(done[:4])}. " if done else "")
-                      + "Скажи, что доработать.")
+        if _answer_now:
+            # Юзер нажал «ответить сейчас» — это НАМЕРЕННЫЙ ранний финал по накопленному, НЕ провал.
+            # Мягкая пометка, без «не довёл/продолжи»; ответ ниже И ЕСТЬ запрошенный быстрый результат.
+            caveat = ("⚡ Быстрый ответ по тому, что собрано на момент запроса "
+                      + (f"(готово: {'; '.join(done[:4])})" if done else "") + ":")
         else:
-            why = "бюджет прогона исчерпан" if _cut else "не все шаги завершены"
-            caveat = (f"⚠ НЕ довёл задачу до конца ({why}) — НЕ считай выполненным, проверь. "
-                      + (f"Успел: {'; '.join(done[:4])}. " if done else "")
-                      + "Скажи «продолжи» — доведу с места остановки.")
+            # Бюджета нет → сюда только при абсолютном анти-runaway потолке (патология) или нерешённых
+            # подшагах. Доводим по максимуму, честно метим непокрытое — без «продолжи/бюджет».
+            why = "упёрся в анти-runaway потолок" if _cut else "часть шагов не закрылась"
+            caveat = (f"⚠ Довёл по максимуму, но не на 100% ({why}) — проверь. "
+                      + (f"Готово: {'; '.join(done[:4])}. " if done else ""))
         # СОДЕРЖАТЕЛЬНЫЙ черновик (контентная задача — «напиши стратегию/текст») отдаём ПОД пометкой:
         # сам ответ И ЕСТЬ результат, пусть частичный. Короткий/мета — это скорее ложный side-effect-
         # claim («добавил в корзину») → НЕ сохраняем (только честная пометка).
@@ -2613,23 +2608,16 @@ def route_after_sgr_create(state: GeneralGraphState) -> str:
 
 
 def route_after_step(state: GeneralGraphState) -> str:
-    """Шаговый цикл: остались подшаги (или идёт ретрай) → step_executor, иначе → synthesize.
-    ИНТЕРАКТИВ (desktop/TUI): НЕ рубим на 150с/8 шагов — даём естественно-конечному плану доработать
-    (он сам ≤MAX_SUBTASKS + капы ретраев + анти-зацикливание), стоп только по АБСОЛЮТНОМУ
-    предохранителю (анти-патология) → нет «продолжи». EVAL/one-shot: тугой бюджет как раньше."""
-    if _is_interactive(state):
-        if (runbudget.elapsed() >= MAX_RUN_SECONDS_HARD
-                or state.get("steps_executed", 0) >= MAX_STEPS_HARD):
-            print(f"[Budget] абсолютный предохранитель ({runbudget.elapsed():.0f}с / "
-                  f"{state.get('steps_executed', 0)} шагов) — собираю что есть")
-            return "synthesize"
-        if state.get("current_step", 0) < len(state.get("subtasks", [])):
-            return "step_executor"
+    """Шаговый цикл БЕЗ БЮДЖЕТА. Рез по времени/токенам/шагам-8 УБРАН: план сам ограничен
+    (≤MAX_SUBTASKS подшагов + капы ретраев + анти-зацикливание seen_calls), поэтому доводим до
+    ЕСТЕСТВЕННОГО конца — никаких «не довёл по бюджету», в т.ч. на ДОЛГИХ задачах. Ранний выход —
+    только РЕШЕНИЕ ЮЗЕРА (кнопка «ответить сейчас» → answer_now → быстрый синтез по накопленному) или
+    абсолютный анти-runaway потолок шагов (патология, не бюджет; план до него не доходит)."""
+    if run_context.answer_now():
+        print("[AnswerNow] юзер запросил ответ сейчас — синтез по накопленному контексту")
         return "synthesize"
-    _tl, _sl = _run_limits(state)
-    if state.get("steps_executed", 0) >= MAX_STEPS_PER_RUN or runbudget.exhausted(_tl, _sl):
-        print(f"[Budget] стоп: шаги={state.get('steps_executed', 0)}/{MAX_STEPS_PER_RUN}, "
-              f"токены={runbudget.used()}/{_tl}, {runbudget.elapsed():.0f}с — собираю что есть")
+    if state.get("steps_executed", 0) >= MAX_STEPS_HARD:
+        print(f"[Safety] {MAX_STEPS_HARD} шагов — абсолютный анти-runaway потолок (не бюджет)")
         return "synthesize"
     if state.get("current_step", 0) < len(state.get("subtasks", [])):
         return "step_executor"

@@ -40,16 +40,15 @@ def test_callback_counts_token_usage():
     assert runbudget.used() == 1000
 
 
-def test_route_after_step_stops_on_token_budget(monkeypatch):
+def test_route_after_step_ignores_token_budget(monkeypatch):
+    """Бюджет УБРАН: «за токен-бюджетом» прогон НЕ рубится — есть подшаги → step_executor."""
     import src.graph.agent as A
 
-    monkeypatch.setattr(A, "MAX_RUN_TOKENS", 5000)
-    monkeypatch.setattr(A, "MAX_STEPS_PER_RUN", 99)
     runbudget.reset()
-    runbudget.add(6000)  # за бюджетом
-    # есть ещё подшаги, но бюджет исчерпан → синтез, не step_executor
+    runbudget.add(10**9)  # «за бюджетом» — на маршрут больше не влияет
     state = {"steps_executed": 1, "current_step": 0, "subtasks": [{"goal": "a"}, {"goal": "b"}]}
-    assert A.route_after_step(state) == "synthesize"
+    monkeypatch.setattr(A.run_context, "answer_now", lambda: False)
+    assert A.route_after_step(state) == "step_executor"
     runbudget.reset()
 
 
@@ -65,12 +64,14 @@ def test_route_after_step_continues_within_budget(monkeypatch):
     runbudget.reset()
 
 
-def test_step_budget_caps_count(monkeypatch):
+def test_no_step_budget_only_anti_runaway_ceiling(monkeypatch):
+    """8-шаговый бюджет убран: много шагов → идём дальше; стоп только на абсолютном MAX_STEPS_HARD."""
     import src.graph.agent as A
 
-    monkeypatch.setattr(A, "MAX_RUN_TOKENS", 10**9)
-    monkeypatch.setattr(A, "MAX_STEPS_PER_RUN", 3)
+    monkeypatch.setattr(A.run_context, "answer_now", lambda: False)
     runbudget.reset()
-    state = {"steps_executed": 3, "current_step": 0, "subtasks": [{"goal": "a"}, {"goal": "b"}]}
-    assert A.route_after_step(state) == "synthesize"  # исчерпан бюджет шагов
+    s1 = {"steps_executed": 10, "current_step": 0, "subtasks": [{"goal": "a"}, {"goal": "b"}]}
+    assert A.route_after_step(s1) == "step_executor"          # 10 шагов — не рубим
+    s2 = {"steps_executed": A.MAX_STEPS_HARD, "current_step": 0, "subtasks": [{"goal": "a"}]}
+    assert A.route_after_step(s2) == "synthesize"             # абсолютный анти-runaway потолок
     runbudget.reset()
