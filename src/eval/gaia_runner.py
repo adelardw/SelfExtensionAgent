@@ -177,11 +177,12 @@ async def run(n: int = 8, offset: int = 0, jsonl: str | None = None) -> None:
             tr = TokenTracker()
             t0 = time.monotonic()
             try:
-                r = await asyncio.wait_for(
-                    graph.ainvoke({"query": query, "user_id": f"gaia_{gidx}", "chat_history": []},
-                                  config={"recursion_limit": 50, "callbacks": [tr]}),
-                    timeout=SCENARIO_TIMEOUT,
-                )
+                # БЕЗ внешнего таймаута: граф терминируется сам (wall-бюджет шагов + SDK-таймаут
+                # клиента). Гильотина рубила задачу за ~30с до естественного финиша и теряла её пустой
+                # (11× TimeoutError на n=100). Пусть доходит до конца и отдаёт реальный ответ.
+                r = await graph.ainvoke(
+                    {"query": query, "user_id": f"gaia_{gidx}", "chat_history": []},
+                    config={"recursion_limit": 50, "callbacks": [tr]})
                 ans = r.get("final_answer", "") or ""
                 mode = r.get("mode", "?")
             except Exception as e:  # noqa: BLE001

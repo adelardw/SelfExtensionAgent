@@ -2059,13 +2059,22 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         _parts.insert(0, f"[Установлено в прошлых попытках]\n{_prior[:3000]}")
     results_text = "\n\n".join(_parts) or "(шаги не дали результата)"
 
-    resp = await synth_chain.ainvoke({
+    _payload = {
         "query": state["query"],
         "memory_context": state.get("memory_context", "Память пуста."),
         "clarifications": clarify.format_ledger(),
         "step_results": results_text,
-    })
-    answer = strip_tool_markup((resp.content if hasattr(resp, "content") else str(resp)) or "")
+    }
+    # БЕЗ собственного таймаута — каждый LLM-вызов и так ограничен SDK-таймаутом клиента
+    # (config.llm_timeout, max_retries=1), шаги — дедлайнами, цикл — wall-бюджетом. Граф сам
+    # терминируется. Если синтез всё же упал (SDK-таймаут/сбой) — ниже guard подхватит лучший
+    # результат шага, чтобы НЕ потерять найденное (вместо пустого/ошибки).
+    try:
+        resp = await synth_chain.ainvoke(_payload)
+    except Exception:  # noqa: BLE001
+        degradation.note("synth_failed")
+        resp = None
+    answer = strip_tool_markup((resp.content if hasattr(resp, "content") else str(resp)) or "") if resp else ""
     # Guard от пустого/протёкшего финала. НЕ отдаём сырой текст шага, если он похож на
     # ПЛАН/ПРОЦЕСС («[Шаг N]…», «Navigate to…», «Найти/Открыть…») — это не ответ
     # (AB вскрыл: финал = «[Шаг 3] Navigate to Zillow…»). Лучше честный отказ.
