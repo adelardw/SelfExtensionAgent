@@ -47,7 +47,6 @@ def test_route_after_step_ignores_token_budget(monkeypatch):
     runbudget.reset()
     runbudget.add(10**9)  # «за бюджетом» — на маршрут больше не влияет
     state = {"steps_executed": 1, "current_step": 0, "subtasks": [{"goal": "a"}, {"goal": "b"}]}
-    monkeypatch.setattr(A.run_context, "answer_now", lambda: False)
     assert A.route_after_step(state) == "step_executor"
     runbudget.reset()
 
@@ -68,7 +67,6 @@ def test_no_step_budget_only_anti_runaway_ceiling(monkeypatch):
     """8-шаговый бюджет убран: много шагов → идём дальше; стоп только на абсолютном MAX_STEPS_HARD."""
     import src.graph.agent as A
 
-    monkeypatch.setattr(A.run_context, "answer_now", lambda: False)
     runbudget.reset()
     s1 = {"steps_executed": 10, "current_step": 0, "subtasks": [{"goal": "a"}, {"goal": "b"}]}
     assert A.route_after_step(s1) == "step_executor"          # 10 шагов — не рубим

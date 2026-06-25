@@ -211,17 +211,14 @@ validated by the 3-stage SGR gate) · project (`.sea/skills/`, default for agent
 a project is initialized) · external (`SKILL.md`). The `code` skill (glob/grep/tree/read +
 edit/bash) is a global capability.
 
-**No run limit: execution to natural completion, with an "answer now" option.** A run is not
-interrupted by time, token count, or step count. The plan is bounded by itself (at most
-`max_subtasks` subtasks, retry limits, and protection against repeating identical calls), so
-execution reaches its natural end, including long-running tasks. The user can finish earlier: an
-**"Answer now"** button is available from the start of a run and, via `POST /run/{id}/answer_now`,
-asks the graph to assemble an answer from the context gathered so far using the fast model. The only
-automatic stop is an absolute step ceiling that guards against looping (not a cost limit). As a
-safeguard against indefinite waiting (not as a budget), the model-request timeout and network-request
-timeouts are kept. Files the agent creates are delivered to the user as downloadable attachments
-(`export_table`/`write_file` → `GET /artifact/{id}` and a download button in the interface), rather
-than printed as text to copy.
+**No run limit: execution to natural completion.** A run is not interrupted by time, token count, or
+step count. The plan is bounded by itself (at most `max_subtasks` subtasks, retry limits, and
+protection against repeating identical calls), so execution reaches its natural end, including
+long-running tasks. The only automatic stop is an absolute step ceiling that guards against looping
+(not a cost limit). As a safeguard against indefinite waiting (not as a budget), the model-request
+timeout and network-request timeouts are kept. Files the agent creates are delivered to the user as
+downloadable attachments (`export_table`/`write_file` → `GET /artifact/{id}` and a download button in
+the interface), rather than printed as text to copy.
 
 ## CLI commands
 
@@ -369,7 +366,7 @@ START
 | Безопасность | `utils_validation.py` (AST-гейт: запись + уровень модуля), `tools/skill_creation.py` (гейт загрузки), `utils.py` (песочница-подпроцесс), `hitl.py` (human-in-the-loop), **`improve/safety.py`** | генерируемый код: AST-запреты + smoke в изолированном процессе (rlimits/kill); **гейт загрузки** (`_load_skill_module`): навык гейтится ПЕРЕД `exec_module` (HITL гейтит *вызов*, но module-level код идёт при *импорте*) по трёхуровневой модели доверия (core=как есть · imported=AST уровня модуля · orphan/сгенерированное=полный AST) + кэш по mtime (нет ре-exec на шаг); side-effect инструменты — подтверждение, deny by default; **защита от инъекций в выводах инструментов/MCP/поиска** (`sanitize_tool_output`); **гарантированная фильтрация PII** (`strip_ungrounded_pii` режет выдуманные email, числа не трогает; `redact_pii` в коллективных паттернах) — «не разглашать» = близнец «не выдумывать»; **анти-галлюцинационные гейты собраны в единую decision-таблицу** (`docs/anti_hallucination_gates.md`, закреплены характеризационными тестами); запреты обучения (не менять архитектуру/промпты, не учиться на взломе). **Честный потолок**: AST = паритет, не песочница |
 | Внешнее | `external/context.py` | контекст A2A/MCP в состоянии (слот + плумбинг) |
 | Обслуживание | `maintenance/dep_update.py` | безопасный авто-апдейт зависимостей с health-check и откатом |
-| Интерфейсы | **`cli.py`/`tui.py` (полноэкранный Textual TUI — дефолтный `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (нативное окно через pywebview), упакованный **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` — теперь только one-shot/скрипты (REPL заменён TUI). | общий граф + общая память. GUI гонит каждый ход как фоновый запуск с **живым прогрессом** (шаги по узлам через `astream`), кнопкой **«Ответить сейчас»** (досрочное завершение по накопленному контексту, быстрая модель), кнопками загрузки созданных файлов, **интерактивным clarify** (Q/A-мультиселект через `/run/{id}/respond`) и подтверждением, нативное прикрепление файлов (`/attach_local`) + микрофон (ffmpeg на сервере), история тредов, панель настроек (провайдер/модели/ключ, режимы, токен расширения). Ключ/провайдер из CLI (`sea key`) в глобальный конфиг; упакованное приложение работает в `~/Library/Application Support/SEA`. Мозг — Python; тонкий клиент + мозг. |
+| Интерфейсы | **`cli.py`/`tui.py` (полноэкранный Textual TUI — дефолтный `sea`)**, `bot.py` (Telegram), `server.py` (FastAPI), **`frontend/` (React+Vite+Tailwind GUI)**, **`desktop.py`** (нативное окно через pywebview), упакованный **`SEA.app`** (macOS, `build_binary.py --app` → Launchpad). `main.py` — теперь только one-shot/скрипты (REPL заменён TUI). | общий граф + общая память. GUI гонит каждый ход как фоновый запуск с **живым прогрессом** (шаги по узлам через `astream`), кнопками загрузки созданных файлов, **интерактивным clarify** (Q/A-мультиселект через `/run/{id}/respond`) и подтверждением, нативное прикрепление файлов (`/attach_local`) + микрофон (ffmpeg на сервере), история тредов, панель настроек (провайдер/модели/ключ, режимы, токен расширения). Ключ/провайдер из CLI (`sea key`) в глобальный конфиг; упакованное приложение работает в `~/Library/Application Support/SEA`. Мозг — Python; тонкий клиент + мозг. |
 
 ## Раскладка репозитория (`src/`)
 
@@ -479,14 +476,11 @@ HITL подтверждают и как стримят прогресс.
 в инициализированном проекте) · внешние (`SKILL.md`). Навык `code` (glob/grep/tree/read +
 edit/bash) — глобальная способность.
 
-**Без ограничения запуска: выполнение до естественного завершения, с возможностью «ответить
-сейчас».** Прогон не прерывается по времени, числу токенов или числу шагов. План ограничен сам по
-себе (не более `max_subtasks` подзадач, ограничения на повторы, защита от зацикливания одинаковых
-вызовов), поэтому выполнение доходит до естественного конца, включая длительные задачи. Пользователь
-может завершить раньше: кнопка **«Ответить сейчас»** доступна с начала запуска и через
-`POST /run/{id}/answer_now` просит граф собрать ответ из уже накопленного контекста быстрой моделью.
-Единственная автоматическая остановка — абсолютный предел числа шагов как защита от зацикливания (не
-ограничение по стоимости). В качестве защиты от бесконечного ожидания (не как бюджет) сохранены
+**Без ограничения запуска: выполнение до естественного завершения.** Прогон не прерывается по
+времени, числу токенов или числу шагов. План ограничен сам по себе (не более `max_subtasks` подзадач,
+ограничения на повторы, защита от зацикливания одинаковых вызовов), поэтому выполнение доходит до
+естественного конца, включая длительные задачи. Единственная автоматическая остановка — абсолютный
+предел числа шагов как защита от зацикливания (не ограничение по стоимости). В качестве защиты от бесконечного ожидания (не как бюджет) сохранены
 таймаут обращения к модели и таймауты сетевых запросов. Файлы, которые создаёт агент, передаются
 пользователю как загружаемые вложения (`export_table`/`write_file` → `GET /artifact/{id}` и кнопка
 загрузки в интерфейсе), а не выводятся текстом с просьбой скопировать.

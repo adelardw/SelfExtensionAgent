@@ -103,13 +103,6 @@ export default function App() {
   const [attachInfo, setAttachInfo] = useState<{ n: string; ok: boolean }[]>([])  // вложения: имя+существует (только в «show more»)
   const [input, setInput] = useState("")
   const [busy, setBusy] = useState(false)
-  const [curRunId, setCurRunId] = useState("")        // активный прогон → кнопка «ответить сейчас»
-  const [answeringNow, setAnsweringNow] = useState(false)
-  const answerNow = async () => {
-    if (!curRunId) return
-    setAnsweringNow(true)
-    try { await fetch(`/run/${curRunId}/answer_now`, { method: "POST" }) } catch { /* */ }
-  }
   const [online, setOnline] = useState(false)
   const [sideOpen, setSideOpen] = useState(true)
   const [attached, setAttached] = useState<string[]>([])
@@ -177,9 +170,9 @@ export default function App() {
         if (d.pending?.type === "confirm") { setPending({ run_id, confirm: d.pending.text }); return }
         setProgress(d.progress || ""); continue
       }
-      if (d.status === "done") { setProgress(""); setCurRunId(""); setAnsweringNow(false); if (typeof d.tokens === "number") setTokens(d.tokens); if (typeof d.cost === "number") setCost(d.cost); await streamAnswer(d.answer || "(empty)"); if (Array.isArray(d.artifacts) && d.artifacts.length) setLastArtifacts(d.artifacts); if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads(); setBusy(false); return }
-      if (d.status === "error") { setProgress(""); setCurRunId(""); setAnsweringNow(false); setLastAssistant("⚠ error: " + (d.error || "")); setBusy(false); return }
-      setProgress(""); setCurRunId(""); setLastAssistant("⚠ run not found (server restarted?)"); setBusy(false); return
+      if (d.status === "done") { setProgress(""); if (typeof d.tokens === "number") setTokens(d.tokens); if (typeof d.cost === "number") setCost(d.cost); await streamAnswer(d.answer || "(empty)"); if (Array.isArray(d.artifacts) && d.artifacts.length) setLastArtifacts(d.artifacts); if (d.mode) setMode(d.mode); if (d.title) setTitle(d.title); loadThreads(); setBusy(false); return }
+      if (d.status === "error") { setProgress(""); setLastAssistant("⚠ error: " + (d.error || "")); setBusy(false); return }
+      setProgress(""); setLastAssistant("⚠ run not found (server restarted?)"); setBusy(false); return
     }
   }
 
@@ -192,7 +185,6 @@ export default function App() {
       const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, thread_id: cur, query: text }) })
       if (!r.ok) throw new Error("HTTP " + r.status)
       const { run_id } = await r.json()
-      setCurRunId(run_id); setAnsweringNow(false)   // активный прогон → доступна кнопка «ответить сейчас»
       await poll(run_id)
     } catch (e: any) {
       const net = /load failed|failed to fetch|networkerror/i.test(String(e?.message || e))
@@ -416,15 +408,6 @@ export default function App() {
                       {m.content === "…" || m.content === ""
                         ? <Working steps={steps} current={progress} />
                         : <Markdown html={md(m.content)} />}
-                      {/* «Ответить сейчас»: видна СРАЗУ во время прогона (особенно на долгих задачах) —
-                          даёт быстрый финал по накопленному, без ожидания естественного конца. */}
-                      {(m.content === "…" || m.content === "") && busy && curRunId && (
-                        <button onClick={answerNow} disabled={answeringNow}
-                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-colors disabled:opacity-50"
-                          style={{ background: "var(--surface2, rgba(255,255,255,0.06))", color: "var(--ink)", border: "1px solid var(--border, rgba(255,255,255,0.12))" }}>
-                          <span>⚡</span><span>{answeringNow ? "Собираю ответ…" : "Ответить сейчас"}</span>
-                        </button>
-                      )}
                       {m.artifacts && m.artifacts.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-3">
                           {m.artifacts.map(a => (
