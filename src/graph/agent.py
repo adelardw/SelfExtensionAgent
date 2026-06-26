@@ -914,7 +914,7 @@ async def act_node(state: GeneralGraphState) -> dict:
     # толчок. Простое действие завершается за 1-2 раунда. Раздутый бюджет (12 раундов/2 толчка/
     # дедлайн ×1.5) из попытки автозаказа УБРАН — он заставлял дешёвую модель флейлить дольше на
     # ЛЮБОЙ задаче (живой регресс юзера: «было быстро, стало медленно», 140k токенов/ход).
-    deadline = min(STEP_DEADLINE_CAP, max(15.0, MAX_RUN_SECONDS - runbudget.elapsed()))
+    deadline = STEP_DEADLINE_CAP  # БЕЗ времячувствительности прогона: только анти-зависание ОДНОГО вызова
     try:
         output, msgs = await _exec_direct(sys_text, query, tools, deadline, history=history)
     except Exception as e:  # noqa: BLE001
@@ -2663,17 +2663,17 @@ def route_after_synthesize(state: GeneralGraphState) -> str:
     """Сквозной ревью — ЗАРАБОТАННАЯ эскалация (Thread 3c): запускается, когда собранный
     артефакт ОКАЗАЛСЯ большим/многошаговым (evidence), а не по предсказанному режиму heavy.
     Остальное идёт сразу на финальную валидацию."""
-    # Бюджет/время исчерпаны → пропускаем дорогой deep-ревью, сразу валидация.
-    if _earned_review(state) and state.get("revision_rounds", 0) < MAX_REVISIONS \
-            and not runbudget.exhausted(*_run_limits(state)):
+    # БЕЗ бюджета (чистое «до конца»): заработанный deep-ревью запускается по EVIDENCE, а не по
+    # остатку времени/токенов. Анти-зацикливание ревизий (revision_rounds) остаётся — это не бюджет.
+    if _earned_review(state) and state.get("revision_rounds", 0) < MAX_REVISIONS:
         return "review"
     return "validation"
 
 
 def route_after_review(state: GeneralGraphState) -> str:
-    """Ревью добавил fix-подшаги → обратно в шаговый цикл; чисто/бюджет исчерпан → валидация."""
-    if state.get("steps_executed", 0) < MAX_STEPS_PER_RUN and \
-            not runbudget.exhausted(*_run_limits(state)) and \
+    """Ревью добавил fix-подшаги → обратно в шаговый цикл; иначе валидация. БЕЗ бюджета: предел —
+    только абсолютный анти-runaway потолок шагов (как в route_after_step), не остаток времени/токенов."""
+    if state.get("steps_executed", 0) < MAX_STEPS_HARD and \
             state.get("current_step", 0) < len(state.get("subtasks", [])):
         return "step_executor"
     return "validation"
@@ -2689,9 +2689,8 @@ def route_after_validation(state: GeneralGraphState) -> str:
     """
     invalid = not state.get("validation_passed", True)
     conf = state.get("confidence", 1.0)
-    # Бюджет/время исчерпаны → не перезапускаем весь пайплайн (ретрай дороже всего), принимаем как есть.
-    if runbudget.exhausted(*_run_limits(state)):
-        return "reflect"
+    # БЕЗ бюджета: полный ретрай не блокируется остатком времени/токенов — решает только валидность/
+    # уверенность (ниже). Ретрай дорог, поэтому его условия и так узкие (реально невалидный ответ).
     # Веб-research уже верифицировал факты ВНУТРИ (план→поиск→проверка) и НЕ ретраился
     # по-шагово — полный ретрай его лишь жжёт бюджет (eval ловил 4× исполнения/140с) ради
     # маржинального прироста. Поэтому при использованном research ретраим ТОЛЬКО реально
