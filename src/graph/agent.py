@@ -99,6 +99,7 @@ from src.runtime import context_files
 from src.data.research import make_deep_research_tool, agentic_research
 from src.tools.image_search import make_image_search_tool
 from src.runtime.compute import make_compute_tool, make_datetime_tool
+from src.runtime.data_fetch import make_fetch_data_tool
 from src.runtime.artifacts import make_export_tool
 from src.media import make_pdf_vision_tool, image_data_url
 from src.data.knowledge_base import (
@@ -907,6 +908,7 @@ async def act_node(state: GeneralGraphState) -> dict:
     # Экспорт-файл доступен и в act: «дай excel/csv/файл» приходит и сюда (живой eval: act-режим без
     # export_table → агент врал «мои инструменты не поддерживают генерацию файлов»). Доставка — та же.
     tools.append(make_export_tool())
+    tools.append(make_fetch_data_tool())   # «дай датасет по URL» приходит и в act — добыча → .xlsx
     sys_text = act_system_prompt.format(
         memory_context=state.get("memory_context", "Память пуста."))
     history = _history_messages(state)  # реальные Human/AIMessage диалога (контекст «любую/да»)
@@ -1627,6 +1629,22 @@ async def _exec_compose(system: str, goal: str, deadline: float, images=None) ->
 
 _DIRECT_ROUNDS = 6  # максимум раундов «вызов → инструменты» в direct-шаге (анти-runaway);
                     # 6 — реальные браузер-цепочки: открыть→see→клик→опция→в корзину→see
+_RESEARCH_CALL_CAP = 4  # СХОДИМОСТЬ: максимум research-вызовов на ОДИН шаг (анти-кружение по вебу)
+
+
+def _is_research_tool(name: str) -> bool:
+    return "research" in (name or "").lower()
+
+
+def _research_dry(output: str) -> bool:
+    """Раунд «сухой» — research вернул 0 подтверждённых (маркер «[research: 0/…]»)."""
+    m = re.search(r"\[research:\s*(\d+)\s*/", output or "")
+    return bool(m) and m.group(1) == "0"
+
+
+def _research_exhausted(calls: int, dry: int, cap: int = _RESEARCH_CALL_CAP) -> bool:
+    """Хватит искать: исчерпан кап вызовов ИЛИ 2 «сухих» раунда подряд (отдача иссякла)."""
+    return calls >= cap or dry >= 2
 
 
 async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
@@ -1656,6 +1674,7 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
     cap = _DIRECT_ROUNDS if rounds_cap is None else rounds_cap
     rounds, nudges = 0, 0
     seen_calls: set[str] = set()  # анти-зацикливание: тот же тул с теми же аргументами
+    research_calls, dry_research = 0, 0  # СХОДИМОСТЬ: кап research + стоп на «сухих» (см. _research_exhausted)
     while True:
         calls = getattr(resp, "tool_calls", None) or []
         if not calls:
@@ -1688,8 +1707,17 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                     tool_call_id=tc.get("id", "")))
                 continue
             seen_calls.add(sig)
-            t = by_name.get(tc.get("name"))
             _tname = tc.get("name")
+            # СХОДИМОСТЬ: research исчерпал отдачу (кап вызовов ИЛИ 2 «сухих») → НЕ ищем снова, велим
+            # собрать РЕЗУЛЬТАТ из имеющегося (подтверждённое — в дело, пробел — честно, без выдумок).
+            if _is_research_tool(_tname) and _research_exhausted(research_calls, dry_research):
+                msgs.append(ToolMessage(content=(
+                    "(Поиска достаточно — новые запросы не дают подтверждённого. НЕ ищи снова: "
+                    "сформируй РЕЗУЛЬТАТ из УЖЕ собранного. Подтверждённое используй; по неподтверждённому "
+                    "честно отметь пробел в самом артефакте. Ничего НЕ выдумывай.)"),
+                    tool_call_id=tc.get("id", "")))
+                continue
+            t = by_name.get(_tname)
             if t is None:
                 out = f"(нет инструмента {_tname})"
             else:
@@ -1703,6 +1731,9 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                         skill_health.record(_tname, ok=False, err=str(e),
                                             err_type=type(e).__name__, args=tc.get("args", {}))
             s = out if isinstance(out, str) else str(out)
+            if _is_research_tool(_tname):  # учёт сходимости: счётчик вызовов + «сухость» по маркеру
+                research_calls += 1
+                dry_research = dry_research + 1 if _research_dry(s) else 0
             s, _flag = await asyncio.to_thread(sanitize_tool_output, s, tc.get("name", "инструмент"))  # анти-инъекция (в потоке)
             if tc.get("name") not in _INTERNAL_SAFE_TOOLS:  # внешний контент → taint (гейт python_exec)
                 run_context.mark_external_content()
@@ -1854,6 +1885,9 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # дефект: на «дай excel» агент вываливал CSV с «скопируйте»). Доступен всегда — формат запроса
     # «дай файл» универсален. Доставку (кнопка/путь) делает сервер/CLI из run_context.artifacts.
     tools.append(make_export_tool())
+    # Добыча ДАТАСЕТА по URL → .xlsx (read-only сеть, HITL): закрывает дыру «python_exec без сети +
+    # веб чанкует» → агент СКАЧИВАЕТ полные данные (CSV/JSON/bulk) и собирает файл, а не «находит источник».
+    tools.append(make_fetch_data_tool())
     # Vision-чтение фигур в PDF — ТОЛЬКО когда в задаче реально есть PDF (анти-bloat
     # контекста: не вешать на каждый шаг тул, который без файла бесполезен).
     _ctx = (state.get("query", "") + " " + state.get("memory_context", "")).lower()
@@ -2124,8 +2158,10 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
     # Анти-ложь о файле (анти-галлюцинация): ответ обещает скачиваемый файл, а артефакта так и нет →
     # честная пометка вместо выдумки «Файл готов к скачиванию».
     if not run_context.artifacts() and re.search(r"\.(xlsx|csv|xls)\b|файл готов|готов к скач", answer, re.I):
-        answer += ("\n\n⚠ Файл фактически не сформирован: не удалось собрать данные в таблицу за этот "
-                   "запуск. Что нашёл — собрал выше; если чего-то не хватает, скажи, что доработать.")
+        # БЕЗ отмазок про прогон/бюджет/верификатор. Факт по ВНЕШНЕЙ доступности данных + принцип
+        # «ноль мусора»: выдумывать числа нельзя. Подтверждённое — выше, в самом ответе.
+        answer += ("\n\n(Файл не приложен: подтверждённых табличных данных по запросу собрать не "
+                   "получилось, а выдумывать значения нельзя. Подтверждённое по источникам — выше.)")
 
     # Анти-PII пол (Thread 2c): выдуманный email (нет в запросе/находках/памяти) → убрать.
     grounded = state["query"] + "\n" + state.get("memory_context", "") + "\n" + results_text
@@ -2257,27 +2293,15 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # Ложь о завершении при оборванном прогоне → честный статус с реальным прогрессом, ПРИНЯТЬ
     # (ретрай не «дозавершит» — прогон уже исчерпан). Заменяет регэксп «добавил|заказал…» в synthesize.
     if flag_false_completion and incomplete:
-        done = [s["goal"] for s in _subs if s.get("status") == "done"]
-        # Честная ПОМЕТКА вперёд (юзер не примет за «сделано»/side-effect), но СОДЕРЖАТЕЛЬНЫЙ черновик
-        # НЕ выбрасываем: для контентных задач («напиши стратегию/текст») синтез-ответ И ЕСТЬ результат,
-        # пусть и частичный. Раньше отдавали голую отписку «нет результата» — юзер терял черновик.
-        draft = (state.get("final_answer") or "").strip()
-        # Бюджета нет → сюда только при абсолютном анти-runaway потолке (патология) или нерешённых
-        # подшагах. Доводим по максимуму, честно метим непокрытое — без «продолжи/бюджет».
-        why = "упёрся в анти-runaway потолок" if _cut else "часть шагов не закрылась"
-        caveat = (f"⚠ Довёл по максимуму, но не на 100% ({why}) — проверь. "
-                  + (f"Готово: {'; '.join(done[:4])}. " if done else ""))
-        # СОДЕРЖАТЕЛЬНЫЙ черновик (контентная задача — «напиши стратегию/текст») отдаём ПОД пометкой:
-        # сам ответ И ЕСТЬ результат, пусть частичный. Короткий/мета — это скорее ложный side-effect-
-        # claim («добавил в корзину») → НЕ сохраняем (только честная пометка).
-        if len(draft) >= 200 and not flag_meta_stub:
-            final = caveat + "\n\n———\n\n" + draft
-        else:
-            final = caveat + (" Подтверждённого результата пока нет." if not done else "")
-        print("[Validation] судья: незавершённый прогон → честная пометка + сохранён черновик")
+        # Сюда пускает ТОЛЬКО СУДЬЯ (false_completion = «заявлено ВЫПОЛНЕННОЕ ДЕЙСТВИЕ», а прогон
+        # оборван) — без регэкспов. Факт-ответы (дата/погода/справка) и частичные черновики судья сюда
+        # НЕ пускает (их критерий — в промпте валидации) → они идут обычным путём и доставляются как есть.
+        # Здесь — только не выдать недоделанный side-effect за сделанный: честно, без имён шагов/отмазок.
+        final = "Не всё удалось довести по этому запросу — скажи, что именно нужно, и доберу."
+        print("[Validation] судья: ложь о выполненном ДЕЙСТВИИ на оборванном прогоне → честная пометка")
         return {"validation_passed": True, "confidence": LOW_CONF,
                 "final_answer": final,
-                "validation_feedback": "незавершённый прогон → честная пометка, черновик сохранён",
+                "validation_feedback": "ложь о выполненном действии → честная пометка",
                 "global_retries": state.get("global_retries", 0)}
     # Мета-заглушка вместо результата → невалидно: уходит на ретрай собрать результат целиком.
     if flag_meta_stub:

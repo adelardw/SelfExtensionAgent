@@ -153,14 +153,7 @@ async def run(n: int = 8, offset: int = 0, jsonl: str | None = None) -> None:
     """Прогон n задач с глобальным offset. Если задан jsonl — каждый результат пишется
     строкой JSON СРАЗУ (инкрементально, flush) → отказоустойчивый драйвер резюмирует после
     нативного краша (SIGABRT в либе) с точки, где остановились (см. scripts/gaia_resilient.py)."""
-    # ЭКСПЕРИМЕНТ: тот же флаг, что и в main.py — GAIA можно гонять на composer-графе
-    # (мета-контроллер примитивов) для сравнения с режимным графом.
-    from src.graph.agent import config as _cfg
-    if _cfg.get("experimental", {}).get("composer") or os.getenv("AGENT_EXPERIMENTAL"):
-        from src.graph.agent_experimental import build_graph
-        print("⚗  GAIA на experimental.composer (мета-контроллер примитивов)")
-    else:
-        from src.graph.agent import build_graph
+    from src.graph.agent import build_graph
     from src.llm.usage import TokenTracker, cost_of
 
     tasks = _load_tasks(n, offset=offset)

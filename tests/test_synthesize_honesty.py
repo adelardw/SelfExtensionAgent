@@ -37,8 +37,29 @@ def test_validator_flags_false_completion(monkeypatch):
              "subtasks": [{"goal": "добавить пиццу", "status": "partial"}]}
     out = asyncio.run(A.validation_node(state))
     ans = out["final_answer"].lower()
-    # честная пометка «не на 100%», а не «добавил» как факт (и без «не довёл по бюджету»)
-    assert "проверь" in ans and ("100%" in ans or "максимум" in ans)
+    # ложный side-effect-claim («добавил в корзину») НЕ выдаётся за факт; БЕЗ отмазок про бюджет/потолок
+    assert "добавил" not in ans                              # ложное «сделано» убрано
+    assert "доберу" in ans                                   # честная замена (доберу по запросу)
+    assert "бюджет" not in ans and "потолок" not in ans      # никаких внутренних отмазок
+    assert "сформировать итоговый" not in ans                # имена ВНУТРЕННИХ шагов не протекают
+
+
+@needs_key
+def test_validator_keeps_short_factual_answer(monkeypatch):
+    """Регресс (date+weather): ФАКТ-ответ — это НЕ заявление о действии → судья НЕ флагует
+    false_completion → нормальный путь, ответ НЕ подменяется (даже при partial-подшаге)."""
+    import asyncio
+    import src.graph.agent as A
+
+    monkeypatch.setattr(A, "validation_chain", _judge(false_completion=False))   # факт ≠ действие
+    monkeypatch.setattr(A, "CONSENSUS_VALIDATION", False)
+    state = {"query": "какое сегодня число и погода в москве",
+             "final_answer": "Сегодня 28 июня 2026. В Москве ясно, +20°.",
+             "subtasks": [{"goal": "узнать дату", "status": "done"},
+                          {"goal": "узнать погоду", "status": "partial"}]}     # partial → incomplete
+    out = asyncio.run(A.validation_node(state))
+    assert "final_answer" not in out            # факт-ответ НЕ подменён → доставится как есть
+    assert out["validation_passed"] is True
     assert out["validation_passed"] is True
 
 

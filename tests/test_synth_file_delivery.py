@@ -62,4 +62,5 @@ def test_no_tabular_data_no_false_file_claim(monkeypatch, tmp_path):
                            synth_text="Файл готов к скачиванию: metro.xlsx",
                            csv_text="")  # модель не смогла извлечь таблицу
     assert arts == []                                   # пустышку не плодим
-    assert "не сформирован" in out["final_answer"]      # честная пометка
+    _fa = out["final_answer"]
+    assert "не приложен" in _fa and "выдумывать" in _fa  # честно: файла нет + ничего не сочиняем (без отмазок)

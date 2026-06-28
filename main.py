@@ -41,15 +41,7 @@ _frozen_bootstrap()  # до импорта src.agent (он читает config.y
 # Мгновенный фидбек: тяжёлые импорты (langchain/langgraph/модели/навыки) занимают пару
 # секунд — показываем это сразу, чтобы старт не выглядел зависшим.
 with console.status("[cyan]🔥 Прогрев агента (первый запуск дольше — грузятся модели и навыки)…"):
-    from src.graph.agent import config, memory_store, rebuild_llms
-    # ЭКСПЕРИМЕНТ (флаг experimental.composer): мета-контроллер компонует примитивы
-    # вместо выбора 1 из 6 режимов. Изолировано в src/agent_experimental.py; рабочий граф
-    # используется по умолчанию.
-    if config.get("experimental", {}).get("composer"):
-        from src.graph.agent_experimental import build_graph
-        console.print("[yellow]⚗  experimental.composer: ON — мета-контроллер примитивов[/]")
-    else:
-        from src.graph.agent import build_graph
+    from src.graph.agent import build_graph, config, memory_store, rebuild_llms
     from src.interface.clarify import set_clarifier
     from src.runtime.hitl import set_confirmer
     from src.llm.llm import active_summary, set_provider
