@@ -32,7 +32,8 @@ def _cfg_signals() -> dict:
     d = {"paywall_threshold": 0.58, "paywall_margin": 0.05,
          "error_threshold": 0.55, "error_margin": 0.05,
          "media_threshold": 0.55, "media_margin": 0.05,
-         "fileout_threshold": 0.50, "fileout_margin": 0.04}
+         "fileout_threshold": 0.50, "fileout_margin": 0.04,
+         "time_threshold": 0.48, "time_margin": 0.04}
     try:
         from omegaconf import OmegaConf
         c = OmegaConf.load("config.yml").get("semantic_signals", {}) or {}
@@ -104,11 +105,18 @@ class _ContrastiveSignal:
         if not (text or "").strip() or not self.enabled:
             return False
         try:
+            qv = self._emb().embed((text or "")[:1500])
+        except Exception:  # noqa: BLE001
+            return False
+        return self.fires_vec(qv, threshold, margin)
+
+    def fires_vec(self, qv, threshold: float, margin: float) -> bool:
+        """Как fires, но на УЖЕ посчитанном векторе запроса — без повторного embed (экономия вызова)."""
+        if not qv or not self.enabled:
+            return False
+        try:
             self._ensure_seeds()
             if not self._pos_v:
-                return False
-            qv = self._emb().embed((text or "")[:1500])
-            if not qv:
                 return False
             pos = max((cosine(qv, v) for v in self._pos_v), default=0.0)
             neg = max((cosine(qv, v) for v in (self._neg_v or [])), default=0.0)
@@ -220,6 +228,49 @@ def wants_file_output(query: str) -> bool:
     act) НЕ перебивал такой запрос в act: act файла не делает, нужен deliberate (грунтует
     исследованием + экспортит). Без эмбеддера → False (тогда обычный путь)."""
     return _fileout_detector().fires(query or "", _SIG_CFG["fileout_threshold"], _SIG_CFG["fileout_margin"])
+
+
+# ── ЗАПРОС ЗАВЯЗАН НА ТЕКУЩИЙ МОМЕНТ (дата события/дедлайн/сезон/«сколько осталось»/план по дням) ──
+# Только тогда стоит дать модели «сегодня» (иначе — шум, лишние «сегодня», риск галлюцинаций). POS —
+# планирование/сроки/сезонность ОТНОСИТЕЛЬНО СЕЙЧАС; NEG — статичные факты/прошлые данные/код/перевод.
+_TIME_POS = [
+    "спланируй поездку по дням, еду 10 июля на две недели",
+    "составь расписание на следующую неделю",
+    "сколько дней осталось до поездки",
+    "что успеть до конца месяца",
+    "когда лучше бронировать билеты на август",
+    "открыт ли сезон восхождения в июле сейчас",
+    "какое сегодня число и погода",
+    "напомни про дедлайн на этой неделе",
+    "plan my trip day by day, leaving next month",
+    "how many days until my flight",
+    "what is open this season right now",
+    "is it too late to book for july",
+    "来週の予定を立てて", "planifica mi viaje para la próxima semana",
+]
+_TIME_NEG = [
+    "what is the capital of France", "напиши код сортировки массива", "переведи этот текст на русский",
+    "объясни машинное обучение простыми словами", "найди лучшие рестораны рядом",
+    "какая была инфляция в 2023 году", "summarize this article", "сколько стоит этот товар",
+    "как работает фотосинтез", "расскажи историю Древнего Рима",
+]
+_TIME: Optional[_ContrastiveSignal] = None
+
+
+def _time_detector() -> _ContrastiveSignal:
+    global _TIME
+    if _TIME is None:
+        _TIME = _ContrastiveSignal(_TIME_POS, _TIME_NEG)
+    return _TIME
+
+
+def is_time_sensitive(query: str, qvec=None) -> bool:
+    """Запрос завязан на ТЕКУЩИЙ момент (дата события/дедлайн/сезон/«сколько осталось»/план по дням) —
+    тогда стоит дать модели «сегодня». Для остальных запросов дату НЕ инжектим (анти-шум). Embedding-
+    контраст, без регэкспов. qvec — уже посчитанный эмбеддинг запроса (без лишнего embed)."""
+    det = _time_detector()
+    thr, mar = _SIG_CFG["time_threshold"], _SIG_CFG["time_margin"]
+    return det.fires_vec(qvec, thr, mar) if qvec else det.fires(query or "", thr, mar)
 
 
 def is_paywall(text: str) -> bool:

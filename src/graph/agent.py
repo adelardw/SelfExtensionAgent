@@ -458,6 +458,16 @@ async def recall_node(state: GeneralGraphState) -> dict:
     if kb_bits:
         memory_context = "\n\n".join(kb_bits) + "\n\n" + memory_context
 
+    # СВЯЗНОСТЬ ПО ДАТЕ — ТОЛЬКО когда запрос реально про время (поездка/дедлайн/сезон/«сколько
+    # осталось»/план по дням): детект эмбеддингом, переиспользуя уже посчитанный query_emb (без
+    # лишнего embed). Для остальных запросов «сегодня» НЕ инжектим — не засоряем контекст и не плодим
+    # лишние упоминания даты (риск шума/галлюцинаций). Живой баг: «бронируй за 3-4 мес» на поездку
+    # через 2 недели — модель не соотнесла дату события с сегодняшним днём.
+    if _is_time_sensitive(query, query_emb or None):
+        from datetime import datetime as _dt
+        memory_context = (f"[Сегодня: {_dt.now().strftime('%Y-%m-%d, %A')}] — соотноси с датами, "
+                          "сроками и сезонностью из запроса.\n\n" + memory_context)
+
     # Сигнал несёт служебный маркер [neg] (его читает harvest); снимаем при инъекции в промпт.
     implicit_fb = detect_implicit_feedback(memory_store, user_id, query, LOW_CONF)
     ext = get_external_context(user_id).model_dump()
@@ -683,7 +693,8 @@ _PHYSICAL_SKILLS = frozenset({
 # мета-заглушка теперь флагает финальный LLM-валидатор (validation_node), не список слов.
 from src.graph.semantic_signals import (is_degenerate as _is_degenerate, is_paywall as _is_paywall,
                                is_error_page as _is_error_page, is_media_playing as _is_media_playing,
-                               wants_file_output as _wants_file_output)
+                               wants_file_output as _wants_file_output,
+                               is_time_sensitive as _is_time_sensitive)
 from src.browser.browser_session import MEDIA_PLAYING as _MEDIA_PLAYING
 
 
