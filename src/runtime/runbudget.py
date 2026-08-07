@@ -45,7 +45,8 @@ class BudgetExceeded(BaseException):
 class _RunState:
     """Счётчик/таймер/жёсткий обрыв ОДНОГО прогона."""
 
-    __slots__ = ("used", "start", "armed", "hard_tokens", "hard_sec", "lock")
+    __slots__ = ("used", "start", "armed", "hard_tokens", "hard_sec", "lock", "human_wait",
+                 "human_since", "human_depth")
 
     def __init__(self) -> None:
         self.used = 0
@@ -54,6 +55,9 @@ class _RunState:
         self.hard_tokens = 10**9
         self.hard_sec = 10**9
         self.lock = threading.Lock()
+        self.human_wait = 0.0     # ЗАВЕРШЁННЫЕ секунды ожидания человека
+        self.human_since = 0.0    # monotonic начала ТЕКУЩЕЙ паузы (0 — паузы нет)
+        self.human_depth = 0      # вложенность human_pause (ask внутри HITL)
 
 
 _registry_lock = threading.Lock()
@@ -90,6 +94,37 @@ def reset() -> None:
     with st.lock:
         st.used = 0
         st.start = time.monotonic()
+        st.human_wait = 0.0
+        st.human_since = 0.0
+        st.human_depth = 0
+
+
+@contextmanager
+def human_pause():
+    """ЧАСЫ ПРОГОНА СТОЯТ, пока думает ЧЕЛОВЕК (уточнение/HITL-подтверждение).
+
+    Ключевая фишка (как AskUserQuestion в Claude Code): вопрос висит СКОЛЬКО УГОДНО ДОЛГО.
+    Без этой паузы wall-clock прогона тикал во время раздумий → пользователь отвечал через
+    10 минут, а прогон уже был «исчерпан» и обрывался — вопрос терял смысл. Время ожидания
+    человека НЕ его вина и НЕ работа агента: вычитаем его из elapsed/exhausted/hard-abort.
+    Реентерабельно (вложенные ask внутри HITL). ВАЖНО: пауза учитывается НА ЛЕТУ (human_since),
+    а не только по выходу — иначе наблюдатель (дедлайн тула) во время раздумий видит нули и
+    обрывает ожидание (поймано тестом: «человек думает 2.5с» падало на дедлайне 1с)."""
+    st = _state()
+    with st.lock:
+        if st.human_depth == 0:
+            st.human_since = time.monotonic()
+        st.human_depth += 1
+    try:
+        yield
+    finally:
+        with st.lock:
+            st.human_depth -= 1
+            if st.human_depth <= 0:
+                st.human_depth = 0
+                if st.human_since:
+                    st.human_wait += time.monotonic() - st.human_since
+                st.human_since = 0.0
 
 
 def add(n: int) -> None:
@@ -109,15 +144,30 @@ def over(limit: int) -> bool:
 
 
 def elapsed() -> float:
-    """Секунд с начала прогона (reset). Для wall-clock дедлайна против медленного heavy."""
+    """Секунд РАБОТЫ с начала прогона (reset), БЕЗ времени ожидания человека (human_pause).
+    Для wall-clock дедлайна против медленного heavy — но не против думающего пользователя."""
     st = _state()
-    return time.monotonic() - st.start if st.start else 0.0
+    return max(0.0, time.monotonic() - st.start - _human_total(st)) if st.start else 0.0
+
+
+def _human_total(st) -> float:
+    """Завершённые паузы + ТЕКУЩАЯ (если идёт) — «на лету», для наблюдателей-дедлайнов."""
+    live = (time.monotonic() - st.human_since) if st.human_depth and st.human_since else 0.0
+    return st.human_wait + live
+
+
+def human_wait_seconds() -> float:
+    """Сколько секунд прогон простоял в ожидании ответа человека (для трейса/диагностики)."""
+    return _human_total(_state())
 
 
 def exhausted(token_limit: int, sec_limit: float) -> bool:
     """Бюджет исчерпан по токенам ИЛИ по времени — оба стоп-крана разом."""
     st = _state()
-    return st.used >= token_limit or bool(st.start and (time.monotonic() - st.start) >= sec_limit)
+    # human_wait вычитаем: ожидание ответа человека не «съедает» бюджет прогона (вопрос висит
+    # сколько угодно — как AskUserQuestion в Claude Code).
+    return st.used >= token_limit or bool(
+        st.start and (time.monotonic() - st.start - _human_total(st)) >= sec_limit)
 
 
 def arm(token_limit: int, sec_limit: float) -> None:
@@ -148,7 +198,7 @@ class BudgetCallback(BaseCallbackHandler):
         # контекстом) это и нужно; одиночный монструозный вызов держит wait_for(deadline).
         st = _state()
         if st.armed and (st.used >= st.hard_tokens or
-                         (st.start and (time.monotonic() - st.start) >= st.hard_sec)):
+                         (st.start and (time.monotonic() - st.start - _human_total(st)) >= st.hard_sec)):
             raise BudgetExceeded(f"бюджет прогона исчерпан ({st.used} ток / {elapsed():.0f}с)")
 
     # ChatOpenAI зовёт on_chat_model_start (НЕ on_llm_start!) — перехватываем оба.

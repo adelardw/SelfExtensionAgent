@@ -29,6 +29,9 @@ _USAGE = """sea — self-extension-agent (CLI)
   sea key <API_KEY>         задать ключ провайдера
   sea provider openrouter|ollama [base_url]   выбрать провайдера
   sea config                показать текущую конфигурацию (провайдер, ключ, пути)
+  sea doctor [--offline] [--json] [--fix]   диагностика болей: ключ/LLM/эмбеддинги/поиск
+                            (SearXNG+DDG)/browse/MCP/песочницы/навыки/телеметрия;
+                            --fix = безопасные авто-починки (прунинг чекпоинтов с бэкапом)
 
   sea --version, -V         версия      ·      sea --help, -h      справка
 
@@ -108,6 +111,11 @@ def main_cli() -> None:
         print(f"✓ Провайдер: {args[1]}" + (f" · base_url: {args[2]}" if len(args) > 2 else "")
               + f"  → {config_paths.global_local_path()}")
         return
+    if first == "doctor":
+        # Диагностика болей (родилась из мульти-агентной валидации: тихие отказы окружения —
+        # SearXNG «жив, но пуст», сломанный mcp-fetch — маскировались graceful-фолбэками).
+        from src.maintenance.doctor import main as doctor_main
+        raise SystemExit(doctor_main(args[1:]))
     if first == "config":
         from src.config.cli_config import get_cli
         from src.config import config_paths

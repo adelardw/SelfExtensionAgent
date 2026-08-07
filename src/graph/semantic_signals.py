@@ -33,7 +33,8 @@ def _cfg_signals() -> dict:
          "error_threshold": 0.55, "error_margin": 0.05,
          "media_threshold": 0.55, "media_margin": 0.05,
          "fileout_threshold": 0.50, "fileout_margin": 0.04,
-         "time_threshold": 0.48, "time_margin": 0.04}
+         "time_threshold": 0.48, "time_margin": 0.04,
+         "docx_threshold": 0.48, "docx_margin": 0.04}
     try:
         from omegaconf import OmegaConf
         c = OmegaConf.load("config.yml").get("semantic_signals", {}) or {}
@@ -255,6 +256,98 @@ _TIME_NEG = [
     "как работает фотосинтез", "расскажи историю Древнего Рима",
 ]
 _TIME: Optional[_ContrastiveSignal] = None
+
+# ── ЗАПРОС ТРЕБУЕТ ДАННЫХ ИЗ КОНКРЕТНОГО ДОКУМЕНТА (статья/таблица/страница/pdf/отчёт) ──
+# Анти-фабрикация (валидация р.3): «дай точные числа из Table 2 статьи X» при непрочитанном X
+# должен вести к честному отказу, а не к выдуманным числам с ложной атрибуцией. POS — просьбы
+# ИЗВЛЕЧЬ конкретику из named-источника; NEG — общие вопросы/поиск/объяснения (там память легитимна).
+_DOC_POS = [
+    "приведи точные числа из статьи",
+    "какие значения в Table 2 этой работы",
+    "процитируй метрики из раздела результатов статьи",
+    "извлеки данные из этого документа",
+    "what are the exact numbers reported in the paper",
+    "give me the figures from Table 3 of the article",
+    "quote the accuracy values from the results section",
+    "какие цифры в этом отчёте на странице 5",
+    "дай точные значения из таблицы на этой странице",
+    "extract the benchmark scores from that paper",
+    "перепроверь значения по этой ссылке и подтверди числа",
+    "прочитай статью по ссылке и приведи точные результаты",
+    "open this link and verify the exact numbers from the table",
+    "зайди на сайт и скажи, сколько это стоит",
+    "открой страницу тарифов и дай точные цены",
+    "check their pricing page and tell me the exact cost",
+    "这篇论文表2里的具体数字是多少", "cita los valores exactos del artículo",
+]
+_DOC_NEG = [
+    "объясни, как работает этот подход",
+    "сделай обзор методов со ссылками на работы",
+    "найди статьи про retrieval augmented generation",
+    "какая сейчас ключевая ставка",
+    "напиши код сортировки массива",
+    "что лучше: подход А или Б, и почему",
+    "explain the main idea of self-rag",
+    "recommend papers to read about agents",
+    "переведи этот текст", "сколько стоит этот товар",
+]
+# ── ВЫЧИСЛИТЕЛЬНЫЙ ЗАПРОС (посчитать по ФОРМУЛЕ из данных запроса, веб не нужен) ──
+# Расширенная матрица: «посчитай вклад с пополнениями» уходил в web_grounding→research и
+# отвечал «сходите в калькулятор», хотя python_exec решает это точно. POS — расчёты по данным
+# ИЗ ЗАПРОСА; NEG — запросы, где число надо ИСКАТЬ (цены/ставки/статистика) или не считать.
+_CALC_POS = [
+    "посчитай сложный процент по вкладу 100000 под 12% на 5 лет",
+    "сколько будет, если откладывать по 5000 в месяц под процент",
+    "рассчитай ежемесячный платёж по ипотеке 3 млн на 20 лет под 15%",
+    "какая сумма накопится с ежемесячной капитализацией",
+    "посчитай среднее и медиану этих чисел",
+    "сколько процентов составляет 37 от 480",
+    "calculate compound interest for my deposit",
+    "compute the monthly annuity payment for this loan",
+    "если инфляция 8%, сколько будут стоить мои 200000 через 3 года",
+]
+_CALC_NEG = [
+    "сколько стоит iphone сейчас", "какая сейчас ключевая ставка",
+    "найди статистику продаж за год", "что нового за неделю",
+    "переведи этот текст", "напиши код сортировки массива",
+    "какие сейчас ставки по вкладам в банках",  # это ПОИСК ставки, не расчёт
+    "find the current mortgage rates", "лучшие вклады этого месяца",
+]
+_CALC: Optional[_ContrastiveSignal] = None
+
+
+def _calc_detector() -> _ContrastiveSignal:
+    global _CALC
+    if _CALC is None:
+        _CALC = _ContrastiveSignal(_CALC_POS, _CALC_NEG)
+    return _CALC
+
+
+def is_computational(query: str, qvec=None) -> bool:
+    """Запрос решается РАСЧЁТОМ по данным из него самого (python_exec), а не веб-поиском.
+    Embedding-контраст; qvec переиспользуется. Без эмбеддера → False (обычный путь)."""
+    det = _calc_detector()
+    thr, mar = _SIG_CFG.get("calc_threshold", 0.48), _SIG_CFG.get("calc_margin", 0.04)
+    return det.fires_vec(qvec, thr, mar) if qvec else det.fires(query or "", thr, mar)
+
+
+_DOCX: Optional[_ContrastiveSignal] = None
+
+
+def _doc_detector() -> _ContrastiveSignal:
+    global _DOCX
+    if _DOCX is None:
+        _DOCX = _ContrastiveSignal(_DOC_POS, _DOC_NEG)
+    return _DOCX
+
+
+def is_doc_extraction(query: str, qvec=None) -> bool:
+    """Запрос просит ИЗВЛЕЧЬ конкретные данные (числа/цитаты/значения) из named-документа.
+    Embedding-контраст (любой язык, без регэкспов); qvec переиспользуется. Без эмбеддера → False."""
+    det = _doc_detector()
+    if qvec is not None:
+        return det.fires_vec(qvec, _SIG_CFG["docx_threshold"], _SIG_CFG["docx_margin"])
+    return det.fires(query or "", _SIG_CFG["docx_threshold"], _SIG_CFG["docx_margin"])
 
 
 def _time_detector() -> _ContrastiveSignal:

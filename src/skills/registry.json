@@ -31,7 +31,8 @@
     "has_system_prompt": true,
     "created_at": "2026-06-16T19:40:18.313443",
     "updated_at": "2026-06-16T19:40:18.313444",
-    "version": 1
+    "version": 1,
+    "protected": true
   },
   "device_control": {
     "description": "# Skill: device_control (core)\n\nДействия с устройством **по запросу из чата** (on-demand, не фоновый мониторинг).\nmacOS, штатные утилиты, без сторонних зависимостей.\n\n## Когда использовать\n- Пользоват",
@@ -108,7 +109,8 @@
     "has_system_prompt": false,
     "created_at": "2026-06-16T19:40:18.314856",
     "updated_at": "2026-06-16T19:40:18.314857",
-    "version": 1
+    "version": 1,
+    "protected": true
   },
   "uv_package_manager": {
     "description": "Устанавливает Python-пакеты через `uv` (ультрабыстрый менеджер пакетов, альтернатива `pip`).\n**Когда использовать**:\n- Когда требуется установить пакет в текущее окружение Python.\n- Когда нужна максим",

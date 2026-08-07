@@ -100,37 +100,82 @@ def ensure_python_package(module_name: str) -> tuple[bool, str]:
         return False, f"{pkg} установлен, но '{module_name}' всё равно не импортируется: {e}"
 
 
+# Раннер проверки загружаемости: импорт модуля навыка + перечисление @tool-функций,
+# исполняется в ОТДЕЛЬНОМ процессе (rlimits + опц. syscall-sandbox). Раньше exec_module
+# шёл в процессе агента — module-level код LLM-навыка исполнялся в хосте ещё до HITL
+# (Hermes-порт: изоляция исполнения). Формат вывода тот же __SMOKE__-JSON.
+_LOADCHECK_RUNNER = r"""
+import json, sys
+
+def _limits():
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_CPU, (20, 20))
+        resource.setrlimit(resource.RLIMIT_FSIZE, (20 * 1024 * 1024,) * 2)
+        try:
+            resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 ** 3,) * 2)
+        except (ValueError, OSError):
+            pass
+    except Exception:
+        pass
+
+def _emit(ok, result):
+    print("__SMOKE__" + json.dumps({"ok": ok, "result": str(result)[:2000]}, ensure_ascii=False))
+
+_limits()
+py_file = sys.argv[1]
+import importlib.util
+try:
+    spec = importlib.util.spec_from_file_location("skill_load_check", py_file)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+except Exception as e:
+    _emit(False, f"{type(e).__name__}: {e}"); sys.exit(0)
+
+tools = [getattr(module, a).name for a in dir(module)
+         if hasattr(getattr(module, a), "name") and hasattr(getattr(module, a), "invoke")]
+if not tools:
+    _emit(False, "не найдено ни одной @tool функции (есть ли 'from langchain_core.tools import tool'?)")
+else:
+    _emit(True, ", ".join(tools))
+"""
+
+
 def _skill_loadable(skill_name: str) -> tuple[bool, str]:
     """
     Этап валидации «загружаемость»: модуль навыка обязан импортироваться БЕЗ ошибок
     и содержать хотя бы одну @tool-функцию. Ловит битьё вроде отсутствия
     `from langchain_core.tools import tool` (name 'tool' is not defined) ещё ДО приёма.
+    Импорт идёт в ИЗОЛИРОВАННОМ подпроцессе (rlimits + опц. syscall-sandbox) — module-level
+    код свежесгенерированного навыка НЕ исполняется в процессе агента.
     Возвращает (ok, сообщение).
     """
     py_file = _skill_base(skill_name) / f"{skill_name}.py"
     if not py_file.exists():
         return False, "нет файла навыка"
-    module_name = f"skills_load_check.{skill_name}"
-    try:
-        if module_name in sys.modules:
-            del sys.modules[module_name]
-        spec = importlib.util.spec_from_file_location(module_name, str(py_file))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
-    except Exception as e:  # noqa: BLE001
-        return False, f"{type(e).__name__}: {e}"
-    finally:
-        sys.modules.pop(module_name, None)
 
-    tools = [
-        getattr(module, a).name
-        for a in dir(module)
-        if hasattr(getattr(module, a), "name") and hasattr(getattr(module, a), "invoke")
-    ]
-    if not tools:
-        return False, "не найдено ни одной @tool функции (есть ли 'from langchain_core.tools import tool'?)"
-    return True, ", ".join(tools)
+    base = [_python_exe(), "-c", _LOADCHECK_RUNNER, str(py_file)]
+    cmd = _syscall_sandbox_prefix() + base
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=SMOKE_TEST_TIMEOUT + SMOKE_IMPORT_GRACE)
+    except FileNotFoundError:
+        proc = subprocess.run(base, capture_output=True, text=True,
+                              timeout=SMOKE_TEST_TIMEOUT + SMOKE_IMPORT_GRACE)
+    except subprocess.TimeoutExpired:
+        return False, f"импорт навыка завис (таймаут {SMOKE_TEST_TIMEOUT + SMOKE_IMPORT_GRACE}с) — процесс убит"
+    except Exception as e:  # noqa: BLE001
+        return False, f"песочница проверки не запустилась: {type(e).__name__}: {e}"
+
+    for line in reversed(proc.stdout.splitlines()):
+        if line.startswith("__SMOKE__"):
+            try:
+                payload = json.loads(line[len("__SMOKE__"):])
+                return bool(payload["ok"]), str(payload["result"])
+            except Exception:  # noqa: BLE001
+                break
+    err = (proc.stderr or proc.stdout or "").strip()[-400:]
+    return False, f"проверка загружаемости без результата (rc={proc.returncode}): {err}"
 
 
 # Раннер песочницы: исполняется ОТДЕЛЬНЫМ python-процессом. Ставит resource-лимиты

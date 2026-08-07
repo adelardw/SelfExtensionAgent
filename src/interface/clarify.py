@@ -44,6 +44,13 @@ def set_clarifier(fn: Optional[Clarifier]) -> None:
     _clarifier = fn
 
 
+def has_channel() -> bool:
+    """Есть ли живой канал уточнений (интерактивный фронтенд). Нет — clarify_gate вместо
+    самоответов-допущений возвращает вопросы ПОЛЬЗОВАТЕЛЮ как ответ (валидация: граф 5 минут
+    гадал и трижды падал по таймауту там, где 15-секундный вопрос решал всё)."""
+    return _clarifier is not None
+
+
 def reset_ledger() -> None:
     """Новый прогон — чистый ledger (зовётся в recall_node). Ключ — run_id с границы запроса."""
     _ledgers[_key()] = []
@@ -87,9 +94,15 @@ async def ask(items: list[dict]) -> list[dict]:
 
     fresh: dict[str, str] = {}
     if ask_now and _clarifier is not None:
+        # ЧАСЫ ПРОГОНА СТОЯТ, пока думает человек: вопрос может висеть сколько угодно долго
+        # (как AskUserQuestion в Claude Code). Без паузы wall-clock прогона тикал во время
+        # раздумий → ответ приходил в уже «исчерпанный» прогон.
+        from src.runtime import runbudget
+
         try:
-            res = _clarifier(ask_now)
-            answers = await res if inspect.isawaitable(res) else res
+            with runbudget.human_pause():
+                res = _clarifier(ask_now)
+                answers = await res if inspect.isawaitable(res) else res
         except Exception:  # noqa: BLE001
             answers = None
         for j, it in enumerate(ask_now):

@@ -197,10 +197,15 @@ async def confirm_rich(description: str) -> tuple[bool, str, str]:
     """
     if _confirmer is None:
         return False, "", "deny"
+    # Часы прогона стоят, пока человек решает (подтверждение может висеть сколько угодно —
+    # см. runbudget.human_pause): иначе раздумья съедали бюджет и обрывали прогон после «да».
+    from src.runtime import runbudget
+
     try:
-        res = _confirmer(description)
-        if inspect.isawaitable(res):
-            res = await res
+        with runbudget.human_pause():
+            res = _confirmer(description)
+            if inspect.isawaitable(res):
+                res = await res
     except Exception:  # noqa: BLE001
         res = False
     if isinstance(res, bool):
@@ -275,9 +280,17 @@ def wrap_with_confirmation(t, skill_name: str):
             "что действие требует его подтверждения."
         )
 
-    return StructuredTool(
+    wrapped = StructuredTool(
         name=t.name,
         description=t.description,
         args_schema=t.args_schema,
         coroutine=_arun,
     )
+    # СТРУКТУРНАЯ метка «этот тул может ждать человека»: исполнитель шага НЕ накладывает на
+    # него дедлайн (иначе подтверждение убивалось через 45с — раньше, чем юзер прочтёт вопрос).
+    # Атрибут, а не список имён: работает для любого навыка, включая созданные агентом.
+    try:
+        object.__setattr__(wrapped, "hitl_guarded", True)
+    except Exception:  # noqa: BLE001 — pydantic-модель может запретить; тогда просто без метки
+        pass
+    return wrapped

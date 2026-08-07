@@ -97,6 +97,8 @@ skills:
   - ax_control
   - phone_control
   - stash
+  - browser_control   # авторский core (физ-браузер, «браузер-first»): без protected AST-гейт
+  - launcher          # молча резал __import__/subprocess → навыки были МЕРТВЫ (вскрыто судьями)
   confirm:                   # side-effect навыки: вызов тула требует подтверждения человека (HITL)
   - device_control
   - app_control
@@ -109,6 +111,10 @@ skills:
   - edit_file                #   Имена ТУЛОВ (не навыков). Дефолт {run_bash, edit_file} зашит в hitl.py.
   autosync: true
   temp_ttl_days: 7           # временные (не принятые в библиотеку) навыки старше TTL чистятся при старте
+  curator_min_uses: 5        # куратор: судим навык только после N реальных использований
+  curator_win_floor: 0.2     # куратор: win-rate ниже пола → сгенерированный навык вычищается при старте
+  distill_from_trajectory: true  # ретроспектива: успешный тяжёлый прогон (5+ tool-вызовов) → дистилляция в навык
+  distill_min_tool_calls: 5      # порог «задача стоила навыка» (эвристика Hermes)
 mcp:
   auto_trust_discovered: false
   discover_limit: 8

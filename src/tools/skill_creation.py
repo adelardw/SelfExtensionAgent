@@ -2,6 +2,7 @@ import ast
 import json
 import os
 import importlib.util
+import re
 import sys
 import tempfile
 import threading
@@ -165,6 +166,58 @@ def _default_scope() -> str:
     return "project" if _sea_initialized() else "global"
 
 
+# ── SKILL.md frontmatter (agentskills.io-стиль, Hermes-порт) ──────────────────
+# Создаваемые навыки получают YAML-frontmatter (name/description/when_to_use) → каталог
+# переносим в другие harness'ы (Claude Code, OpenClaw и пр.) без конвертации; when_to_use —
+# отдельное поле «когда использовать» для селектора. Чтение ТОЛЕРАНТНО: старые md без
+# frontmatter работают как раньше.
+_FM_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.S)
+
+
+def split_frontmatter(text: str) -> tuple[dict, str]:
+    """SKILL.md → (frontmatter dict, тело markdown). Нет frontmatter → ({}, текст как есть)."""
+    m = _FM_RE.match(text or "")
+    if not m:
+        return {}, text or ""
+    try:
+        import yaml
+
+        meta = yaml.safe_load(m.group(1)) or {}
+    except Exception:  # noqa: BLE001
+        meta = {}
+    return (meta if isinstance(meta, dict) else {}), m.group(2)
+
+
+def _compose_skill_md(name: str, description: str, when_to_use: Optional[str]) -> str:
+    """Обернуть описание навыка в frontmatter. Автор уже дал свой frontmatter → не дублируем."""
+    if (description or "").lstrip().startswith("---"):
+        return description
+    first_line = next((ln.strip().lstrip("#").strip()
+                       for ln in (description or "").splitlines() if ln.strip()), name)
+    meta: dict = {"name": name, "description": first_line[:150]}
+    if when_to_use and when_to_use.strip():
+        meta["when_to_use"] = when_to_use.strip()
+    try:
+        import yaml
+
+        fm = yaml.safe_dump(meta, allow_unicode=True, sort_keys=False).strip()
+    except Exception:  # noqa: BLE001
+        return description
+    return f"---\n{fm}\n---\n\n{description}"
+
+
+def _skill_md_view(name: str, meta: dict) -> tuple[str, str]:
+    """(when_to_use, тело md без frontmatter) навыка — для промпт-инъекции и ретривала."""
+    md_file = _skill_base(name) / f"{name}.md"
+    try:
+        raw = md_file.read_text(encoding="utf-8")
+    except OSError:
+        return str(meta.get("when_to_use", "") or ""), str(meta.get("description", "") or "")
+    fm, body = split_frontmatter(raw)
+    wtu = str(fm.get("when_to_use", "") or meta.get("when_to_use", "") or "")
+    return wtu, body.strip() or raw
+
+
 def _validate_python(code: str) -> tuple[bool, str]:
     """Проверяет синтаксис Python-кода БЕЗ выполнения."""
     try:
@@ -193,14 +246,38 @@ def _security_gate(code: str) -> tuple[bool, str]:
     )
 
 
-# Имена навыков, созданных в этой сессии (структурный канал для create_skills_node,
-# вместо хрупкого регэкспа по тексту сообщений агента).
-_session_created: list[str] = []
+# Имена навыков, созданных в текущем ПРОГОНЕ (структурный канал для create_skills_node,
+# вместо хрупкого регэкспа по тексту сообщений агента). Скоуп по run_id (contextvar из
+# run_context, наследуется вниз по asyncio): под конкурентным сервером и при фоновой
+# дистилляции параллельные прогоны НЕ уводят имена друг у друга. Нет run-контекста
+# (CLI/фон-поток) → общий ключ "_default" (прежнее поведение).
+_session_created: dict[str, list[str]] = {}
+
+try:  # per-run записи чистятся по завершении запроса (тот же механизм, что taint/research)
+    from src.runtime.run_context import register_cleanup as _reg_cleanup
+
+    _reg_cleanup(lambda rid: _session_created.pop(rid, None))
+except Exception:  # noqa: BLE001
+    pass
+
+
+def _created_key() -> str:
+    try:
+        from src.runtime.run_context import current_run_id
+
+        return current_run_id() or "_default"
+    except Exception:  # noqa: BLE001
+        return "_default"
+
+
+def _note_created(name: str) -> None:
+    _session_created.setdefault(_created_key(), []).append(name)
 
 
 def pop_last_created() -> str:
-    """Возвращает имя последнего созданного в сессии навыка (и забывает его)."""
-    return _session_created.pop() if _session_created else ""
+    """Возвращает имя последнего навыка, созданного в ТЕКУЩЕМ прогоне (и забывает его)."""
+    lst = _session_created.get(_created_key())
+    return lst.pop() if lst else ""
 
 
 # ── временные навыки (создан под задачу → решение «оставить/выбросить» позже) ──
@@ -220,6 +297,55 @@ def clear_temporary(name: str) -> None:
     registry = _load_reg_at(path)
     if name in registry and registry[name].pop("temporary", None):
         _save_reg_at(path, registry)
+
+
+# ── жизненный цикл: usage-статистика навыков (Hermes-порт, аналог Curator) ─────
+# Каждый прогон, где навык был выбран в execution, пишет uses/wins/last_used_at в реестр.
+# Куратор в sync_registry() по этим числам вычищает систематически проигрывающие
+# сгенерированные навыки (protected/imported не трогает). В eval-режиме не пишем
+# (бенч-исходы не должны приговаривать навыки боевой библиотеки).
+
+def record_skill_usage(names: list[str], win: bool) -> None:
+    """Фиксирует факт использования навыков в прогоне (+исход). Ошибки глотаем: статистика
+    не должна ронять reflect. No-op в eval И под pytest: бенч-исходы и юнит-тесты, гоняющие
+    act/reflect с БОЕВЫМ реестром, не должны красить статистику библиотеки (вскрыто живым
+    прогоном сьюта: тесты act записали uses/wins реальным навыкам)."""
+    if os.getenv("AGENT_EVAL_MODE") == "1":
+        return
+    # Под pytest — no-op (тесты act/reflect гоняют БОЕВОЙ реестр), кроме явного opt-in
+    # тестов самой статистики (они работают с временным реестром).
+    if os.getenv("PYTEST_CURRENT_TEST") and os.getenv("AGENT_USAGE_TRACKING_IN_TESTS") != "1":
+        return
+    for name in names or []:
+        try:
+            path = _registry_path_for(name)
+            registry = _load_reg_at(path)
+            meta = registry.get(name)
+            if meta is None:
+                continue
+            meta["uses"] = int(meta.get("uses", 0)) + 1
+            meta["wins"] = int(meta.get("wins", 0)) + (1 if win else 0)
+            meta["last_used_at"] = datetime.now().isoformat()
+            # Retention ДЕЛОМ: temporary-навык (в т.ч. дистиллированный из траектории),
+            # принёсший победу в реальном прогоне, принимается в библиотеку — иначе его
+            # снесёт TTL-чистка, хотя он доказал полезность.
+            if win:
+                meta.pop("temporary", None)
+            _save_reg_at(path, registry)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def skill_usage_stats() -> dict[str, dict]:
+    """{name: {uses, wins, last_used_at}} по объединённому реестру (для CLI/бенча/куратора)."""
+    out = {}
+    for name, meta in _merged_registry().items():
+        out[name] = {
+            "uses": int(meta.get("uses", 0)),
+            "wins": int(meta.get("wins", 0)),
+            "last_used_at": meta.get("last_used_at", ""),
+        }
+    return out
 
 
 
@@ -243,8 +369,10 @@ def list_skills() -> str:
         temp = " 🕒temp" if meta.get("temporary") else ""
         scope = " 📁project" if _skill_scope(name) == "project" else ""
         imp = " 🦞imported" if meta.get("imported") else ""
+        uses = int(meta.get("uses", 0))
+        stats = f" ({int(meta.get('wins', 0))}/{uses} wins)" if uses else ""
         lines.append(
-            f"• {name} [{status}]{lock}{scope}{temp}{imp} — {meta['description'][:100]}"
+            f"• {name} [{status}]{lock}{scope}{temp}{imp}{stats} — {meta['description'][:100]}"
         )
     return "Available skills:\n" + "\n".join(lines)
 
@@ -289,14 +417,18 @@ def create_skill(
     tool_code: Optional[str] = None,
     system_prompt: Optional[str] = None,
     scope: Optional[str] = None,
+    when_to_use: Optional[str] = None,
 ) -> str:
     """
     Create a new skill with description, system prompt, and optionally tool code.
+    The skill's .md is saved with agentskills.io-style YAML frontmatter (portable format).
 
     Args:
         name: Short snake_case name for the skill (e.g. 'web_search', 'data_analysis').
         description: Markdown description of WHEN and HOW to use this skill.
             Include: purpose, triggers, inputs/outputs, examples.
+        when_to_use: One-two sentences: in which situations/queries this skill should be
+            picked. Used by the skill selector — write concrete trigger phrases.
         tool_code: Python source code with @tool-decorated functions.
             Must be valid Python. Will be validated before saving.
             Can be omitted and added later via update_skill_tools.
@@ -334,7 +466,8 @@ def create_skill(
     skill_dir = base_dir / name
     skill_dir.mkdir(parents=True, exist_ok=True)
 
-    (skill_dir / f"{name}.md").write_text(description, encoding="utf-8")
+    (skill_dir / f"{name}.md").write_text(
+        _compose_skill_md(name, description, when_to_use), encoding="utf-8")
 
     has_tools = False
     if tool_code:
@@ -353,8 +486,10 @@ def create_skill(
         "updated_at": datetime.now().isoformat(),
         "version": 1,
     }
+    if when_to_use and when_to_use.strip():
+        registry[name]["when_to_use"] = when_to_use.strip()[:300]
     _save_reg_at(reg_path, registry)
-    _session_created.append(name)
+    _note_created(name)
 
     result = f"Skill '{name}' created successfully (scope: {scope})."
     if has_tools:
@@ -638,11 +773,14 @@ def get_skills_for_prompt() -> str:
 
     sections = []
     for name, meta in registry.items():
-        md_file = _skill_base(name) / f"{name}.md"
-        if md_file.exists():
-            content = md_file.read_text(encoding="utf-8")
-            status = "tools ready" if meta.get("has_tools") else "no tools yet"
-            sections.append(f"### Skill: {name} ({status})\n{content}")
+        if not (_skill_base(name) / f"{name}.md").exists():
+            continue
+        wtu, body = _skill_md_view(name, meta)  # frontmatter в промпт не течёт
+        status = "tools ready" if meta.get("has_tools") else "no tools yet"
+        head = f"### Skill: {name} ({status})"
+        if wtu:
+            head += f"\nКогда использовать: {wtu}"
+        sections.append(f"{head}\n{body}")
 
     return "\n\n---\n\n".join(sections)
 
@@ -651,6 +789,117 @@ def get_skills_for_prompt() -> str:
 # захлёбывается полным списком → включаем ToolSearch (retrieval топ-релевантных).
 TOOLSEARCH_THRESHOLD = 12
 TOOLSEARCH_TOP = 8
+
+
+# ── гибридный ранкер навыков (Hermes-порт: масштабирование выбора) ─────────────
+# BM25 по md + (при включённых memory.embeddings) косинус по кэшированным векторам,
+# слитые RRF. Векторы считаются лениво и кэшируются на диске с инвалидацией по mtime
+# md — на сотнях навыков это один embed-вызов на ЗАПРОС (или ноль, если qvec передан
+# из recall), а не на навык. Эмбеддер выключен/упал → чистый BM25, как раньше.
+_EMB_CACHE_LOCK = threading.Lock()
+_skill_embedder_inst = None
+
+
+def _skill_embedder():
+    global _skill_embedder_inst
+    if _skill_embedder_inst is None:
+        try:
+            from omegaconf import OmegaConf
+
+            from src.memory.embedder import build_embedder
+
+            mc = OmegaConf.load("config.yml").get("memory", {})
+            _skill_embedder_inst = build_embedder(
+                bool(mc.get("embeddings", False)), mc.get("embedding_model"))
+        except Exception:  # noqa: BLE001
+            from src.memory.embedder import NullEmbedder
+
+            _skill_embedder_inst = NullEmbedder()
+    return _skill_embedder_inst
+
+
+# Memo распарсенного кэша векторов: файл ~30-40КБ НА НАВЫК → перечитывать/парсить JSON на
+# КАЖДЫЙ ранк-запрос при сотнях навыков стало бы мегабайтами на запрос. Держим разобранный
+# dict в памяти, перечитываем только если файл на диске сменился (mtime).
+_emb_memo: dict = {"mtime": None, "data": {}}
+
+
+def _cached_skill_vecs(names: list[str], docs: list[str], emb) -> list[Optional[list]]:
+    """Векторы документов навыков из дискового кэша (SKILLS_DIR/.emb_cache.json),
+    инвалидация по mtime md; недостающие докачиваются эмбеддером и дописываются.
+    Мёртвые ключи (удалённые навыки) вычищаются при записи."""
+    cache_path = SKILLS_DIR / ".emb_cache.json"
+    try:
+        disk_mtime = cache_path.stat().st_mtime if cache_path.exists() else None
+    except OSError:
+        disk_mtime = None
+    if _emb_memo["mtime"] == disk_mtime and disk_mtime is not None:
+        cache = _emb_memo["data"]
+    else:
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8")) if cache_path.exists() else {}
+        except Exception:  # noqa: BLE001
+            cache = {}
+        _emb_memo.update(mtime=disk_mtime, data=cache)
+    vecs: list[Optional[list]] = []
+    dirty = False
+    for name, doc in zip(names, docs):
+        try:
+            mtime = (_skill_base(name) / f"{name}.md").stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        entry = cache.get(name)
+        if entry and entry.get("mtime") == mtime and entry.get("vec"):
+            vecs.append(entry["vec"])
+            continue
+        vec = emb.embed(doc[:4000])
+        vecs.append(vec)
+        if vec:
+            cache[name] = {"mtime": mtime, "vec": vec}
+            dirty = True
+    if dirty:
+        try:
+            alive = set(_merged_registry())
+            for dead in [k for k in cache if k not in alive]:
+                cache.pop(dead, None)  # удалённые навыки не пухнут в кэше вечно
+            with _EMB_CACHE_LOCK:
+                _atomic_write_json(cache_path, cache)
+                _emb_memo.update(mtime=cache_path.stat().st_mtime, data=cache)
+        except Exception:  # noqa: BLE001
+            pass
+    return vecs
+
+
+def rank_skill_docs(docs: list[str], query: str, top: int,
+                    names: Optional[list[str]] = None,
+                    qvec: Optional[list] = None) -> list[int]:
+    """Индексы топ-`top` документов навыков: RRF(BM25, cosine-по-эмбеддингам).
+    Без эмбеддера (или без names для кэша) — чистый BM25 (прежнее поведение)."""
+    from src.search.retrieval import bm25_rank
+
+    bm_idx = bm25_rank(docs, query, top)
+    emb = _skill_embedder()
+    if not getattr(emb, "enabled", False) or names is None or len(names) != len(docs):
+        return bm_idx
+    try:
+        from src.memory.embedder import cosine
+
+        qv = qvec or emb.embed(query)
+        if not qv:
+            return bm_idx
+        vecs = _cached_skill_vecs(names, docs, emb)
+        sims = [(i, cosine(qv, v)) for i, v in enumerate(vecs) if v]
+        emb_idx = [i for i, s in sorted(sims, key=lambda p: -p[1]) if s > 0][:top]
+    except Exception:  # noqa: BLE001
+        return bm_idx
+    if not emb_idx:
+        return bm_idx
+    # RRF: устойчивое слияние двух ранжировок без калибровки скорингов
+    score: dict[int, float] = {}
+    for lst in (bm_idx, emb_idx):
+        for pos, i in enumerate(lst):
+            score[i] = score.get(i, 0.0) + 1.0 / (60 + pos)
+    return sorted(score, key=lambda i: -score[i])[:top]
 
 
 def get_relevant_skills_for_prompt(query: str, top: int = TOOLSEARCH_TOP) -> str:
@@ -663,20 +912,20 @@ def get_relevant_skills_for_prompt(query: str, top: int = TOOLSEARCH_TOP) -> str
     if not registry or len(registry) < TOOLSEARCH_THRESHOLD:
         return get_skills_for_prompt.invoke({})  # это @tool, не функция
 
-    from src.search.retrieval import bm25_rank
-
     names, docs, sections = [], [], []
     for name, meta in registry.items():
-        md_file = _skill_base(name) / f"{name}.md"
-        if not md_file.exists():
+        if not (_skill_base(name) / f"{name}.md").exists():
             continue
-        content = md_file.read_text(encoding="utf-8")
+        wtu, body = _skill_md_view(name, meta)  # frontmatter в промпт не течёт
         status = "tools ready" if meta.get("has_tools") else "no tools yet"
         names.append(name)
-        docs.append(f"{name} {content}")
-        sections.append(f"### Skill: {name} ({status})\n{content}")
+        docs.append(f"{name} {wtu} {body}")  # when_to_use — сигнал ретривала (Hermes-порт)
+        head = f"### Skill: {name} ({status})"
+        if wtu:
+            head += f"\nКогда использовать: {wtu}"
+        sections.append(f"{head}\n{body}")
 
-    idx = bm25_rank(docs, query, top)
+    idx = rank_skill_docs(docs, query, top, names=names)
     if not idx:
         return get_skills_for_prompt.invoke({})  # это @tool, не функция
     return "\n\n---\n\n".join(sections[i] for i in idx)
@@ -700,9 +949,8 @@ def get_skill_runtime_prompts(names: list[str]) -> str:
         else:
             md_file = _skill_base(name) / f"{name}.md"
             if md_file.exists():
-                parts.append(
-                    f"[Навык: {name} (описание)]\n{md_file.read_text(encoding='utf-8')}"
-                )
+                _, body = split_frontmatter(md_file.read_text(encoding="utf-8"))
+                parts.append(f"[Навык: {name} (описание)]\n{body}")
     return "\n\n---\n\n".join(parts) if parts else ""
 
 
@@ -726,7 +974,7 @@ def sync_registry() -> dict:
         has_py = (sub / f"{name}.py").exists()
         md = sub / f"{name}.md"
         if name not in registry and (has_py or md.exists()):
-            desc = md.read_text(encoding="utf-8")[:200] if md.exists() else ""
+            desc = split_frontmatter(md.read_text(encoding="utf-8"))[1].strip()[:200] if md.exists() else ""
             registry[name] = {
                 "description": desc,
                 "has_tools": has_py,
@@ -772,8 +1020,34 @@ def sync_registry() -> dict:
             registry = _load_registry()
             expired.append(name)
 
+    # 5. КУРАТОР (Hermes-порт): сгенерированный навык, который систематически проигрывает
+    # (достаточно использований, а побед почти нет), — мусор в реестре: жрёт контекст селектора
+    # и подсовывается заново. Чистим по СТАТИСТИКЕ (uses/wins из record_skill_usage), а не по
+    # слепому TTL. Protected/imported не трогаем; порог консервативный (config skills.curator_*).
+    try:
+        from omegaconf import OmegaConf
+
+        _sk = OmegaConf.load("config.yml").get("skills", {})
+        min_uses = int(_sk.get("curator_min_uses", 5))
+        win_floor = float(_sk.get("curator_win_floor", 0.2))
+    except Exception:  # noqa: BLE001
+        min_uses, win_floor = 5, 0.2
+    curated = []
+    for name in list(registry.keys()):
+        meta = registry[name]
+        if meta.get("protected") or meta.get("imported") or name in PROTECTED_SKILLS:
+            continue
+        uses = int(meta.get("uses", 0))
+        wins = int(meta.get("wins", 0))
+        if uses >= min_uses and (wins / uses) < win_floor:
+            _save_registry(registry)
+            _delete_skill_impl(name, allow_protected=False)
+            registry = _load_registry()
+            curated.append(name)
+
     _save_registry(registry)
-    return {"added": added, "removed": removed, "protected": protected, "expired_temp": expired}
+    return {"added": added, "removed": removed, "protected": protected,
+            "expired_temp": expired, "curated_out": curated}
 
 
 def get_manager_tools() -> list:

@@ -46,6 +46,7 @@ from src.llm.prompts import (
     search_query_prompt,
     synthesize_prompt,
     skill_retention_prompt,
+    distill_judge_prompt,
     OPTIMIZABLE_PROMPTS,
 )
 from src.llm.structured_outputs import (
@@ -62,6 +63,7 @@ from src.llm.structured_outputs import (
     StepOutcome,
     IntegrationReview,
     SkillRetention,
+    DistillVerdict,
     ClarificationSet,
 )
 from src.search import bandit
@@ -75,6 +77,31 @@ _INTERNAL_SAFE_TOOLS = {
     "python_exec", "current_datetime", "ask_user", "search_memory", "recall_history",
     "note_to_self", "remember_project", "stash_view", "stash_aggregate", "export_table",
 }
+
+# Инструменты, которые ЖДУТ ЧЕЛОВЕКА: к ним НЕ применяется дедлайн шага — вопрос висит
+# сколько угодно долго (основная фишка HITL, как AskUserQuestion в Claude Code), а часы
+# прогона на это время останавливаются (runbudget.human_pause в clarify/hitl).
+_HUMAN_WAIT_TOOLS = {"ask_user"}
+
+
+async def _await_tool_work_bounded(coro, deadline: float, poll: float = 1.0):
+    """Ждать инструмент, ограничивая ТОЛЬКО его РАБОЧЕЕ время: секунды, проведённые в
+    ожидании человека (runbudget.human_pause внутри clarify/HITL), из дедлайна вычитаются.
+
+    Так вопрос пользователю висит сколько угодно (фишка HITL), но ЗАВИСШИЙ тул не блокирует
+    прогон навсегда — регресс-набор поймал ход на 8.5 часов при лимите 900с после того, как
+    для таких тулов дедлайн был снят целиком."""
+    task = asyncio.ensure_future(coro)
+    hw0 = runbudget.human_wait_seconds()
+    t0 = time.monotonic()
+    while True:
+        done, _pending = await asyncio.wait({task}, timeout=poll)
+        if done:
+            return task.result()
+        human = runbudget.human_wait_seconds() - hw0      # время раздумий человека — не в счёт
+        if (time.monotonic() - t0 - human) > deadline:
+            task.cancel()
+            raise asyncio.TimeoutError(f"инструмент превысил рабочий дедлайн {deadline:.0f}с")
 from src.graph import intent
 from src.search import collective
 from src.search import habits
@@ -118,8 +145,10 @@ from src.tools.skill_creation import (
     pop_last_created,
     mark_temporary,
     clear_temporary,
+    record_skill_usage,
     _delete_skill_impl,
     _load_registry,
+    _merged_registry,
 )
 
 
@@ -243,6 +272,21 @@ def _step_hard_limits(state) -> tuple[int, float]:
 RECALL_K: int = config.get("memory", {}).get("recall_k", 5)
 PROJECT_MEMORY_K: int = config.get("memory", {}).get("project_recall_k", 5)  # #2 проектный ярус
 REFLECT_EVERY: int = config.get("memory", {}).get("reflect_every", 5)
+
+# Ретроспективная дистилляция (Hermes-порт): успешный тяжёлый прогон, где реально работали
+# инструментами (5+ вызовов), но навык НЕ создавался, — кандидат на выделение переиспользуемой
+# способности из траектории. Снимает риск «не ту абстракцию угадали заранее» у проактивного пути.
+DISTILL_ENABLED: bool = bool(config.get("skills", {}).get("distill_from_trajectory", True))
+DISTILL_MIN_CALLS: int = int(config.get("skills", {}).get("distill_min_tool_calls", 5))
+
+
+def _distill_worthy(outcome: str, mode: str, created_skill: str, tool_calls: int,
+                    reacted_negative: bool) -> bool:
+    """Чистый предикат триггера дистилляции (тестируем без LLM): успешный deliberate/heavy
+    прогон, без уже созданного навыка, с ≥ порога реальных tool-вызовов."""
+    return (DISTILL_ENABLED and outcome == "ok" and not reacted_negative
+            and mode in ("deliberate", "heavy") and not created_skill
+            and tool_calls >= DISTILL_MIN_CALLS)
 RECALL_BUDGET: int = config.get("memory", {}).get("recall_budget_chars", 1800)
 # Гейт ассоциативной памяти («recall не всегда»): эпизоды/выводы инжектятся, только если
 # лучший из них релевантен запросу (top_score>=gate); персона-факты — всегда. 0 = гейт выкл.
@@ -313,6 +357,8 @@ def rebuild_llms() -> None:
     act_finalize_chain = act_finalize_prompt | llm  # чистая финализация act из РЕЗУЛЬТАТОВ
     search_query_chain = search_query_prompt | llm  # запрос юзера → фокусный поисковый запрос
     skill_retention_chain = skill_retention_prompt | llm.with_structured_output(SkillRetention)
+    global distill_judge_chain
+    distill_judge_chain = distill_judge_prompt | llm.with_structured_output(DistillVerdict)
 
     create_skills_agent = create_agent(code_llm, get_manager_tools(), system_prompt=create_skills_system_prompt)
 
@@ -463,7 +509,11 @@ async def recall_node(state: GeneralGraphState) -> dict:
     # лишнего embed). Для остальных запросов «сегодня» НЕ инжектим — не засоряем контекст и не плодим
     # лишние упоминания даты (риск шума/галлюцинаций). Живой баг: «бронируй за 3-4 мес» на поездку
     # через 2 недели — модель не соотнесла дату события с сегодняшним днём.
-    if _is_time_sensitive(query, query_emb or None):
+    # + web_grounding («какая сейчас ставка/цена/курс»): живой пробник показал, что БЕЗ даты
+    # модель считает «сейчас» = своему срезу знаний (2024) и из таблицы-истории в находках
+    # выбирает УСТАРЕВШУЮ строку как «последнюю». Дата — якорь для выбора свежей строки.
+    if (_is_time_sensitive(query, query_emb or None)
+            or _needs_web_grounding(query, query_emb or None)):
         from datetime import datetime as _dt
         memory_context = (f"[Сегодня: {_dt.now().strftime('%Y-%m-%d, %A')}] — соотноси с датами, "
                           "сроками и сезонностью из запроса.\n\n" + memory_context)
@@ -490,6 +540,14 @@ async def recall_node(state: GeneralGraphState) -> dict:
         "global_retries": 0,
         "revision_rounds": 0,
         "user_blocked": False,
+        # Тот же класс протечки: created_skill_name прошлого хода подавлял ретро-дистилляцию
+        # и заставлял retention-судью пере-судить старый навык; stale selected_skills кормил
+        # ложные route-метки/эпизоды на лёгких ходах. Каждый прогон начинает с чистого листа.
+        "created_skill_name": "",
+        "selected_skills": [],
+        # final_answer прошлого хода треда: clarify-гейт маршрутизирует по его наличию
+        # («вопросы уже ответ» → reflect) — stale-значение замыкало бы КАЖДЫЙ прогон.
+        "final_answer": "",
     }
 
 
@@ -639,12 +697,13 @@ async def reflexion_node(state: GeneralGraphState) -> dict:
 
 
 def _skills_for_act(query: str, top: int = 2, qvec: list | None = None) -> list[str]:
-    """Дешёвый ToolSearch для act-режима: BM25 по ПОЛНЫМ md навыков (описание в реестре
-    обрезано — ключевые слова инструментов теряются), без LLM: селектор-LLM был бы
-    дороже самого действия. device_control добирается ВСЕГДА (если есть): act — это
-    действия с устройством, а лексика запроса («включи северслат…») часто не пересекается
-    с md навыка — живой тест оставил act без рук."""
-    from src.tools.skill_creation import SKILLS_DIR
+    """Дешёвый ToolSearch для act-режима: гибрид BM25+эмбеддинги (rank_skill_docs) по ПОЛНЫМ
+    md навыков (описание в реестре обрезано — ключевые слова инструментов теряются), без LLM:
+    селектор-LLM был бы дороже самого действия. qvec из recall переиспользуется (нет лишнего
+    embed-вызова); эмбеддер выключен → чистый BM25. device_control добирается ВСЕГДА (если
+    есть): act — это действия с устройством, а лексика запроса («включи северслат…») часто
+    не пересекается с md навыка — живой тест оставил act без рук."""
+    from src.tools.skill_creation import SKILLS_DIR, rank_skill_docs
 
     registry = _load_registry()
     if not registry:
@@ -658,7 +717,7 @@ def _skills_for_act(query: str, top: int = 2, qvec: list | None = None) -> list[
             doc = str(meta.get("description", ""))
         names.append(n)
         docs.append(f"{n} {doc}")
-    picked = [names[i] for i in bm25_rank(docs, query, top)]
+    picked = [names[i] for i in rank_skill_docs(docs, query, top, names=names, qvec=qvec)]
     # web_search (headless-чтение выдачи) — ВСЕГДА: поиск/анализ/факты идут БЕЗ физ-вкладки.
     # ФИЗИЧЕСКИЕ руки (browser_control = вкладка в окне юзера, device_control = приложения/
     # скриншот) добираются ТОЛЬКО при физ-интенте (воспроизведение/действие на сайте). Для
@@ -694,7 +753,9 @@ _PHYSICAL_SKILLS = frozenset({
 from src.graph.semantic_signals import (is_degenerate as _is_degenerate, is_paywall as _is_paywall,
                                is_error_page as _is_error_page, is_media_playing as _is_media_playing,
                                wants_file_output as _wants_file_output,
-                               is_time_sensitive as _is_time_sensitive)
+                               is_time_sensitive as _is_time_sensitive,
+                               is_doc_extraction as _is_doc_extraction,
+                               is_computational as _is_computational)
 from src.browser.browser_session import MEDIA_PLAYING as _MEDIA_PLAYING
 
 
@@ -810,6 +871,22 @@ def _strip_ungrounded_urls(answer: str, grounded: set[str]) -> str:
     return answer
 
 
+def _dedup_by_domain(urls: list[str], k: int = 3) -> list[str]:
+    """Первые k URL с ПОПАРНО РАЗНЫХ доменов (www. не считается отличием). Чистая функция."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for u in urls:
+        m = re.match(r"https?://(?:www\.)?([^/]+)", u, re.I)
+        dom = (m.group(1) if m else u).lower()
+        if dom in seen:
+            continue
+        seen.add(dom)
+        out.append(u)
+        if len(out) >= k:
+            break
+    return out
+
+
 async def _research_answer(state: GeneralGraphState, query: str) -> dict:
     """ДЕТЕРМИНИРОВАННЫЙ грунтованный поиск (ядро цели «надёжный поисковик»): сами вызываем
     search_web (реальная выдача с реальными URL) + читаем топ-страницы headless, синтез СТРОГО
@@ -840,12 +917,23 @@ async def _research_answer(state: GeneralGraphState, query: str) -> dict:
         print(f"[Research] поиск не вышел → deliberate: {type(e).__name__}")
         return {"mode": "deliberate"}
     if not isinstance(serp, str) or "http" not in serp:
-        return {"final_answer": "Не нашёл ничего по запросу — попробуй переформулировать "
-                "(добавь город/уточнение), и я поищу заново."}
+        # Отказ ИНФРАСТРУКТУРЫ (сентинел web_search) ≠ «темы нет»: честно говорим о недоступности
+        # поиска, не советуем юзеру «добавить город» (шаблон вылезал на академических запросах).
+        if isinstance(serp, str) and _SEARCH_FAIL_MARK in serp:
+            return {"final_answer": (
+                "Поисковые сервисы сейчас не отдают результатов (сбой/лимиты бэкендов) — свежие "
+                "данные из веба достать не могу, а выдавать сведения из памяти за актуальные не "
+                "буду. Попробуй повторить запрос чуть позже.")}
+        return {"final_answer": "Не нашёл ничего по запросу — попробуй переформулировать или "
+                "сузить тему, и я поищу заново."}
     urls = re.findall(r"https?://[^\s)\]}>\"']+", serp)[:8]
     grounded = _domains_of(serp)
     # Читаем топ-3 страницы headless параллельно (реальные детали: адреса/цены/условия) —
     # бюджетно и с фолбэком на сниппеты выдачи, если страница не отдалась.
+    # ДОМЕННЫЙ ДЕДУП (живой пробник «ставка ЦБ»): топ выдачи часто кластер ОДНОГО домена
+    # (cbr.ru×3), а искомое значение прозой несут источники ниже (РИА/банки) — читались бы
+    # три клона, число в находки не попадало, финал заполнялся памятью. Одна страница с
+    # каждого из первых трёх РАЗНЫХ доменов.
     pages = ""
     if browse and urls:
         async def _b(u):
@@ -853,7 +941,7 @@ async def _research_answer(state: GeneralGraphState, query: str) -> dict:
                 return await asyncio.wait_for(browse.ainvoke({"url": u, "find": query}), timeout=20)
             except Exception:  # noqa: BLE001
                 return ""
-        reads = await asyncio.gather(*[_b(u) for u in urls[:3]])
+        reads = await asyncio.gather(*[_b(u) for u in _dedup_by_domain(urls, 3)])
         pages = "\n\n".join(r for r in reads if isinstance(r, str) and len(r) > 120)
         grounded |= _domains_of(pages)
     findings = f"ВЫДАЧА ПОИСКА (реальные ссылки — бери URL отсюда дословно):\n{serp}"
@@ -870,6 +958,118 @@ async def _research_answer(state: GeneralGraphState, query: str) -> dict:
     return {"final_answer": clean}
 
 
+# Сентинел отказа поисковой инфраструктуры (пишет web_search при пустоте ВСЕХ бэкендов).
+# Матч по СВОЕЙ константе — структурный энфорсмент честности, не keyword-эвристика по прозе.
+_SEARCH_FAIL_MARK = "ПОИСК НЕ ДАЛ РЕЗУЛЬТАТОВ"
+
+
+def _doc_source_unread(query: str) -> bool:
+    """True → данные из документа приводить НЕЛЬЗЯ: в прогоне нет успешных чтений вовсе, ИЛИ
+    запрос называет КОНКРЕТНЫЙ источник (URL/arxiv-id), а среди прочитанных URL его нет.
+    Р.4 вскрыл дыру «прочитал что-то ≠ прочитал named-источник»: агент читал случайные страницы
+    выдачи и уверенно фабриковал «из Table 2» непрочитанной статьи."""
+    _, r_ok = run_context.page_read_stats()
+    if r_ok == 0:
+        return True
+    keys = (re.findall(r"https?://[^\s)\]}>\"']+", query or "")
+            + re.findall(r"\b\d{4}\.\d{4,5}\b", query or ""))
+    if not keys:
+        return False  # источник не назван явно → достаточно факта содержательного чтения
+    urls = [u.lower() for u in run_context.read_urls()]
+    for k in keys:
+        frag = k.lower().split("://")[-1].rstrip("/")
+        if any(frag in u for u in urls):
+            return False  # named-источник реально читали
+    return True
+
+
+# Маркер атрибуции к документу (таблица/раздел/страница + числа). Регэксп — допустимый класс
+# (энфорсмент анти-галлюцинации): р.4 показал, что промпт-директиву дешёвая модель игнорирует,
+# фабрикуя и данные, и сам акт «проверки» («при сверке с ar5iv значения совпали»).
+_DOC_ATTR_RE = re.compile(
+    r"(табл\w*|table|раздел\w*|section|figure|рис\.|стр\.|page)\s*№?\s*\d"
+    r"|согласно\s+(стать|работ|докумен|табли)|according to the (paper|article|table)"
+    r"|из (статьи|работы|документа|таблицы)|в статье (указан|привед|сказан)", re.I)
+
+
+# Значения, требующие заземления: дробные метрики (45.5) И суммы с разделителем тысяч
+# (1 290 ₽ — ценовая фабрикация из расширенной матрицы: цифра с «официальной» ссылкой,
+# на странице которой её нет).
+_GROUNDED_NUM_RE = re.compile(r"\d{1,3}(?:[\u00a0 ]\d{3})+(?:[.,]\d+)?|\d+[.,]\d+")
+
+
+def _attr_values_ungrounded(answer: str, evidence: str) -> bool:
+    """Значения (метрики/суммы) из ответа ДОЛЖНЫ присутствовать в реально прочитанном тексте
+    (evidence). Р.5-финал: агент читал ABSTRACT arXiv (named-источник «прочитан» по URL), а
+    числа «из Таблицы 2» дописывала память — URL-гранулярности мало. Нормализация: разделители
+    тысяч (пробел/nbsp) убираются с обеих сторон, запятая→точка."""
+    def _norm(s: str) -> str:
+        return re.sub(r"(?<=\d)[\u00a0 ](?=\d)", "", (s or "")).replace(",", ".")
+
+    nums = {_norm(m) for m in _GROUNDED_NUM_RE.findall(answer or "")}
+    if not nums:
+        return False
+    ev = _norm(evidence)
+    return any(n not in ev for n in nums)
+
+
+def _enforce_no_fake_attribution(answer: str, query: str, doc_intent: bool,
+                                 evidence: str = "") -> str:
+    """ЖЁСТКИЙ гейт (энфорсмент, не промпт): doc-интент + ответ атрибутирует числа документу +
+    (named-источник НЕ прочитан ИЛИ заявленных значений НЕТ в прочитанном тексте) →
+    детерминированная честная замена."""
+    if not doc_intent or not (answer or "").strip():
+        return answer
+    if not (_DOC_ATTR_RE.search(answer) and re.search(r"\d", answer)):
+        return answer  # атрибуции с числами нет — ответ (в т.ч. честный отказ) проходит
+    ev = (evidence or "") + "\n" + (query or "")
+    if not _doc_source_unread(query) and not _attr_values_ungrounded(answer, ev):
+        return answer  # источник читан И значения видны в прочитанном — легитимно
+    links = re.findall(r"https?://[^\s)\]}>\"']+", query or "")
+    link_line = f"\nСсылка на документ: {links[0]}" if links else ""
+    print("[AntiFab] атрибуция чисел без подтверждения в прочитанном → честная замена")
+    return ("Не могу привести точные значения из этого документа: та его часть, которую удалось "
+            "прочитать в этом прогоне, ЗАЯВЛЕННЫХ чисел не содержит (или документ не открылся) — "
+            "а называть числа «из таблиц» по памяти я не буду, это была бы выдумка." + link_line +
+            "\nПопробуй повторить позже (когда источник откроется целиком) или пришли фрагмент "
+            "текста с таблицей — извлеку точные значения. Общий контекст по теме могу дать с "
+            "пометкой «по памяти, не из документа».")
+
+
+def _unread_source_directive(doc_intent: bool, reads_ok: int) -> str:
+    """Анти-ФАБРИКАЦИЯ (валидация р.3): запрос просит извлечь данные из конкретного документа
+    (is_doc_extraction), а в прогоне НЕТ ни одного успешного чтения страницы → синтез обязан
+    честно отказаться от «точных чисел из статьи», НЕ приписывая память таблицам/разделам
+    (живой провал: выдуманные значения «из Table 2/3» Self-RAG при упавшем research).
+    Чистая функция (тестируема без LLM)."""
+    if not doc_intent or reads_ok > 0:
+        return ""
+    return ("[В ЭТОМ ПРОГОНЕ НИ ОДИН ДОКУМЕНТ/СТРАНИЦА НЕ ПРОЧИТАНЫ]\n"
+            "Запрос требует данных ИЗ КОНКРЕТНОГО ИСТОЧНИКА, но источник прочитать не удалось. "
+            "ЗАПРЕЩЕНО: приводить «точные» числа/цитаты из документа и атрибутировать что-либо "
+            "его таблицам/разделам/страницам («согласно Table…», «в разделе X», «из статьи»). "
+            "Честно скажи, что документ недоступен для чтения сейчас, дай ссылку на него и "
+            "предложи повторить позже. Общие сведения по теме — можно, но ТОЛЬКО с пометкой "
+            "«по памяти, не из документа» и без конкретных чисел, якобы взятых из него.")
+
+
+def _stale_data_directive(attempts: int, successes: int, time_sensitive: bool) -> str:
+    """Гейт АКТУАЛЬНОСТИ (из мульти-агентной валидации): время-чувствительный запрос, поиск
+    дёргали, но ни один вызов не дал результатов → синтез ОБЯЗАН пометить сведения из памяти
+    как потенциально устаревшие и не подавать их как текущие (судья ловил ставку 2024 года,
+    поданную «на сегодня», и фразу «поиск подтвердил» при мёртвом поиске). Чистая функция."""
+    if not time_sensitive or attempts == 0 or successes > 0:
+        return ""
+    return (f"[СТАТУС ПОИСКА ЭТОГО ПРОГОНА: {attempts} вызов(ов), 0 успешных — свежих данных "
+            "из веба НЕТ]\nЖЁСТКОЕ ПРАВИЛО: не называй числа/факты «текущими/на сегодня» и не "
+            "утверждай, что поиск что-либо подтвердил. Сведения из памяти подавай ТОЛЬКО с "
+            "явной пометкой «по данным на <дата/период среза знаний>; могли устареть» и советом, "
+            "где проверить самостоятельно.\n"
+            "СРЕДНИЙ ПУТЬ (не пустой отказ): если пользователь ЯВНО разрешил неполные данные или "
+            "«по памяти» — ДАЙ их, пометив каждое значение («по памяти, срез ~<период>; может "
+            "быть неточно»). Полезный частичный ответ с честными пометками ЛУЧШЕ отказа.")
+
+
 async def _finalize_act(query: str, msgs: list, memory_context: str) -> str:
     """Чистая ФИНАЛИЗАЦИЯ act: ответ синтезируется ИЗ РЕЗУЛЬТАТОВ инструментов (находок),
     а НЕ из накопленного хода ReAct-рассуждений — отдельным вызовом (как synthesize у
@@ -881,14 +1081,36 @@ async def _finalize_act(query: str, msgs: list, memory_context: str) -> str:
         if isinstance(getattr(m, "content", ""), str) and (m.content or "").strip())
     if len(findings.strip()) < 400:  # тривиальное действие — синтез ни к чему (экономим вызов)
         return ""
+    # Порядок важен: сначала ДЕШЁВЫЙ гейт по статистике, и только при «поиск дёргали, всё
+    # провалилось» — embedding-проверка времячувствительности. Иначе _is_time_sensitive строил
+    # бы свой детектор-singleton на КАЖДОМ синтезе (лишний embed) и в оффлайн-тестах кэшировал
+    # его выключенным (вскрыто полным сьютом: time_signal-тесты получали False навсегда).
+    _att, _okc = run_context.search_stats()
+    # Триггер — «нужны свежие внешние факты» (web_grounding) ИЛИ time-anchored: живой пробник
+    # показал, что «какая сейчас ставка» time-детектор НЕ считает временны́м (он про даты/
+    # дедлайны/сезон), а web_grounding ловит ровно такие запросы.
+    _stale = _stale_data_directive(
+        _att, _okc, _needs_web_grounding(query) or _is_time_sensitive(query)) \
+        if (_att > 0 and _okc == 0) else ""
+    if _stale:
+        findings = _stale + "\n\n" + findings
+    # Анти-фабрикация «из статьи»: named-источник должен быть прочитан ИМЕННО он (р.4:
+    # чтение случайных страниц ≠ чтение статьи). Интент — чистый (проверки unread/значений —
+    # внутри энфорсмента, р.5: abstract прочитан ≠ таблица прочитана).
+    _doc_intent = _is_doc_extraction(query)
+    if _doc_intent and _doc_source_unread(query):
+        findings = _unread_source_directive(True, 0) + "\n\n" + findings
+    from datetime import datetime as _dt
     try:
         resp = await act_finalize_chain.ainvoke({
             "query": query, "memory_context": memory_context or "Память пуста.",
+            "today": _dt.now().strftime("%Y-%m-%d"),  # якорь «сейчас» (не срез знаний модели)
             "findings": findings[-6000:],  # хвост — самые свежие/итоговые находки
         })
         out = strip_tool_markup(resp.content if hasattr(resp, "content") else str(resp)) or ""
         # Анти-PII (Thread 2c): email в ответе должен быть в находках/запросе/памяти, иначе выдумка.
-        return strip_ungrounded_pii(out, query + "\n" + (memory_context or "") + "\n" + findings)
+        out = strip_ungrounded_pii(out, query + "\n" + (memory_context or "") + "\n" + findings)
+        return _enforce_no_fake_attribution(out, query, _doc_intent, evidence=findings)  # гейт (р.4/5)
     except Exception as e:  # noqa: BLE001
         print(f"[Act-finalize] {type(e).__name__} → сырой output")
         return ""
@@ -907,7 +1129,10 @@ async def act_node(state: GeneralGraphState) -> dict:
     # «где купить»/«как оформить»/«лучшие в городе») и БЕЗ физ-интента → ДЕТЕРМИНИРОВАННЫЙ
     # грунтованный поиск (сами ищем headless, синтез строго из находок, чистим выдуманные URL,
     # открываем лучшую ссылку фоном). Не отдаём это на волю модели — она дампит память.
-    if _needs_web_grounding(query, _qe) and not _wants_physical_browser(query, _qe):
+    # ВЫЧИСЛИТЕЛЬНЫЙ запрос (данные в самом запросе) НЕ уводим в research (матрица: «посчитай
+    # вклад с пополнениями» искал в вебе и слал в калькуляторы) — прямой exec с python_exec.
+    if (_needs_web_grounding(query, _qe) and not _wants_physical_browser(query, _qe)
+            and not _is_computational(query, _qe)):
         res = await _research_answer(state, query)
         if "final_answer" in res:
             return res  # иначе (res={'mode':'deliberate'}) — провалились, идём обычным путём
@@ -920,6 +1145,9 @@ async def act_node(state: GeneralGraphState) -> dict:
     # export_table → агент врал «мои инструменты не поддерживают генерацию файлов»). Доставка — та же.
     tools.append(make_export_tool())
     tools.append(make_fetch_data_tool())   # «дай датасет по URL» приходит и в act — добыча → .xlsx
+    # ВЫЧИСЛЕНИЯ и в act (валидация: «а если пополнять по 5к/мес» пришло follow-up'ом в act,
+    # compute был только в step-пути → агент отправил юзера в веб-калькуляторы вместо расчёта).
+    tools.append(make_compute_tool())
     sys_text = act_system_prompt.format(
         memory_context=state.get("memory_context", "Память пуста."))
     history = _history_messages(state)  # реальные Human/AIMessage диалога (контекст «любую/да»)
@@ -942,8 +1170,20 @@ async def act_node(state: GeneralGraphState) -> dict:
     # «нет инструментов» — а должен был эскалировать; ответ юзера едет дальше в ledger).
     called = [tc.get("name", "") for m in msgs for tc in (getattr(m, "tool_calls", None) or [])
               if tc.get("name") != "ask_user"]
+    # ЗАЗЕМЛЕНИЕ ДЛЯ НАБЛЮДАТЕЛЯ: имена вызванных тулов уходят в run_context — act возвращает
+    # наружу только текст, и стенд/судья иначе не может отличить «посчитал python_exec» от
+    # «сочинил в уме» (вердикты так и писали: «used_compute_tool: неясно»).
+    run_context.note_tool_names(called)
+    run_context.note_tool_calls(len(called))
     if not called or "ESCALATE" in (output or "").upper()[:200]:
         return {"mode": "deliberate"}
+
+    # ЖИЗНЕННЫЙ ЦИКЛ: act реально отработал инструментами (заземлено called, не эскалация,
+    # не отказ юзера) → честный учёт использований. win=True: сами навыки отработали; провалы
+    # КОНТЕНТА ниже (paywall/«не заиграло») — не дефект навыка, в минус ему не идут. Здесь
+    # state.selected_skills НЕ используется (в act он старый из прошлого хода треда) — берём
+    # СВЕЖИЙ picked этого хода. В eval — no-op (внутри record_skill_usage).
+    record_skill_usage(picked, win=True)
 
     # ЗАЗЕМЛЕНИЕ ВОСПРОИЗВЕДЕНИЯ: на просьбу «включи/запусти трек/видео» успех = РЕАЛЬНЫЙ звук,
     # подтверждённый структурным флагом браузера (или эмбеддинг-фолбэком), а не слова модели и не
@@ -951,6 +1191,17 @@ async def act_node(state: GeneralGraphState) -> dict:
     play_intent = _is_play_intent(query, _qe)
     tool_msgs = [m for m in msgs if m.__class__.__name__ == "ToolMessage"]
     tool_texts = " ".join(m.content for m in tool_msgs if isinstance(getattr(m, "content", ""), str))
+    # ЧЕСТНОСТЬ О ФИЗ-ВОЗМОЖНОСТИ (вскрыто судьёй): если мост браузера НЕ подключён (расширение
+    # закрыто / eval-среда), вкладку никто не открывал — плеерные ветки ниже НЕЛЬЗЯ пускать, они
+    # безусловно утверждают «Открыл нужную страницу». Деградируем к тому, что реально можем:
+    # обычная финализация из находок (ссылки/варианты) + честная приписка о недоступности.
+    _no_browser_note = ""
+    if play_intent and not browser_bridge.connected():
+        play_intent = False
+        _no_browser_note = (
+            "\n\n———\nСам включить не смог: браузер не подключён к агенту (нет расширения/окна "
+            "в этой среде) — вкладку я НЕ открывал. Открой ссылку выше и нажми плей, либо "
+            "подключи расширение — тогда включу сам.")
     # ЗАЗЕМЛЕНИЕ ВЕРДИКТА воспроизведения БЕЗ keyword-костылей (feedback-no-keyword-crutches):
     #   • playing = СТРУКТУРНЫЙ сентинел из in-repo browser_session (ground-truth !m.paused) ИЛИ
     #     эмбеддинг-фолбэк для extension-прозы (is_media_playing, контраст «играет» vs «пауза»);
@@ -1034,8 +1285,16 @@ async def act_node(state: GeneralGraphState) -> dict:
             opened = await _maybe_open_best(clean)
             if opened:
                 clean = f"{clean}\n\n🔗 Открыл в фоновой вкладке: {opened} (посмотри, когда удобно)."
-            return {"final_answer": clean}
-    return {"final_answer": output}
+            return {"final_answer": clean + _no_browser_note}
+    # СЫРОЙ output (финализация скипнута/плеер): р.5 вскрыл, что ЭТОТ путь обходил анти-фабрикацию —
+    # ход-1 fable вышел с выдуманной «Таблицей 2» именно здесь. Гейтим и его (evidence = вывод тулов).
+    output = _enforce_no_fake_attribution(
+        output, query, _is_doc_extraction(query, _qe), evidence=tool_texts)
+    # АНТИ-ВЫДУМКА URL и на сыром пути: живой пробник расчёта вклада приклеил к верному ответу
+    # ссылку-«источник» calculator-vkladov.ru, которой не было ни в одном результате инструмента.
+    # Заземление — домены из вывода тулов и из запроса юзера (его ссылки легитимны).
+    output = _strip_ungrounded_urls(output, _domains_of(tool_texts) | _domains_of(query))
+    return {"final_answer": output + _no_browser_note}
 
 
 _URL_RE = re.compile(r"https?://[^\s)\]}>\"']+")
@@ -1074,8 +1333,16 @@ async def _maybe_open_best(answer: str) -> str:
 
 async def fast_answer_node(state: GeneralGraphState) -> dict:
     """System 1: быстрый интуитивный ответ из памяти без инструментов (или уточняющий вопрос)."""
+    mem = state.get("memory_context", "Память пуста.")
+    # Анти-фабрикация: fast работает БЕЗ инструментов → «точные числа из документа X» здесь
+    # физически неоткуда взять (валидация р.3: фолбэк после упавшего research фабриковал
+    # значения «из Table 2/3»). Doc-интент → жёсткий запрет ложной атрибуции.
+    _unread = _unread_source_directive(
+        _is_doc_extraction(state["query"], state.get("query_emb") or None), 0)
+    if _unread:
+        mem = _unread + "\n\n" + mem
     sys_text = _override_system("fast_answer", {
-        "memory_context": state.get("memory_context", "Память пуста."),
+        "memory_context": mem,
         "chat_history": _format_chat_history(state),
         "mode": state.get("mode", "fast"),
     })
@@ -1083,14 +1350,20 @@ async def fast_answer_node(state: GeneralGraphState) -> dict:
     answer = resp.content if hasattr(resp, "content") else str(resp)
     # Анти-PII пол (Thread 2c): email из памяти легитимен (recall данных юзера ему же), выдуманный — нет.
     answer = strip_ungrounded_pii(answer, state["query"] + "\n" + state.get("memory_context", ""))
+    answer = _enforce_no_fake_attribution(answer, state["query"], bool(_unread))  # жёсткий гейт (р.4)
     return {"final_answer": answer}
 
 
 async def reason_node(state: GeneralGraphState) -> dict:
     """System 2 без инструментов: глубокое пошаговое рассуждение → продуманный ответ.
     Отдельный «тип мышления» в Any-2-Any; его промпт — обучаемый параметр (role 'reason')."""
+    mem = state.get("memory_context", "Память пуста.")
+    _unread = _unread_source_directive(  # без инструментов «из документа» взять неоткуда
+        _is_doc_extraction(state["query"], state.get("query_emb") or None), 0)
+    if _unread:
+        mem = _unread + "\n\n" + mem
     sys_text = _override_system("reason", {
-        "memory_context": state.get("memory_context", "Память пуста."),
+        "memory_context": mem,
         "chat_history": _format_chat_history(state),
     })
     msgs = [SystemMessage(content=sys_text), _human_msg(state, state["query"])]
@@ -1118,6 +1391,7 @@ async def reason_node(state: GeneralGraphState) -> dict:
         answer = "Не удалось сформулировать ответ — переформулируй вопрос, пожалуйста."
     # Анти-PII пол (Thread 2c): reason без инструментов — выдуманный email особенно вероятен.
     answer = strip_ungrounded_pii(answer, state["query"] + "\n" + state.get("memory_context", ""))
+    answer = _enforce_no_fake_attribution(answer, state["query"], bool(_unread))  # жёсткий гейт (р.4)
     return {"final_answer": answer}
 
 
@@ -1141,8 +1415,46 @@ async def clarify_gate_node(state: GeneralGraphState) -> dict:
              for it in result.items[:4]]
     if not items:
         return {}
+    # КОРОТКОЕ ЗАМЫКАНИЕ (арх. дефект из валидации): канала уточнений НЕТ (one-shot/бот без
+    # реализации) → вопросы возвращаются ПОЛЬЗОВАТЕЛЮ как ответ (он ответит следующим
+    # сообщением треда), а не самоотвечаются допущениями с уходом в многоминутное гадание.
+    # В eval — старое поведение (GAIA-раннер ответить не может; допущения осознанны), НО
+    # диалоговые стенды (sim-судьи через драйвер) отвечают следующим ходом → для них
+    # override AGENT_CLARIFY_SHORTCIRCUIT=1 включает замыкание и под eval-изоляцией.
+    # ОДИН раунд вопросов на тред: если уже спрашивали, второй раз НЕ переспрашиваем —
+    # берём допущения и ДЕЛАЕМ (валидация: 4 хода подряд «в каком формате?» и игнор
+    # «давай уже делай» — пользователь не получил ничего).
+    if (not clarify.has_channel() and not _clarify_already_asked(state)
+            and (os.getenv("AGENT_EVAL_MODE") != "1"
+                 or os.getenv("AGENT_CLARIFY_SHORTCIRCUIT") == "1")):
+        return {"final_answer": _format_clarify_questions(items), "mode": "clarify"}
     resolved = await clarify.ask(items)  # канал человека или авто-допущения → ledger
     return {"clarifications": resolved}
+
+
+# Маркер блока уточнений в истории треда: по нему видно, что вопросы УЖЕ задавались.
+# Второй раунд подряд не спрашиваем — работаем с тем, что есть (валидация: агент 4 хода
+# подряд переспрашивал «в каком формате отчёт» и игнорировал «давай уже делай»).
+_CLARIFY_MARK = "Чтобы сделать полезно, уточни"
+
+
+def _clarify_already_asked(state: GeneralGraphState) -> bool:
+    """Уточнения уже задавались в этом треде (наш блок есть среди ответов ассистента)?"""
+    for h in reversed((state.get("chat_history") or [])[-8:]):
+        if h.get("role") == "assistant" and _CLARIFY_MARK in str(h.get("content", "")):
+            return True
+    return False
+
+
+def _format_clarify_questions(items: list[dict]) -> str:
+    """Вопросы clarify-гейта — коротким человеческим ответом (чистая функция, тестируема)."""
+    lines = [f"{_CLARIFY_MARK}, пожалуйста:"]
+    for i, it in enumerate(items, 1):
+        q = str(it.get("question", "")).strip()
+        opts = [str(o) for o in (it.get("options") or []) if str(o).strip()]
+        lines.append(f"{i}. {q}" + (f" (варианты: {', '.join(opts[:4])})" if opts else ""))
+    lines.append("Ответь одним сообщением — сразу продолжу с учётом ответов.")
+    return "\n".join(lines)
 
 
 async def router_node(state: GeneralGraphState) -> dict:
@@ -1733,7 +2045,19 @@ async def _exec_direct(system: str, goal: str, tools: list, deadline: float,
                 out = f"(нет инструмента {_tname})"
             else:
                 try:
-                    out = await asyncio.wait_for(t.ainvoke(tc.get("args", {})), timeout=deadline)
+                    if _tname in _HUMAN_WAIT_TOOLS:
+                        # УТОЧНЕНИЕ НЕ ОГРАНИЧИВАЕТСЯ ВООБЩЕ (как AskUserQuestion в Claude Code):
+                        # ask_user — чистое ожидание человека, никакой «работы» в нём нет, и
+                        # висеть он может сколько угодно — хоть до завтра.
+                        out = await t.ainvoke(tc.get("args", {}))
+                    elif getattr(t, "hitl_guarded", False):
+                        # HITL-тул = подтверждение (ждём человека сколько угодно) + РЕАЛЬНОЕ
+                        # действие после него (браузер/шелл/сеть). Ограничиваем только РАБОТУ:
+                        # голый await давал зависание навсегда — регресс-набор поймал ход на
+                        # 8.5 часов при лимите 900с.
+                        out = await _await_tool_work_bounded(t.ainvoke(tc.get("args", {})), deadline)
+                    else:
+                        out = await asyncio.wait_for(t.ainvoke(tc.get("args", {})), timeout=deadline)
                     if skill_tool_names and _tname in skill_tool_names:  # навык отработал → здоров
                         skill_health.record(_tname, ok=True)
                 except Exception as e:  # noqa: BLE001
@@ -2033,6 +2357,8 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # «Открываю почту» текстом без вызова open_url — не действие (вскрыто живым прогоном:
     # валидация приняла слова за дело, validation_passed=0.8, почта не открылась).
     called = [tc.get("name", "") for m in msgs for tc in (getattr(m, "tool_calls", None) or [])]
+    run_context.note_tool_calls(len(called))  # триггер ретроспективной дистилляции (reflect)
+    run_context.note_tool_names(called)       # заземление для стенда/судьи (какие тулы реально шли)
 
     # По-пунктовая валидация
     try:
@@ -2104,6 +2430,22 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         _parts.insert(0, f"[Установлено в прошлых попытках]\n{_prior[:3000]}")
     results_text = "\n\n".join(_parts) or "(шаги не дали результата)"
 
+    # Гейт актуальности (валидация вскрыла: устаревшая память подавалась как «текущее»
+    # при мёртвом поиске): статус поиска прогона впрыскивается ПЕРЕД дистиллятом шагов.
+    # Embedding-проверка — ТОЛЬКО при провале поиска (см. комментарий в _finalize_act).
+    _att, _okc = run_context.search_stats()
+    _stale = _stale_data_directive(
+        _att, _okc,
+        _needs_web_grounding(state["query"]) or _is_time_sensitive(state["query"])) \
+        if (_att > 0 and _okc == 0) else ""
+    if _stale:
+        results_text = _stale + "\n\n" + results_text
+    # Анти-фабрикация «из статьи»: named-источник должен быть прочитан ИМЕННО он (р.4).
+    _doc_unread = (_doc_source_unread(state["query"])
+                   and _is_doc_extraction(state["query"], state.get("query_emb") or None))
+    if _doc_unread:
+        results_text = _unread_source_directive(True, 0) + "\n\n" + results_text
+
     _payload = {
         "query": state["query"],
         "memory_context": state.get("memory_context", "Память пуста."),
@@ -2125,6 +2467,11 @@ async def synthesize_node(state: GeneralGraphState) -> dict:
         t = (t or "").strip().lower()
         return (t.startswith(("[шаг", "[step", "navigate", "search for", "go to")) or
                 t.startswith(("найти ", "найди ", "открыть ", "перейти", "шаг ")))
+    if answer.strip():
+        answer = _enforce_no_fake_attribution(  # жёсткий гейт (р.4/5): evidence = дистиллят шагов
+            answer, state["query"],
+            _is_doc_extraction(state["query"], state.get("query_emb") or None),
+            evidence=results_text)
     if not answer.strip() or _looks_like_process(answer):
         best = next((r["result"] for r in reversed(results)
                      if (r.get("result") or "").strip() and not _looks_like_process(r["result"])), "")
@@ -2225,6 +2572,29 @@ async def review_node(state: GeneralGraphState) -> dict:
     }
 
 
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.S)
+
+
+def _parse_fenced_model(model_cls, text: str):
+    """Достать pydantic-объект из текста, где JSON завёрнут в ```json-фенсы (или голый).
+    Валидация р.3: consensus-судья (code_llm) вместо tool-call вернул фенсованный JSON —
+    structured-парсер падал, консенсус молча скипался."""
+    m = _JSON_FENCE_RE.search(text or "")
+    raw = (m.group(1) if m else (text or "")).strip()
+    return model_cls.model_validate_json(raw)
+
+
+async def _invoke_validation_b(payload: dict):
+    """Второй судья: structured-путь, при парс-фейле — один raw-повтор с фенс-толерантным
+    разбором (не плодим вызовы на здоровом пути)."""
+    try:
+        return await validation_chain_b.ainvoke(payload)
+    except Exception:  # noqa: BLE001
+        raw = await (validation_prompt | code_llm).ainvoke(payload)
+        return _parse_fenced_model(
+            ValidationResult, raw.content if hasattr(raw, "content") else str(raw))
+
+
 async def validation_node(state: GeneralGraphState) -> dict:
     """Финальный Schema Guided Reasoning ответа агента."""
     # Действие заблокировано пользователем (HITL) — ответ корректен по сути («нужно
@@ -2270,7 +2640,7 @@ async def validation_node(state: GeneralGraphState) -> dict:
     # Мульти-модельный консенсус (идея Ouroboros): второй судья на другой модели.
     if CONSENSUS_VALIDATION:
         try:
-            b = await validation_chain_b.ainvoke(payload)
+            b = await _invoke_validation_b(payload)
             agree = (b.is_valid == result.is_valid)
             is_valid = result.is_valid and b.is_valid
             # согласие → берём min уверенности; разногласие → штраф (двигает на ретрай).
@@ -2286,6 +2656,17 @@ async def validation_node(state: GeneralGraphState) -> dict:
 
     # Ложный отказ «нет доступа» (жёсткое правило проекта: НИКОГДА не «нет доступа» — доступ ЕСТЬ
     # через расширение). Подменяем честным статусом и ПРИНИМАЕМ: ретрай лишь воспроизведёт срыв.
+    if flag_false_refusal:
+        # ИСКЛЮЧЕНИЕ (р.4): отказ, ЗАЗЕМЛЁННЫЙ реальным отказом инфраструктуры (поиск дёргали —
+        # все провалились / named-документ так и не прочитан), — это ЧЕСТНОСТЬ, а не «ложный
+        # отказ». Валидатор приклеивал «доступ есть» поверх корректного признания и обесценивал
+        # его противоречием (живой лог fable-р.4).
+        _v_att, _v_ok = run_context.search_stats()
+        _vq = state["query"]
+        if (_v_att > 0 and _v_ok == 0) or (
+                _doc_source_unread(_vq) and _is_doc_extraction(_vq, state.get("query_emb") or None)):
+            print("[Validation] отказ заземлён отказом инфраструктуры — оставляю честный ответ")
+            flag_false_refusal = False
     if flag_false_refusal:
         print("[Validation] судья: ложный отказ «нет доступа» → честный статус (доступ есть)")
         # Бюджета и «продолжи» больше нет. Если агент что-то собрал — отдаём это (частичный
@@ -2468,6 +2849,15 @@ async def reflect_node(state: GeneralGraphState) -> dict:
         except Exception:  # noqa: BLE001
             pass
 
+    # ЖИЗНЕННЫЙ ЦИКЛ НАВЫКОВ (Hermes-порт): прогон пишет uses/wins/last_used_at в реестр
+    # (внутри — no-op в eval). ТОЛЬКО deliberate/heavy: на этих путях skill_selector кладёт
+    # СВЕЖИЙ selected_skills; на fast/act/reason state несёт СТАРЫЙ список прошлого хода треда
+    # (чекпоинтер персистит ключи) → запись там считала бы «использования» навыкам, которые в
+    # этом ходе не трогались, и дула wins (fast всегда outcome=ok). По этой статистике куратор
+    # в sync_registry() вычищает систематически проигрывающие сгенерированные навыки.
+    if mode in ("deliberate", "heavy"):
+        record_skill_usage(state.get("selected_skills", []), win=(outcome == "ok"))
+
     # Судьба ВРЕМЕННОГО навыка, созданного по ходу задачи: оставить в библиотеке
     # (переиспользуем) или выбросить (одноразовый). Решается в фоне, дёшево.
     created_skill = state.get("created_skill_name", "")
@@ -2508,6 +2898,56 @@ async def reflect_node(state: GeneralGraphState) -> dict:
                     print(f"[Habit] повторяющаяся задача → директива само-расширения: «{hk}»")
         except Exception as e:  # noqa: BLE001
             print(f"[Habit] detection failed: {e}")
+
+    # Счётчик тул-вызовов снимаем ЗДЕСЬ (в ноде): фоновый daemon-поток НЕ наследует
+    # contextvars → run_context внутри него смотрел бы в чужой "_default"-скоуп.
+    _tcalls = run_context.tool_calls_count()
+
+    async def _distill_trajectory():
+        """Ретроспективная дистилляция (Hermes-порт): траектория успешного тяжёлого прогона →
+        (опционально) переиспользуемый навык. Создаётся temporary: примет его либо победа в
+        реальном прогоне (record_skill_usage), либо снесёт TTL-чистка. В eval выключено
+        (анти-оверфит: бенч-задачи не должны плодить навыки)."""
+        if eval_mode or not _distill_worthy(outcome, mode, created_skill, _tcalls, reacted_negative):
+            return
+        steps = [s for s in (state.get("step_results") or []) if str(s.get("result") or "").strip()]
+        if not steps:
+            return
+        traj = "\n".join(f"- {str(s.get('goal', ''))[:120]} → {str(s.get('result', ''))[:280]}"
+                         for s in steps[:8])
+        try:
+            # СУДЬЯ ПЕРЕД ИНЖЕНЕРОМ (дёшево, малая модель): системный промпт create_skills_agent
+            # императивно велит «создать навык» — просить его же «не создавай, если не стоит»
+            # бесполезно (конфликт промптов, перевес у создания). Отдельный structured-гейт
+            # решает «стоит ли» и ловит дубликаты по списку существующих навыков.
+            existing = "\n".join(
+                f"- {n}: {str(m.get('description', ''))[:100]}"
+                for n, m in list(_merged_registry().items())[:40]) or "(навыков нет)"
+            verdict = await distill_judge_chain.ainvoke({
+                "query": query, "trajectory": traj, "existing_skills": existing})
+            if not verdict.worth:
+                if os.getenv("AGENT_DEBUG") == "1":
+                    print(f"[Distill] судья: не стоит ({verdict.reason})")
+                return
+            # Имя созданного берём ДИФФОМ РЕЕСТРА (до/после), а не только pop_last_created:
+            # глобальный список созданий под конкурентным сервером мог бы отдать имя чужого
+            # прогона; дифф не зависит от общего состояния. pop — дренаж своего ключа + фолбэк.
+            before = set(_merged_registry())
+            await create_skills_agent.ainvoke({"messages": [("human", (
+                "РЕТРОСПЕКТИВА успешно решённой задачи (не новый запрос пользователя).\n"
+                f"Задача: «{query[:200]}»\n"
+                f"Траектория ({_tcalls} tool-вызовов):\n{traj}\n\n"
+                f"ТЗ: выдели способность «{verdict.capability[:200]}» в ОДИН навык через "
+                "create_skill: код @tool на stdlib/бесплатных API, описание с when_to_use."
+            ))]})
+            nm = pop_last_created()
+            new_names = [n for n in _merged_registry() if n not in before] or ([nm] if nm else [])
+            for n in new_names:
+                mark_temporary(n)
+                print(f"[Distill] траектория → навык '{n}' (temporary; примет победа в деле или снесёт TTL)")
+        except Exception as e:  # noqa: BLE001
+            if os.getenv("AGENT_DEBUG") == "1":
+                print(f"[Distill] failed: {e}")
 
     async def _judge_created_skill():
         if not created_skill:
@@ -2582,7 +3022,7 @@ async def reflect_node(state: GeneralGraphState) -> dict:
 
         async def _run():
             await asyncio.gather(_extract_facts(), _synth_reflection(), _judge_created_skill(),
-                                 return_exceptions=True)
+                                 _distill_trajectory(), return_exceptions=True)
         try:
             asyncio.run(_run())
         except Exception as e:  # noqa: BLE001
@@ -2782,7 +3222,10 @@ def build_graph(checkpointer=None) -> CompiledStateGraph:
         "clarify_gate": "clarify_gate",
         "router": "router",
     })
-    graph.add_edge("clarify_gate", "router")
+    # clarify_gate: канал есть → ответы в ledger → router; канала нет → вопросы УЖЕ ответ → reflect
+    graph.add_conditional_edges("clarify_gate",
+                                lambda s: "reflect" if s.get("final_answer") else "router",
+                                {"router": "router", "reflect": "reflect"})
     graph.add_edge("fast_answer", "reflect")
     graph.add_edge("reason", "validation")  # глубокое рассуждение проходит финальную валидацию
     graph.add_conditional_edges("router", route_after_router, {

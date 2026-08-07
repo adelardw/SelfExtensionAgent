@@ -215,11 +215,40 @@ def test_act_does_not_lie_about_playback(monkeypatch):
     # путь БЕЗ подтверждения, поэтому глушим авто-дожим (connected→False).
     monkeypatch.setattr(A.browser_bridge, "connected", lambda: False)
     out = asyncio.run(A.act_node({"query": "включи трек X"}))
-    # Не врёт про воспроизведение (нет «ЗВУК ИГРАЕТ» → честное «не пошло»), и НЕ сливает
-    # сырой снапшот в ответ (раньше дампил «Что сейчас на странице» — убрано как плумбинг).
+    # МОСТ НЕ ПОДКЛЮЧЁН → вкладку никто не открывал: ответ не должен заявлять НИ
+    # воспроизведение, НИ открытие страницы (валидация вскрыла хардкод «Открыл нужную
+    # страницу…» — он выдавался даже при connected()==False). Ждём честного признания.
     ans = out["final_answer"]
-    assert "НЕ пошл" in ans and "mode" not in out
-    assert "нажми плей" in ans.lower() or "уточни" in ans.lower()
+    assert "mode" not in out
+    assert "Открыл нужную страницу" not in ans          # ложь об открытии — недопустима
+    assert "НЕ открывал" in ans or "не подключён" in ans  # честный статус
+    assert "расширение" in ans.lower() or "нажми плей" in ans.lower()  # что делать дальше
+
+
+def test_act_honest_template_when_browser_connected(monkeypatch):
+    """Мост ПОДКЛЮЧЁН, но плей не подтверждён → прежний честный статус «открыл, не пошло»
+    (там открытие реально было — заявление правдиво)."""
+    import asyncio
+
+    from langchain_core.messages import AIMessage, ToolMessage
+
+    import src.graph.agent as A
+
+    async def _fake_direct(system, goal, tools, deadline, history=None, **kw):
+        ai = AIMessage(content="", tool_calls=[{"name": "browser_open", "args": {}, "id": "1"}])
+        tm = ToolMessage(content="Открыл страницу. Плеер на паузе", tool_call_id="1")
+        return "Открываю…", [ai, tm]
+
+    async def _no_play(*a, **k):
+        return "плеер на паузе"
+
+    monkeypatch.setattr(A, "_exec_direct", _fake_direct)
+    monkeypatch.setattr(A, "_skills_for_act", lambda q, top=2, qvec=None: ["browser_control"])
+    monkeypatch.setattr(A, "get_all_loaded_skill_tools", lambda names: [object()])
+    monkeypatch.setattr(A.browser_bridge, "connected", lambda: True)
+    monkeypatch.setattr(A.browser_bridge, "media", _no_play)
+    ans = asyncio.run(A.act_node({"query": "включи трек X"}))["final_answer"]
+    assert "НЕ пошл" in ans and "НЕ открывал" not in ans
 
 
 def test_act_accepts_confirmed_playback(monkeypatch):

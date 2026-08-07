@@ -116,7 +116,11 @@ set_confirmer(_bot_confirm)
 # ── Уточнения (онбординг неясной задачи): варианты-кнопки или ответ текстом ──
 _pending_opts: dict[str, asyncio.Future] = {}      # cid → выбор варианта
 _pending_text: dict[str, asyncio.Future] = {}      # uid → ответ свободным текстом
-CLARIFY_TIMEOUT_S = 180
+# Вопрос пользователю ЖДЁТ СКОЛЬКО УГОДНО (фишка HITL, как AskUserQuestion в Claude Code):
+# в мессенджере человек отвечает и через час, и на следующий день. 180с молча подменяли
+# вопрос допущением. Часы прогона на это время стоят (runbudget.human_pause в clarify).
+# Верхняя граница — сутки (защита от вечных «висяков» в памяти процесса), настраивается env.
+CLARIFY_TIMEOUT_S = float(os.getenv("AGENT_CLARIFY_TIMEOUT_S") or 86400)
 
 
 async def _bot_clarify(items: list[dict]) -> list[str]:

@@ -34,3 +34,6 @@ develop.md
 
 # Артефакты, произведённые агентом для отдачи юзеру (export_table) — генерируются в рантайме
 /artifacts/
+src/skills/.emb_cache.json
+/tmp/sim_chat_threads/
+data/eval/harness_runs.jsonl

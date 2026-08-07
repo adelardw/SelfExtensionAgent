@@ -21,15 +21,18 @@ from typing import Optional
 REGISTRY_URL = "https://registry.modelcontextprotocol.io/v0/servers"
 
 # Доверенные серверы: автоподключение разрешено.
+# fetch: пин `mcp<2` — свежий SDK переименовал McpError→MCPError, а mcp-server-fetch ещё
+# импортирует старое имя → ImportError на каждом старте (вскрыто мульти-агентной валидацией;
+# проверено: с пином сервер поднимается). Убрать пин, когда апстрим обновит импорт.
 TRUSTED_SERVERS: dict[str, dict] = {
-    "fetch": {"command": "uvx", "args": ["mcp-server-fetch"], "transport": "stdio"},
+    "fetch": {"command": "uvx", "args": ["--with", "mcp<2", "mcp-server-fetch"], "transport": "stdio"},
 }
 
 # Каталог известных надёжных MCP (official/Python, без ключей) — для «сам найди под задачу».
 CATALOG: dict[str, dict] = {
     "fetch": {"spec": TRUSTED_SERVERS["fetch"], "keywords": ["url", "сайт", "страниц", "fetch", "веб", "web", "новост"],
               "desc": "Загрузка и markdown-извлечение веб-страниц"},
-    "time": {"spec": {"command": "uvx", "args": ["mcp-server-time"], "transport": "stdio"},
+    "time": {"spec": {"command": "uvx", "args": ["--with", "mcp<2", "mcp-server-time"], "transport": "stdio"},
              "keywords": ["врем", "time", "часов", "timezone", "дата", "который час"], "desc": "Текущее время и таймзоны"},
 }
 
@@ -92,7 +95,20 @@ async def get_mcp_tools(servers: Optional[list[str]] = None) -> list:
 
     _load_user_registry()  # подмешать серверы из MCP.md (если есть) до выбора
     names = servers or list(TRUSTED_SERVERS)
-    cfg = {n: TRUSTED_SERVERS[n] for n in names if n in TRUSTED_SERVERS}
+    # stdio-серверы: глушим установочный шум пакетных менеджеров (валидация р.3: node-обвязка
+    # сервера писала npm-лог «added 40 packages…» в stdout → JSONRPC-парсер сыпал трейсбеки).
+    _quiet = {"npm_config_loglevel": "silent", "NO_UPDATE_NOTIFIER": "1",
+              "NPM_CONFIG_FUND": "false", "UV_NO_PROGRESS": "1"}
+    cfg = {}
+    for n in names:
+        if n not in TRUSTED_SERVERS:
+            continue
+        spec = dict(TRUSTED_SERVERS[n])
+        if spec.get("transport") == "stdio":
+            import os as _os
+
+            spec["env"] = {**_os.environ, **_quiet}
+        cfg[n] = spec
     if not cfg:
         return []
     key = frozenset(cfg)

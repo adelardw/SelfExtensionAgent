@@ -146,8 +146,13 @@ _RUNS: dict[str, dict] = {}
 _cur_run: contextvars.ContextVar[str] = contextvars.ContextVar("server_run", default="")
 
 
-async def _await_user(kind: str, payload: dict, timeout: float = 900.0):
-    """Выставить pending текущему прогону и ждать ответ клиента (или None по таймауту)."""
+async def _await_user(kind: str, payload: dict, timeout: float = 0.0):
+    """Выставить pending текущему прогону и ЖДАТЬ ответ клиента СКОЛЬКО УГОДНО ДОЛГО.
+
+    timeout=0 (дефолт) → без таймаута: вопрос висит, пока человек не ответит (фишка HITL —
+    как AskUserQuestion в Claude Code). Раньше стоял 900с, после чего вопрос молча
+    подменялся допущением — пользователь возвращался к уже «решённой» за него задаче.
+    Часы прогона на это время стоят (runbudget.human_pause в clarify/hitl)."""
     run = _RUNS.get(_cur_run.get())
     if not run:
         return None
@@ -156,8 +161,8 @@ async def _await_user(kind: str, payload: dict, timeout: float = 900.0):
     run["future"] = fut
     run["status"] = "waiting"
     try:
-        ans = await asyncio.wait_for(fut, timeout=timeout)
-    except Exception:  # noqa: BLE001 — таймаут/отмена → допущение
+        ans = await (asyncio.wait_for(fut, timeout=timeout) if timeout > 0 else fut)
+    except Exception:  # noqa: BLE001 — отмена прогона/дисконнект → допущение
         ans = None
     run["pending"] = None
     run["future"] = None

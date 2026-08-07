@@ -96,6 +96,8 @@ if os.getenv("AGENT_EVAL_MODE") == "1" or os.getenv("AGENT_NO_BROWSER") == "1":
 _SEARXNG = os.getenv("SEARXNG_URL", "").rstrip("/")
 _RECENCY_RANGE = {"d": "day", "w": "week", "m": "month", "y": "year"}
 _SEARXNG_COOLDOWN_S = 600          # после отказа не дёргаем SearXNG N секунд (анти-спам в лог)
+_SEARXNG_EMPTY_COOLDOWN_S = 300    # «жив, но 0 результатов» (капча апстримов) — тоже отказ, но
+                                   # короче: апстримы отпускают капчу быстрее, чем поднимают сервис
 
 # Cooldown живёт в env, а не в глобале: модуль навыка ПЕРЕЗАГРУЖАЕТСЯ на каждом
 # подключении тулов (exec_module), и глобал сбрасывался бы каждый шаг.
@@ -108,6 +110,54 @@ def _searxng_down_until() -> float:
 
 def _set_searxng_down(until: float) -> None:
     os.environ["SEARXNG_DOWN_UNTIL"] = str(until)
+
+
+def _note_attempt() -> None:
+    """Попытка поиска — НА ВХОДЕ (р.5: отмена зависшего вызова по wait_for съедала пост-нотацию
+    → circuit-breaker не размыкался). Best-effort: вне контекста прогона — молча."""
+    try:
+        from src.runtime.run_context import note_search_attempt
+
+        note_search_attempt()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _note_success() -> None:
+    """Успех поиска (результаты получены)."""
+    try:
+        from src.runtime.run_context import note_search_success
+
+        note_search_success()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _note_read(ok: bool, url: str = "") -> None:
+    """Нотировать исход чтения страницы (+URL успеха — сверка named-источника, анти-фабрикация)."""
+    try:
+        from src.runtime.run_context import note_page_read
+
+        note_page_read(ok, url)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# Circuit-breaker прогона (валидация р.3: research умирал 2×290с об мёртвые бэкенды): после
+# N ПОЛНЫХ провалов поиска подряд в ОДНОМ прогоне дальнейшие вызовы возвращают сентинел
+# МГНОВЕННО, без сетевых попыток → research быстро сходится к честному частичному ответу
+# вместо TimeoutError юзеру. Скоуп по run_id (между прогонами бэкенды могут ожить).
+_CIRCUIT_AFTER = 3
+
+
+def _search_circuit_open() -> bool:
+    try:
+        from src.runtime.run_context import search_stats
+
+        att, okc = search_stats()
+        return att >= _CIRCUIT_AFTER and okc == 0
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _clean(text: str) -> str:
@@ -222,13 +272,35 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
     Returns:
         Formatted list of results, or an error string.
     """
+    # Circuit-breaker: бэкенды уже доказали мёртвость в этом прогоне → мгновенный честный
+    # отказ без новых сетевых попыток (не жжём wall-время research'а об капчу/лимиты).
+    if _search_circuit_open():
+        _note_attempt()
+        print(f"[web_search] circuit OPEN — поиск отключён до конца прогона ({_CIRCUIT_AFTER}+ провалов)")
+        return (f"ПОИСК НЕ ДАЛ РЕЗУЛЬТАТОВ (отключён до конца прогона: {_CIRCUIT_AFTER}+ полных "
+                f"провалов подряд — бэкенды недоступны) по запросу: {query}. Свежих данных из "
+                "веба НЕТ — собери ответ из уже имеющегося, честно пометив ограничение; "
+                "не выдавай сведения из памяти за текущие.")
+
+    _note_attempt()  # НА ВХОДЕ: отмена зависшего вызова (wait_for) не должна терять попытку
     # Приоритет: SearXNG (приватный/свежий) → cloakbrowser (stealth) → urllib.
     engine = "http-fallback"
     results = []
+    searxng_alive_but_empty = False
     try:
         if _SEARXNG and time.time() >= _searxng_down_until():
             results = _search_searxng(query, max_results, recency)
             engine = "searxng"
+            if not results:
+                # «Жив, но пуст»: транспорт 200, а апстрим-движки в капче/бане → 0 результатов
+                # на ЛЮБОЙ запрос (вскрыто мульти-агентной валидацией). Это отказ бэкенда,
+                # не «темы нет» → КУЛДАУН (как на exception): иначе каждый вызов ходил впустую
+                # и печатал ту же строку — red-team насчитал 27-30 повторов за один тяжёлый ход
+                # (лишние round-trip'ы + спам в лог). DDG-фолбэк ниже отрабатывает штатно.
+                searxng_alive_but_empty = True
+                _set_searxng_down(time.time() + _SEARXNG_EMPTY_COOLDOWN_S)
+                print(f"[web_search] SearXNG жив, но 0 результатов (апстримы в капче/бане?) — "
+                      f"отключаю на {_SEARXNG_EMPTY_COOLDOWN_S // 60} мин, иду в fallback")
     except Exception as e:  # noqa: BLE001
         # SearXNG недоступен (не поднят docker) → молчаливый cooldown, лог один раз,
         # а не спам "Connection refused" на каждый поисковый вызов.
@@ -248,8 +320,17 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
                 # cloak-поиск в потоке с жёстким таймаутом БЕЗ ожидания зависшего потока (дедлок)
                 results = _run_bounded(_search_cloak, query, max_results, recency, timeout=_BROWSE_HARD_TIMEOUT)
                 engine = "cloakbrowser"
+        if results:
+            _note_success()
         if not results:
-            return f"Ничего не найдено по запросу: {query}"
+            # ЧЕСТНЫЙ ОТКАЗ ИНФРАСТРУКТУРЫ (не «темы нет»): пустота от ВСЕХ бэкендов почти
+            # всегда означает их отказ (капча/лимиты/сеть). Размытое «ничего не найдено»
+            # позволяло синтезу тихо скатиться в устаревшую память и подать её как «текущее».
+            hint = " (SearXNG отвечал, но апстрим-движки пусты — вероятно капча/бан)" \
+                if searxng_alive_but_empty else ""
+            return (f"ПОИСК НЕ ДАЛ РЕЗУЛЬТАТОВ{hint} по запросу: {query}. Это отказ поисковых "
+                    "бэкендов, а НЕ доказательство отсутствия темы. Свежих данных из веба НЕТ — "
+                    "не выдавай сведения из памяти за текущие; явно скажи об ограничении.")
         lines = []
         for i, r in enumerate(results, 1):
             lines.append(f"{i}. {r['title']}\n   {r['url']}\n   {r['snippet']}".rstrip())
@@ -257,6 +338,8 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
     except Exception as e:  # noqa: BLE001
         try:
             results = _search_fallback(query, max_results)
+            if results:
+                _note_success()
             lines = [f"{i}. {r['title']}\n   {r['url']}" for i, r in enumerate(results, 1)]
             return "Результаты (fallback):\n" + "\n".join(lines) if lines else f"Ошибка поиска: {e}"
         except Exception as e2:  # noqa: BLE001
@@ -471,11 +554,14 @@ def browse(url: str, find: str = "") -> str:
     try:
         title, text = _page_text(url)
         if not text:
+            _note_read(False)
             return f"Страница {url} пустая или не отрендерилась."
         body = _relevant_chunks(text, find, budget=3500) if find else text[:5000]
         head = f"# {title}\n{url}" + (f"\n[поиск: {find}]" if find else "")
+        _note_read(len(body) > 120, url)  # содержательное чтение + URL (анти-фабрикация)
         return f"{head}\n\n{body}"
     except Exception as e:  # noqa: BLE001
+        _note_read(False)
         return f"Не удалось прочитать {url}: {type(e).__name__}: {e}"
 
 
@@ -505,6 +591,7 @@ def read_url(url: str, max_chars: int = 4000) -> str:
                 title = _clean(page.title())
                 body = page.query_selector("body")
                 text = _clean(body.inner_text()) if body else ""
+                _note_read(len(text) > 120, url)
                 return f"# {title}\n{url}\n\n{text[:max_chars]}"
             finally:
                 browser.close()
@@ -513,6 +600,8 @@ def read_url(url: str, max_chars: int = 4000) -> str:
             html = resp.read().decode("utf-8", "ignore")
         text = _clean(re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I))
         text = _clean(re.sub("<[^>]+>", " ", text))
+        _note_read(len(text) > 120, url)
         return f"{url}\n\n{text[:max_chars]}"
     except Exception as e:  # noqa: BLE001
+        _note_read(False)
         return f"Не удалось прочитать {url}: {e}"
