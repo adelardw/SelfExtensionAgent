@@ -107,6 +107,52 @@ def vision_supported() -> bool:
     return supports_modality("image")
 
 
+# ── ENDPOINTS: единое разрешение base_url для обоих провайдеров ────────────────
+# Приоритет ОДИНАКОВ для всех настроек: env → настройки CLI (config.local.yml) → config.yml →
+# дефолт. Раньше у openrouter base_url брался ТОЛЬКО из CLI-настроек, а у ollama — ТОЛЬКО из
+# config.yml: ни прокси/шлюз для OpenRouter, ни удалённый Ollama нельзя было задать через .env
+# (обычный способ для docker/CI). Теперь оба — через env и оба — через config.yml.
+OLLAMA_BASE_DEFAULT = "http://localhost:11434/v1"
+
+
+def openrouter_base_url() -> str:
+    """Endpoint OpenAI-совместимого провайдера (OpenRouter/шлюз/прокси).
+    env OPENROUTER_BASE_URL или OPENAI_BASE_URL → `sea provider ... <base_url>` → config.yml
+    `base_url` → https://openrouter.ai/api/v1."""
+    return (os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+            or _cli_override("base_url") or _cfg.get("base_url") or OPENROUTER_BASE).rstrip("/")
+
+
+def ollama_base_url() -> str:
+    """Endpoint Ollama (локальный или удалённый хост).
+    env OLLAMA_BASE_URL → настройки CLI `ollama_base_url` → config.yml `ollama.base_url` →
+    http://localhost:11434/v1. Хост без /v1 дополняем сами — частая ошибка в конфиге."""
+    raw = (os.getenv("OLLAMA_BASE_URL") or _cli_override("ollama_base_url")
+           or _cfg.get("ollama", {}).get("base_url") or OLLAMA_BASE_DEFAULT)
+    raw = str(raw).rstrip("/")
+    return raw if raw.endswith("/v1") else raw + "/v1"
+
+
+def base_url() -> str:
+    """Активный endpoint (по текущему провайдеру) — для баннера/диагностики."""
+    return ollama_base_url() if provider() == "ollama" else openrouter_base_url()
+
+
+def base_url_source() -> str:
+    """Откуда взят endpoint — для `sea config`/доктора (без раскрытия секретов)."""
+    if provider() == "ollama":
+        if os.getenv("OLLAMA_BASE_URL"):
+            return "env OLLAMA_BASE_URL"
+        if _cli_override("ollama_base_url"):
+            return "настройки"
+        return "config.yml" if _cfg.get("ollama", {}).get("base_url") else "по умолчанию"
+    if os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENAI_BASE_URL"):
+        return "env OPENROUTER_BASE_URL"
+    if _cli_override("base_url"):
+        return "настройки"
+    return "config.yml" if _cfg.get("base_url") else "по умолчанию"
+
+
 def api_key() -> str | None:
     """Ключ: env (приоритет) → пользовательский ввод из настроек (config.local.yml)."""
     return (os.getenv("OPEN_ROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
@@ -127,7 +173,7 @@ def validate_credentials(key: str | None = None, base_url: str | None = None,
     """Живая проверка ключа/endpoint: минимальный chat-запрос (max_tokens=1) к
     OpenAI-совместимому base_url. Работает для openrouter и любого кастомного endpoint."""
     key = key or api_key()
-    base = (base_url or _cli_override("base_url") or OPENROUTER_BASE).rstrip("/")
+    base = (base_url or openrouter_base_url()).rstrip("/")
     if not key:
         return False, "API-ключ не задан"
     mdl = model or model_for("fast")
@@ -204,9 +250,9 @@ def model_for(role: str) -> str:
 
 def _base_and_key() -> tuple[str, str]:
     if provider() == "ollama":
-        return _cfg.get("ollama", {}).get("base_url", "http://localhost:11434/v1"), "ollama"
-    # openrouter / совместимый: endpoint можно переопределить из настроек (cli.base_url)
-    return (_cli_override("base_url") or OPENROUTER_BASE), (api_key() or "")
+        return ollama_base_url(), "ollama"          # локальному Ollama ключ не нужен
+    # openrouter / совместимый: env → настройки → config.yml → дефолт (см. openrouter_base_url)
+    return openrouter_base_url(), (api_key() or "")
 
 
 def chat(role: str = "fast", temperature: float = 0.0):

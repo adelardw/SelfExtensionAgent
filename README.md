@@ -58,6 +58,43 @@ see [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ---
 
+## Quickstart (5 minutes)
+
+```bash
+# 1. Get the code and install (adds the `sea` CLI)
+git clone <repo> && cd self_extension_agent
+uv sync && uv pip install -e .
+.venv/bin/python -m playwright install chromium     # optional: stealth-browser search
+
+# 2. Give it a provider — EITHER a cloud key …
+sea key                          # hidden prompt; stored in ~/.config/sea/config.local.yml (0600)
+#    … OR fully local models:
+sea provider ollama              # default endpoint http://localhost:11434/v1
+#    (dev alternative: put OPEN_ROUTER_API_KEY=... into .env)
+
+# 3. Check the environment (16 checks: key, endpoint, embeddings, search, sandboxes, skills)
+sea doctor                       # --offline to skip network checks, --fix for safe repairs
+
+# 4. Talk to it
+sea                              # full-screen TUI
+sea "какая сейчас ключевая ставка ЦБ? дай источник"     # one-shot
+```
+
+**Custom endpoint** (gateway, proxy, remote Ollama) — same precedence everywhere:
+`env` → `sea provider … <base_url>` → `config.yml` → default.
+
+```bash
+sea provider openrouter https://my-gateway.example/v1    # persisted in user config
+# or via .env / environment:
+#   OPENROUTER_BASE_URL=https://my-gateway.example/v1    # any OpenAI-compatible endpoint
+#   OPENAI_BASE_URL=...                                  # alias, also accepted
+#   OLLAMA_BASE_URL=http://gpu-box.local:11434           # remote Ollama ( `/v1` is appended if missing )
+sea config                                               # shows the effective endpoint and where it came from
+```
+
+Nothing to configure beyond that: models, memory and skills ship with sensible defaults in
+`config.yml`. Not sure it works? `sea doctor` tells you exactly what is broken and how to fix it.
+
 ## Benchmarks & results
 
 Honest numbers from live runs — not benchmark-tuned. Two model tiers measured on GAIA (n=100 each).
@@ -381,6 +418,8 @@ Key/provider can be set via **`sea key`/`sea provider`** (global config, above) 
 `.env` (template — `.env.example`, the file is in `.gitignore`, not committed):
 ```
 OPEN_ROUTER_API_KEY=...              # required (LLM AND embeddings via OpenRouter)
+OPENROUTER_BASE_URL=...              # opt. — custom OpenAI-compatible endpoint (gateway/proxy)
+OLLAMA_BASE_URL=...                  # opt. — remote Ollama host ( `/v1` appended if missing )
 SEARXNG_URL=http://localhost:8080    # opt. — private fresh search
 TELEGRAM_BOT_TOKEN=...               # opt. — for the Telegram bot
 TELEGRAM_ALLOWED_IDS=11111,22222     # opt. but recommended — only these chat_ids may command the bot
@@ -632,6 +671,45 @@ FastAPI), входящие в граф; ноды раскрашены по ро�
 
 Полное послойное описание (память, двухуровневая маршрутизация, навыки, безопасность, …) —
 в [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+---
+
+## Быстрый старт (5 минут)
+
+```bash
+# 1. Код и установка (появится команда `sea`)
+git clone <repo> && cd self_extension_agent
+uv sync && uv pip install -e .
+.venv/bin/python -m playwright install chromium     # опц.: поиск через stealth-браузер
+
+# 2. Дать провайдера — ЛИБО облачный ключ…
+sea key                          # скрытый ввод; хранится в ~/.config/sea/config.local.yml (0600)
+#    …ЛИБО полностью локальные модели:
+sea provider ollama              # endpoint по умолчанию http://localhost:11434/v1
+#    (dev-вариант: положить OPEN_ROUTER_API_KEY=... в .env)
+
+# 3. Проверить окружение (16 проверок: ключ, endpoint, эмбеддинги, поиск, песочницы, навыки)
+sea doctor                       # --offline — без сетевых, --fix — безопасные авто-починки
+
+# 4. Работать
+sea                              # полноэкранный TUI
+sea "какая сейчас ключевая ставка ЦБ? дай источник"     # одна задача и выход
+```
+
+**Свой endpoint** (шлюз, прокси, удалённый Ollama) — приоритет одинаков везде:
+`env` → `sea provider … <base_url>` → `config.yml` → дефолт.
+
+```bash
+sea provider openrouter https://my-gateway.example/v1    # сохранится в пользовательский конфиг
+# либо через .env / переменные окружения:
+#   OPENROUTER_BASE_URL=https://my-gateway.example/v1    # любой OpenAI-совместимый endpoint
+#   OPENAI_BASE_URL=...                                  # алиас, тоже принимается
+#   OLLAMA_BASE_URL=http://gpu-box.local:11434           # удалённый Ollama ( `/v1` допишется сам )
+sea config                                               # покажет действующий endpoint и его источник
+```
+
+Больше настраивать нечего: модели, память и навыки идут с разумными дефолтами в `config.yml`.
+Не уверен, что всё поднялось? `sea doctor` скажет, что именно сломано и как чинить.
 
 ## Бенчмарки и результаты
 
@@ -960,6 +1038,8 @@ SearXNG** (`.app` не читает `.env` — задаётся тут один 
 `.env` (шаблон — `.env.example`, файл в `.gitignore`, в гит не попадает):
 ```
 OPEN_ROUTER_API_KEY=...              # обязателен (LLM И эмбеддинги через OpenRouter)
+OPENROUTER_BASE_URL=...              # опц. — свой OpenAI-совместимый endpoint (шлюз/прокси)
+OLLAMA_BASE_URL=...                  # опц. — удалённый Ollama ( `/v1` допишется сам )
 SEARXNG_URL=http://localhost:8080    # опц. — приватный свежий поиск
 TELEGRAM_BOT_TOKEN=...               # опц. — для Telegram-бота
 TELEGRAM_ALLOWED_IDS=11111,22222     # опц., но рекомендуется — только эти chat_id могут командовать ботом

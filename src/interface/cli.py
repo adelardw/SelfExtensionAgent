@@ -123,7 +123,11 @@ def main_cli() -> None:
         print(f"  base config : {config_paths.base_config_path()}")
         print(f"  user config : {config_paths.global_local_path()}")
         print(f"  provider    : {get_cli('provider') or 'openrouter (default)'}")
-        print(f"  base_url    : {get_cli('base_url') or '(default)'}")
+        try:  # ЭФФЕКТИВНЫЙ endpoint (env → настройки → config.yml → дефолт) + его источник
+            from src.llm.llm import base_url as _bu, base_url_source as _bus
+            print(f"  base_url    : {_bu()}  ({_bus()})")
+        except Exception:  # noqa: BLE001 — без импорта агента показываем то, что есть в настройках
+            print(f"  base_url    : {get_cli('base_url') or '(default)'}")
         has_env = bool(__import__('os').getenv('OPEN_ROUTER_API_KEY') or __import__('os').getenv('OPENAI_API_KEY'))
         print(f"  api key     : {'env (.env)' if has_env else ('set (user config)' if get_cli('api_key') else 'NOT SET — run: sea key <KEY>')}")
         return

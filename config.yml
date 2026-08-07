@@ -1,4 +1,8 @@
 provider: openrouter  # | ollama
+# Endpoint провайдера. Пусто → https://openrouter.ai/api/v1. Годится любой OpenAI-совместимый
+# шлюз/прокси/self-host. Приоритет: env OPENROUTER_BASE_URL (или OPENAI_BASE_URL) → `sea provider
+# openrouter <base_url>` → это поле → дефолт.
+base_url:            # напр. https://openrouter.ai/api/v1 | http://my-gateway:8000/v1
 # Тиры low-cost (цены проверены живьём через /api/v1/models, июнь 2026):
 model:                                  # роутинг/валидация/extraction — дёшево и быстро
   name: google/gemini-3.1-flash-lite    # $0.25 in / $1.50 out, ctx 1M
@@ -10,6 +14,8 @@ deep_model:                             # ТОЛЬКО heavy-ревью и ре�
   name: deepseek/deepseek-v4-pro        # $0.435 in / $0.87 out (промо), ~Opus-уровень агентики
   temperature: 0
 ollama:
+  # Локальный или УДАЛЁННЫЙ хост. Приоритет: env OLLAMA_BASE_URL → настройки CLI → это поле →
+  # http://localhost:11434/v1. Суффикс /v1 дописывается автоматически, если забыт.
   base_url: http://localhost:11434/v1
   model: nemotron-3-nano:4b      # Q4 — быстрее (~2× к q8), ~2.8ГБ
   code_model: nemotron-3-nano:4b

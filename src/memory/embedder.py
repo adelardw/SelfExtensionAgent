@@ -54,7 +54,9 @@ class OpenAIEmbedder:
             _c = OmegaConf.load("config.yml")
             if _c.get("provider") == "ollama":
                 oll = _c.get("ollama", {})
-                self._key, self._base = "ollama", oll.get("base_url", "http://localhost:11434/v1")
+                from src.llm.llm import ollama_base_url  # единое разрешение (env→настройки→config)
+
+                self._key, self._base = "ollama", ollama_base_url()
                 self.model = model or oll.get("embed_model", "nomic-embed-text")
                 self.enabled = True
                 self._client = None
