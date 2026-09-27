@@ -58,6 +58,8 @@ intent:
   min_sim: 0.30               # глоб. порог уверенности intent-роутера (cosine-kNN); калибровано route_eval. Ниже — None, caller полагается на reflexion (без регэксп-костыля)
   min_sim_per_label:          # PER-LABEL переопределения (тюнинг по confusion-структуре)
     web_grounding: 0.23       # ниже: его промахи почти все «None» (не кросс) → ловим больше grounding без риска перепутать (recall 76→87%)
+  backend: knn                # knn | jev — jev: TypeSafe JEV через OpenRouter (route_eval 98.1% vs kNN 83.0%, ~$0.00002/запрос, см. TODO.md#JEV); ollama/нет ключа/ошибка → kNN
+  jev_model: typesafe/jev-1.13
 semantic_signals:             # анти-галлюцинация БЕЗ регэкспов: paywall — embedding-классификатор (любой язык)
   paywall_threshold: 0.58     # порог cosine к позитивным seed'ам стены подписки (консервативный; калибровать на размеченном наборе)
   paywall_margin: 0.05        # маржа над лучшим НЕГАТИВНЫМ seed'ом (контраст: «сейчас играет»/«бесплатно» ≠ «оформите подписку»)

@@ -435,12 +435,13 @@ async def recall_node(state: GeneralGraphState) -> dict:
 
     # Эмбеддинг запроса считаем ОДИН раз (async, вне loop) и переиспользуем: в recall (гейт/
     # graph) И в intent-роутере (universal routing) — ноль лишних сетевых вызовов в hot-path.
-    query_emb = None
-    try:
-        if memory_store.embedder.enabled:
-            query_emb = await memory_store.embedder.aembed(query)
-    except Exception:  # noqa: BLE001
-        query_emb = None
+    async def _embed_query():
+        try:
+            return await memory_store.embedder.aembed(query) if memory_store.embedder.enabled else None
+        except Exception:  # noqa: BLE001
+            return None
+    # intent.backend: jev → JEV-интент греем ПАРАЛЛЕЛЬНО с эмбеддингом (его ~0.45 с прячется здесь).
+    query_emb, _ = await asyncio.gather(_embed_query(), intent.ajev_prefetch(query))
     # Гейт RECALL_GATE: ассоциативная память (эпизоды/выводы) — только при релевантности;
     # персона-факты остаются всегда («recall не всегда должен быть»).
     memory_context, _recall_score = await asyncio.to_thread(

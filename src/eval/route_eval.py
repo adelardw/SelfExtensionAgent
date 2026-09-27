@@ -11,12 +11,16 @@ per-label recall, confusion-матрица, fallback-rate.
 
 Запуск (база/seed-only — temp кодбук):
   AGENT_INTENT_CODEBOOK=/tmp/cb.json .venv/bin/python -m src.eval.route_eval
+JEV-бэкенд (OpenRouter, ~$0.012 за прогон):
+  .venv/bin/python -m src.eval.route_eval --backend jev
 """
 from __future__ import annotations
 
+import os
+import sys
 from collections import Counter, defaultdict
 
-from src.graph.intent import get_router
+from src.graph.intent import get_router, jev_enabled
 
 # (query, expected_label) — НОВЫЕ формулировки, мультиязычные. Не копии _SEED.
 CASES: list[tuple[str, str]] = [
@@ -556,9 +560,14 @@ def _wilson(k: int, n: int) -> tuple[float, float]:
     return max(0.0, c - h), min(1.0, c + h)
 
 
-def run() -> None:
+def run(backend: str = "") -> None:
+    if backend:
+        os.environ["AGENT_INTENT_BACKEND"] = backend
     r = get_router()
-    if not r.enabled:
+    if backend == "jev" and not jev_enabled():
+        print("[route_eval] JEV недоступен (нужен provider: openrouter + ключ).")
+        return
+    if backend != "jev" and not r.enabled:
         print("[route_eval] эмбеддер выключен — нечего оценивать (включи memory.embeddings).")
         return
     n = len(CASES)
@@ -566,10 +575,12 @@ def run() -> None:
     confusion: dict[str, Counter] = defaultdict(Counter)
     per_total: Counter = Counter()
     per_correct: Counter = Counter()
-    print(f"\n{'='*90}\nROUTE-EVAL: {n} размеченных кейсов (мультиязычные, вне seed)\n{'='*90}")
+    by_backend: Counter = Counter()
+    print(f"\n{'='*90}\nROUTE-EVAL [{backend or 'knn'}]: {n} размеченных кейсов (мультиязычные, вне seed)\n{'='*90}")
     for q, exp in CASES:
         c = r.classify(q)
         pred = c["label"] if c else None
+        by_backend[(c or {}).get("backend", "knn")] += 1
         per_total[exp] += 1
         confusion[exp][pred or "NONE"] += 1
         if pred is None:
@@ -584,6 +595,8 @@ def run() -> None:
     acc = correct / n
     lo, hi = _wilson(correct, n)
     print(f"\nOverall accuracy: {correct}/{n} = {acc:.1%}  [95% Wilson {lo:.1%}–{hi:.1%}]")
+    if backend == "jev":
+        print(f"Ответил JEV: {by_backend['jev']}/{n} (остальное — откат на kNN)")
     print(f"Classified (не-None): {classified}/{n} = {classified/n:.0%}  ·  fallback(None): {fallback}/{n} = {fallback/n:.0%}")
     print("\nPer-label recall:")
     for lbl in ("web_grounding", "physical_browser", "play_media", "media_control", "self_contained"):
@@ -598,4 +611,4 @@ def run() -> None:
 
 
 if __name__ == "__main__":
-    run()
+    run(sys.argv[sys.argv.index("--backend") + 1] if "--backend" in sys.argv else "")

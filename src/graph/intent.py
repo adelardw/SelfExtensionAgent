@@ -46,9 +46,11 @@ def _cfg_intent() -> dict:
         from omegaconf import OmegaConf
         c = OmegaConf.load("config.yml").get("intent", {}) or {}
         return {"min_sim": float(c.get("min_sim", 0.30)),
-                "per_label": dict(c.get("min_sim_per_label", {}) or {})}
+                "per_label": dict(c.get("min_sim_per_label", {}) or {}),
+                "backend": str(c.get("backend", "knn") or "knn"),
+                "jev_model": str(c.get("jev_model", "typesafe/jev-1.13") or "typesafe/jev-1.13")}
     except Exception:  # noqa: BLE001
-        return {"min_sim": 0.30, "per_label": {}}
+        return {"min_sim": 0.30, "per_label": {}, "backend": "knn", "jev_model": "typesafe/jev-1.13"}
 
 
 # Калибровано на route_eval: глоб. порог 0.45→0.30 (acc 78→93%); PER-LABEL порог для
@@ -146,6 +148,80 @@ _SEED: dict[str, list[str]] = {
 }
 
 
+# ── JEV-бэкенд: TypeSafe «System One» через OpenRouter Decisions API ──────────────────────────
+# Типизированный choice-классификатор вместо kNN: на route_eval 98.1% vs kNN 83.0% (у kNN 25
+# уверенных «включи музыку → media_control»), ~0.45 с, ~$0.00002 за запрос (TODO.md, раздел JEV).
+# Включается intent.backend: jev (или env AGENT_INTENT_BACKEND=jev). Только облако OpenRouter:
+# ollama / свой шлюз / нет ключа / ошибка → откат на kNN-кодбук (он продолжает расти из фидбека).
+JEV_URL = "https://openrouter.ai/api/alpha/decisions"
+JEV_TIMEOUT = 3.0          # p95 на бенче ~0.55 с; дольше — не держим граф, уходим в kNN
+_JEV_CACHE_MAX = 256
+_JEV_CACHE: dict[str, Optional[dict]] = {}   # запрос → ответ: classify зовётся до 3× на запрос
+_JEV_INSTR = "Which route should a personal AI assistant take to handle this user request?"
+# Описания классов (zero-shot): примеры из _SEED в criteria точность не подняли, а токенов ×1.8.
+_JEV_CRITERIA = {
+    "web_grounding": "needs FRESH external facts from the web: where to buy, prices, addresses, "
+                     "opening hours, 'best X' recommendations, news, reviews, official procedures",
+    "physical_browser": "perform an action in the user's own browser, usually logged in: open a site/account, "
+                        "log in, add to cart, checkout, click buttons, fill forms",
+    "play_media": "START playing music, a video, a film, a podcast or a stream",
+    "media_control": "control an already-playing player: pause, stop, resume, volume up/down, mute",
+    "self_contained": "answerable from knowledge or reasoning alone, no web: math, code, explanations, "
+                      "translation, writing, greetings, creating apps/docs/presentations",
+}
+
+
+def jev_enabled() -> bool:
+    if (os.getenv("AGENT_INTENT_BACKEND") or _INTENT_CFG["backend"]) != "jev":
+        return False
+    from src.llm.llm import api_key, openrouter_base_url, provider
+    return (provider() == "openrouter" and bool(api_key())
+            and openrouter_base_url().startswith("https://openrouter.ai"))
+
+
+def _jev_parse(data: dict) -> Optional[dict]:
+    a = (data.get("answers") or {}).get("route") or {}
+    if a.get("choice") not in LABELS:
+        return None
+    return {"label": a["choice"], "score": float(a.get("confidence", 0.0)),
+            "scores": dict(a.get("probabilities") or {}), "backend": "jev"}
+
+
+def jev_classify(text: str) -> Optional[dict]:
+    """Один вызов JEV на текст запроса (кэш, в т.ч. неудачи — чтобы не ждать таймаут трижды).
+    None → caller откатывается на kNN."""
+    key = (text or "").strip()
+    if not key:
+        return None
+    if key in _JEV_CACHE:
+        return _JEV_CACHE[key]
+    try:
+        import httpx
+
+        from src.llm.llm import api_key
+        body = {"model": _INTENT_CFG["jev_model"], "state": key,
+                "questions": {"route": {"type": "choice", "instructions": _JEV_INSTR,
+                                        "criteria": _JEV_CRITERIA}}}
+        r = httpx.post(JEV_URL, json=body, headers={"Authorization": f"Bearer {api_key()}"},
+                       timeout=JEV_TIMEOUT)
+        r.raise_for_status()
+        res = _jev_parse(r.json())
+    except Exception:  # noqa: BLE001
+        res = None
+    if len(_JEV_CACHE) >= _JEV_CACHE_MAX:
+        _JEV_CACHE.pop(next(iter(_JEV_CACHE)))
+    _JEV_CACHE[key] = res
+    return res
+
+
+async def ajev_prefetch(text: str) -> None:
+    """Прогрев кэша из recall ПАРАЛЛЕЛЬНО с эмбеддингом запроса → задержка JEV прячется в recall.
+    Никогда не бросает; бэкенд не jev → no-op."""
+    if jev_enabled():
+        import asyncio
+        await asyncio.to_thread(jev_classify, text)
+
+
 class IntentRouter:
     """Кодбук маршрутов + cosine-kNN классификация. Лениво эмбеддит seed и кэширует."""
 
@@ -240,7 +316,12 @@ class IntentRouter:
         самой reflexion. Т.е. нет эмбеддера → не «другая логика на регэкспах», а мягкая деградация к
         суждению reflexion (плюс громкий сигнал от эмбеддера при отсутствии ключа, см. embedder.py).
         qvec — предвычисленный эмбеддинг запроса (из recall) — переиспользуем, не эмбеддим заново.
+        intent.backend: jev → сначала JEV (из кэша, прогретого в recall); недоступен → kNN ниже.
         """
+        if jev_enabled():
+            j = jev_classify(text)
+            if j:
+                return j
         if not self.enabled:
             return None
         self._load()
