@@ -1,5 +1,36 @@
 # TODO — next sessions
 
+# JEV (2026-09-24)
+
+1. Недавно вышел JEV (https://openrouter.ai/typesafe/jev-1.13, https://habr.com/ru/news/1084796/, https://en.wikipedia.org/wiki/Jev_(AI_model), https://www.langchain.com/blog/building-a-harness-with-jev,
+)
+2. Может проверим его тут ? Пишут, что это умный классификатор.
+
+> **Проверено 2026-09-24 на route_eval (570 кейсов, 5 лейблов, 10+ языков).** Работает через НАШ
+> `OPEN_ROUTER_API_KEY`: `POST https://openrouter.ai/api/alpha/decisions`, модель `typesafe/jev-1.13`,
+> тело `{state, questions:{route:{type:"choice", instructions, criteria:{label: описание}}}}`.
+> Бенч-скрипт пока вне репо (scratchpad `jev_bench.py`).
+>
+> | вариант | strict acc [95% CI] | p50 / p95 | $ за 1k запросов |
+> |---|---|---|---|
+> | kNN-кодбук (прод, seed) | 83.0% [79.7–85.8] (89.6% в семантике route_eval) | 523 / 692 мс* | ~0 |
+> | **JEV zero-shot** | **98.1% [96.6–98.9]** | **434 / 531 мс** | **$0.021** |
+> | JEV + 6 примеров/лейбл | 97.9% (примеры не помогли, токенов ×1.8) | 439 / 562 мс | $0.038 |
+> | gemini-3.1-flash-lite (fast-тир) | 98.9% [97.7–99.5] | 1159 / 1682 мс | $0.103 |
+>
+> \* у kNN латентность = вызов эмбеддинга; в проде `qvec` берётся из recall → ~0 доп. мс.
+> - JEV vs kNN: +93 / −7 кейсов (McNemar p<0.001). У kNN **50 уверенных кросс-ошибок**, 25 из них
+>   `play_media→media_control` («поставь джаз», «play despacito» → распознаётся как пауза/громкость).
+> - JEV vs flash-lite: разница НЕ значима (2 vs 7 расходящихся, p=0.18), JEV в ~2.7× быстрее и ~5× дешевле.
+> - Ошибки JEV ≈ ошибки LLM: спорная разметка («включи рок погромче», «альбом на повтор», «next song
+>   in the queue», «что подарить маме»). Калибровка: maxprob≥0.9 → 521 кейс, 99% верно; ниже → ~84%.
+> - **Встроено за флагом (2026-09-26):** `intent.backend: knn | jev` в config.yml (дефолт knn) или env
+>   `AGENT_INTENT_BACKEND=jev`. Один вызов на запрос (кэш, classify зовётся 3×), прогрев в recall
+>   параллельно с эмбеддингом, ollama / свой шлюз / ошибка → откат на kNN. Тесты: `tests/test_intent_jev.py`.
+>   Повтор через прод-путь (`python -m src.eval.route_eval --backend jev`): 558/570 = 97.9% (бенч 559 →
+>   между прогонами меняется ~1 ответ из 570).
+> - Не проверено: живой прогон агента с `backend: jev` (латентность recall, поведение play/grounding-гейтов).
+
 Зафиксировано 2026-06-17 (после ~5ч TUI-полировки + изоляции памяти по чату).
 
 ## 1. Стоимость токенов на тривиальных операциях (приоритет)

@@ -1,0 +1,21 @@
+extends: base.yml
+# Multi-turn curriculum. No automatic model promotion or benchmark claims.
+train:
+  steps: 8
+  seed: 812
+  type_cfg:
+    reward:
+      kind: tool_episodes
+    max_prompt_length: 2048
+    max_completion_length: 128
+  datasets:
+    source: tool_episodes
+    heldout_count: 3
+  episodes:
+    max_turns: 8
+runtime:
+  max_seconds: 300
+  cache_mb: 256
+  gradient_checkpointing: true
+output:
+  path: data/training/runs/tool-episodes-pilot

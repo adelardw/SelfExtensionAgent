@@ -1,0 +1,15 @@
+extends: base.yml
+train:
+  type: sft
+  steps: 100
+  type_cfg:
+    gradient_accumulation_steps: 8
+    max_prompt_length: 2048
+    max_completion_length: 256
+  datasets:
+    source: trajectories
+runtime:
+  max_seconds: 1800
+  gradient_checkpointing: true
+output:
+  path: data/training/runs/sft

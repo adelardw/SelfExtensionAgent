@@ -1,0 +1,17 @@
+extends: sft.yml
+# Verified scripted demonstrations, not teacher/model rollouts.
+train:
+  steps: 80
+  type_cfg:
+    learning_rate: 1.0e-4
+    gradient_accumulation_steps: 1
+    max_prompt_length: 2048
+    max_completion_length: 128
+  datasets:
+    path: data/training/tool-demonstrations
+  sft:
+    save_every: 40
+runtime:
+  max_seconds: 300
+output:
+  path: data/training/runs/tool-sft-warmup

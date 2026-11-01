@@ -16,6 +16,8 @@ Confirmer фронтенда возвращает bool (кнопки бота) �
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import inspect
 from typing import Awaitable, Callable, Optional, Union
 
@@ -40,7 +42,7 @@ _DEFAULT_DANGEROUS = {"run_bash", "edit_file"}
 
 def _load_cfg() -> tuple[bool, set[str], set[str], set[str]]:
     try:
-        cfg = OmegaConf.load("config.yml")
+        cfg = load_base_config()
         require = bool(cfg.get("agent", {}).get("require_confirmation", False))
         skills = set(cfg.get("skills", {}).get("confirm", []) or [])
         readonly = set(cfg.get("skills", {}).get("readonly", []) or []) or set(_DEFAULT_READONLY)
@@ -245,6 +247,8 @@ def wrap_with_confirmation(t, skill_name: str):
     from langchain_core.tools import StructuredTool
 
     async def _arun(**kwargs):
+        from src.security.integrity import require_integrity
+        require_integrity()
         key = f"{skill_name}.{t.name}"
         args_short = ", ".join(f"{k}={str(v)[:80]}" for k, v in kwargs.items())
         # PLAN-режим: side-effect тулзы НЕ исполняем — агент описывает их как шаги плана.

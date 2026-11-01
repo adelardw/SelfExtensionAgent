@@ -1,0 +1,5 @@
+extends: episodes.yml
+model:
+  init_adapter: data/training/runs/tool-sft-warmup
+output:
+  path: data/training/runs/tool-episodes-warm

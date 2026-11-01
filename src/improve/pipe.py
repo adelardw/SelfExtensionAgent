@@ -11,6 +11,8 @@ SelfLearningPipe — evolutionary-контур (L2 self-improvement).
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import os
 import re
 import threading
@@ -28,7 +30,7 @@ from .safety import filter_learnable
 
 from src.llm.llm import chat
 
-_cfg = OmegaConf.load("config.yml")
+_cfg = load_base_config()
 _MODEL = _cfg.get("model", {}).get("name", "gpt-4o-mini")
 
 # Роли, по которым пайп ВИДИТ дефолты (для анализа/градиентов) — весь реестр.

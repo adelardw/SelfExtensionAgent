@@ -15,6 +15,8 @@ OPTIMIZABLE расширяется — и backward становится по-н�
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import os
 from collections import Counter
 
@@ -26,7 +28,7 @@ from src.llm.structured_outputs import NodeGradients
 from ..tracing import trace_store
 from .pipe import SelfLearningPipe
 
-_cfg = OmegaConf.load("config.yml")
+_cfg = load_base_config()
 
 NODE_DESC = {
     "goal": "определяет цель и стоящую цель/rubric",
@@ -37,6 +39,7 @@ NODE_DESC = {
     "step_executor": "исполняет подшаг инструментами и самопроверяет",
     "review": "heavy: сквозной ревью собранного решения, выдаёт fix-подшаги",
     "clarify_gate": "батч уточнений перед исполнением неясной задачи",
+    "researcher": "изолированный веб-исследователь с проверяемыми источниками",
 }
 
 
@@ -93,6 +96,7 @@ OPTIMIZABLE = {
     "step_executor": "step_execution",
     "review": "review",
     "clarify_gate": "clarify_gate",
+    "researcher": "researcher",
 }
 
 

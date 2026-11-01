@@ -161,10 +161,13 @@ def set_chat_handler(fn: Optional[Callable[[str], Awaitable[str]]]) -> None:
 def token() -> str:
     """Стабильный per-машина токен рукопожатия (генерится один раз)."""
     TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if TOKEN_FILE.is_symlink(): raise ValueError('Bridge token must not be a symlink')
     if TOKEN_FILE.exists():
+        TOKEN_FILE.chmod(0o600)
         return TOKEN_FILE.read_text().strip()
     t = secrets.token_urlsafe(24)
     TOKEN_FILE.write_text(t)
+    TOKEN_FILE.chmod(0o600)
     return t
 
 

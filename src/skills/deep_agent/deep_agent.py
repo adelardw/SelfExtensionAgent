@@ -7,6 +7,8 @@ deep_agent — ДОПОЛНЕНИЕ к ядру (не замена): запус�
 многоступенчатый (исследовать → писать файлы → собирать результат). Для простых
 шагов НЕ нужен — это дорогой путь.
 """
+
+from src.config.config_paths import load_base_config
 import os
 from langchain_core.tools import tool
 
@@ -15,7 +17,7 @@ try:
     from langchain_openai import ChatOpenAI
     from omegaconf import OmegaConf
 
-    _cfg = OmegaConf.load("config.yml")
+    _cfg = load_base_config()
     _MODEL = _cfg.get("code_model", {}).get("name", "gpt-4o-mini")
     _DEEP = True
 except Exception:  # noqa: BLE001

@@ -24,6 +24,11 @@ _USAGE = """sea — self-extension-agent (CLI)
   sea "<задача>"            выполнить одну задачу и выйти (one-shot)
   sea --auto "<задача>"     one-shot без подтверждений (автономно)
   sea init                  создать .sea/ + стартовые SEA.md/MEMORY.md/MCP.md
+  sea code [--root PATH] [--reasoning auto|low|medium|high] [--plan|--auto] "задача"
+  sea solve --same-model    общий движок; выбранная модель во всех ролях
+  sea code --resume         продолжить сохранённую задачу с выбранным провайдером
+  sea security audit --network   локальный самоаудит и пассивный обзор соединений
+  sea security enroll       зафиксировать проверенную версию ядра (вручную, один раз)
 
 Настройка (пишется в ~/.config/sea/config.local.yml — работает во ВСЕХ проектах):
   sea key <API_KEY>         задать ключ провайдера
@@ -79,6 +84,9 @@ def main_cli() -> None:
         else:
             print("sea init — уже инициализировано (ничего не перезаписано).")
         return
+    if first in {"code","solve"}:
+        from src.coding.cli import main as coding_main
+        raise SystemExit(coding_main(args[1:]))
     # Настройка ИЗ CLI (без импорта агента) — пишется в ГЛОБАЛЬНЫЙ ~/.config/sea/config.local.yml,
     # поэтому работает во всех проектах. Базовые модели остаются из пакетного config.yml.
     if first in ("key", "login"):
@@ -116,6 +124,9 @@ def main_cli() -> None:
         # SearXNG «жив, но пуст», сломанный mcp-fetch — маскировались graceful-фолбэками).
         from src.maintenance.doctor import main as doctor_main
         raise SystemExit(doctor_main(args[1:]))
+    if first == 'security':
+        from src.security.__main__ import main as security_main
+        raise SystemExit(security_main(args[1:]))
     if first == "config":
         from src.config.cli_config import get_cli
         from src.config import config_paths

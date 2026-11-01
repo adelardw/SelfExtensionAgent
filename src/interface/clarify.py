@@ -78,7 +78,7 @@ def _norm_q(q: str) -> str:
     return re.sub(r"\W+", " ", (q or "").lower()).strip()
 
 
-async def ask(items: list[dict]) -> list[dict]:
+async def ask(items: list[dict], *, require_answer: bool = False) -> list[dict]:
     """
     Задаёт батч вопросов через зарегистрированный канал, иначе берёт допущения.
     Возвращает (и складывает в ledger) resolved-пункты со status answered|assumed.
@@ -120,8 +120,8 @@ async def ask(items: list[dict]) -> list[dict]:
         resolved.append({
             "question": it.get("question", ""),
             "options": it.get("options", []),
-            "answer": ans or _assume_value(it),
-            "status": "answered" if ans else "assumed",
+            "answer": ans or ("" if require_answer else _assume_value(it)),
+            "status": "answered" if ans else "pending" if require_answer else "assumed",
         })
     ledger().extend([r for r in resolved if r["status"] != "reused"])
     return resolved

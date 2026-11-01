@@ -12,6 +12,8 @@
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import os
 from typing import Optional, Protocol
 
@@ -19,7 +21,7 @@ from omegaconf import OmegaConf
 
 from src.llm.llm import chat, model_for, _base_and_key
 
-_cfg = OmegaConf.load("config.yml")
+_cfg = load_base_config()
 
 
 def _api_key() -> Optional[str]:

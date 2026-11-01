@@ -32,7 +32,7 @@ def _serve(port: int) -> None:
     import uvicorn
 
     from src.interface.server import app
-    uvicorn.run(app, host=HOST, port=port, log_level="warning")
+    uvicorn.run(app, host=HOST, port=port, log_level="warning", proxy_headers=False)
 
 
 def _wait_up(port: int, timeout: float = 60.0) -> bool:

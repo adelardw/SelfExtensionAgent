@@ -1,3 +1,5 @@
+
+from src.config.config_paths import load_base_config
 import ast
 import json
 import os
@@ -45,10 +47,13 @@ def _skills_base() -> Path:
         try:
             from omegaconf import OmegaConf
 
-            base = OmegaConf.load("config.yml").get("skills", {}).get("base_path")
+            base = load_base_config().get("skills", {}).get("base_path")
         except Exception:  # noqa: BLE001
             base = None
-    return Path(base) if base else Path("src/skills")
+    if base:
+        return Path(base)
+    project = Path("src/skills")
+    return project if project.is_dir() else Path(__file__).resolve().parent.parent / "skills"
 
 
 SKILLS_DIR = _skills_base()
@@ -60,7 +65,7 @@ def _load_protected() -> set[str]:
     try:
         from omegaconf import OmegaConf
 
-        cfg = OmegaConf.load("config.yml")
+        cfg = load_base_config()
         return set(cfg.get("skills", {}).get("protected", []) or [])
     except Exception:  # noqa: BLE001
         return set()
@@ -106,6 +111,8 @@ def _project_skills_dir() -> Optional[Path]:
 
 def _skill_base(name: str) -> Path:
     """Каталог навыка: ПРОЕКТНЫЙ (.sea/skills) приоритетнее ГЛОБАЛЬНОГО (src/skills)."""
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,99}", name):
+        raise ValueError('Invalid skill name')
     pj = _project_skills_dir()
     if pj and (pj / name).is_dir():
         return pj / name
@@ -442,6 +449,8 @@ def create_skill(
     Returns:
         str: Confirmation or error message.
     """
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,99}", name):
+        return 'Invalid skill name'
     _ensure_dirs()
     # L4b: скоуп → каталог + реестр. Дефолт project в проекте, иначе global (аддитивно).
     scope = scope if scope in ("project", "global") else _default_scope()
@@ -464,6 +473,13 @@ def create_skill(
             return f"Rejected. {sec_msg}"
 
     skill_dir = base_dir / name
+    from src.security.integrity import protect_agent_write, require_integrity
+    try:
+        require_integrity()
+        protect_agent_write(skill_dir)
+        protect_agent_write(reg_path)
+    except ValueError as exc:
+        return str(exc)
     skill_dir.mkdir(parents=True, exist_ok=True)
 
     (skill_dir / f"{name}.md").write_text(
@@ -533,6 +549,13 @@ def update_skill_tools(name: str, tool_code: str, append: bool = False) -> str:
         return f"Rejected. {sec_msg}"
 
     skill_file = _skill_base(name) / f"{name}.py"
+    from src.security.integrity import protect_agent_write, require_integrity
+    try:
+        require_integrity()
+        protect_agent_write(skill_file)
+        protect_agent_write(_rpath)
+    except ValueError as exc:
+        return str(exc)
 
     if append and skill_file.exists():
         existing = skill_file.read_text(encoding="utf-8")
@@ -569,6 +592,14 @@ def _delete_skill_impl(name: str, allow_protected: bool) -> str:
         )
 
     if skill_dir.exists():
+        if not allow_protected:
+            from src.security.integrity import protect_agent_write, require_integrity
+            try:
+                require_integrity()
+                protect_agent_write(skill_dir)
+                protect_agent_write(_rpath)
+            except ValueError as exc:
+                return str(exc)
         shutil.rmtree(skill_dir)
 
     registry.pop(name, None)
@@ -625,6 +656,11 @@ def _load_skill_module(name: str, py_file: Path) -> tuple[object | None, str]:
     Возвращает (module | None, reason). AST-гейт обходим перефразировкой (как и на write-пути);
     это паритет, а не песочница.
     """
+    from src.security.integrity import require_integrity
+    try:
+        require_integrity()
+    except ValueError as exc:
+        return None, str(exc)
     try:
         mtime = py_file.stat().st_mtime
     except OSError as e:  # noqa: BLE001
@@ -808,7 +844,7 @@ def _skill_embedder():
 
             from src.memory.embedder import build_embedder
 
-            mc = OmegaConf.load("config.yml").get("memory", {})
+            mc = load_base_config().get("memory", {})
             _skill_embedder_inst = build_embedder(
                 bool(mc.get("embeddings", False)), mc.get("embedding_model"))
         except Exception:  # noqa: BLE001
@@ -1002,7 +1038,7 @@ def sync_registry() -> dict:
     try:
         from omegaconf import OmegaConf
 
-        ttl_days = float(OmegaConf.load("config.yml").get("skills", {}).get("temp_ttl_days", 7))
+        ttl_days = float(load_base_config().get("skills", {}).get("temp_ttl_days", 7))
     except Exception:  # noqa: BLE001
         ttl_days = 7.0
     now = datetime.now()
@@ -1027,7 +1063,7 @@ def sync_registry() -> dict:
     try:
         from omegaconf import OmegaConf
 
-        _sk = OmegaConf.load("config.yml").get("skills", {})
+        _sk = load_base_config().get("skills", {})
         min_uses = int(_sk.get("curator_min_uses", 5))
         win_floor = float(_sk.get("curator_win_floor", 0.2))
     except Exception:  # noqa: BLE001

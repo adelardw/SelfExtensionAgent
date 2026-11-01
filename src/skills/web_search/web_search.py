@@ -1,13 +1,12 @@
 """
-web_search — нормальный веб-поиск и чтение страниц через stealth-браузер
-(cloakbrowser, drop-in замена Playwright, проходит антибот-детект).
+web_search — поиск и чтение страниц. Произвольные URL читаются через ограниченный
+HTTP-транспорт с проверкой DNS/redirect; браузер остаётся у фиксированных поисковиков.
 
 Защищённый core-навык: search_web (выдача DuckDuckGo) + read_url (полный текст
 страницы для agentic deep-read). Используется sync Playwright API — корректно
 работает, так как агент вызывает синхронные tools в отдельном потоке executor'а.
 
-Graceful: если cloakbrowser/Chromium недоступны — падает на urllib-фолбэк,
-а не роняет навык.
+Для чтения страниц нет браузерного фолбэка: его подзапросы обходили бы HTTP-политику.
 """
 import ipaddress
 import json
@@ -40,8 +39,8 @@ def _is_private_ip(ip_str: str) -> bool:
 
 def _ssrf_blocked(url: str) -> bool:
     """True → URL ведёт на внутренний/приватный адрес и должен быть отклонён. Блокируем литералы
-    приватных IP И имена, резолвящиеся в приватный диапазон. Остаточный TOCTOU (ребайнд между
-    проверкой и fetch) — приемлемый риск на on-device масштабе; полная защита = пиннинг IP."""
+    приватных IP И имена, резолвящиеся в приватный диапазон. Это ранняя подсказка;
+    окончательная проверка с закреплением IP выполняется в security.egress перед соединением."""
     try:
         host = (urllib.parse.urlparse(url).hostname or "").lower().rstrip(".")
     except ValueError:
@@ -272,6 +271,10 @@ def search_web(query: str, max_results: int = 8, recency: str = "") -> str:
     Returns:
         Formatted list of results, or an error string.
     """
+    from src.security.sensitive import guard_text
+    from src.security.integrity import require_integrity
+    require_integrity()
+    guard_text(query)
     # Circuit-breaker: бэкенды уже доказали мёртвость в этом прогоне → мгновенный честный
     # отказ без новых сетевых попыток (не жжём wall-время research'а об капчу/лимиты).
     if _search_circuit_open():
@@ -474,9 +477,8 @@ def _relevant_chunks(text: str, find: str, budget: int = 3500) -> str:
 
 
 def _page_text_urllib(url: str) -> tuple[str, str]:
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        html = resp.read().decode("utf-8", "ignore")
+    from src.security.egress import get
+    html = get(url).decode('utf-8', 'ignore')
     title = _clean((re.search(r"<title[^>]*>(.*?)</title>", html, re.S | re.I) or [None, ""])[1])
     # ЧИСТКА: trafilatura извлекает основной текст (убирает меню/футер/скрипты/реклама),
     # отдаёт читаемый контент с таблицами — намного чище наивного strip-тегов.
@@ -508,28 +510,8 @@ _FAST_ENOUGH = 600  # символов чистого текста с urllib-п�
 
 
 def _page_text(url: str) -> tuple[str, str]:
-    """
-    (title, чистый текст). БЫСТРЫЙ ПУТЬ ПЕРВЫМ: urllib + trafilatura (~0.8с, чистый текст
-    с таблицами). cloakbrowser (Chromium, 2–35с, sync-Playwright МОЖЕТ ЗАВИСНУТЬ и
-    заблокировать event loop) — ТОЛЬКО фолбэк, когда быстрый путь дал мало (бот-стена,
-    JS-рендер). Раньше cloak шёл первым → лишние секунды и риск 35с-зависания на КАЖДОЙ
-    странице. Браузер запускаем в отдельном потоке с жёстким таймаутом (можно «бросить»).
-    """
-    try:
-        title, text = _page_text_urllib(url)
-    except Exception:  # noqa: BLE001
-        title, text = "", ""
-    if len(text) >= _FAST_ENOUGH:
-        return title, text
-    # мало текста → вероятно бот-стена/JS → пробуем браузер (ограниченно по времени)
-    if _CLOAK:
-        try:
-            c_title, c_text = _run_bounded(_page_text_cloak, url, timeout=_BROWSE_HARD_TIMEOUT)
-            if len(c_text) > len(text):
-                return c_title or title, c_text
-        except Exception:  # noqa: BLE001 — таймаут/сбой браузера → что есть с urllib
-            pass
-    return title, text
+    """Pinned HTTP only; browser redirects/subresources would evade this policy."""
+    return _page_text_urllib(url)
 
 
 @tool
@@ -547,6 +529,8 @@ def browse(url: str, find: str = "") -> str:
     Returns:
         Title + targeted relevant text (or a longer extract if `find` is empty).
     """
+    from src.security.sensitive import guard_text
+    guard_text(url); guard_text(find)
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     if _ssrf_blocked(url):
@@ -568,7 +552,7 @@ def browse(url: str, find: str = "") -> str:
 @tool
 def read_url(url: str, max_chars: int = 4000) -> str:
     """
-    Open a URL in a stealth browser and return its readable text content.
+    Open a public URL through guarded HTTP and return its readable text content.
     Use for deep reading of a specific page (agentic RAG step after search_web).
 
     Args:
@@ -578,28 +562,14 @@ def read_url(url: str, max_chars: int = 4000) -> str:
     Returns:
         Extracted page text, or an error string.
     """
+    from src.security.sensitive import guard_text
+    guard_text(url)
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     if _ssrf_blocked(url):
         return f"Отклонено: {url} ведёт на внутренний/приватный адрес (SSRF-защита)."
     try:
-        if _CLOAK:
-            browser = launch(headless=True)
-            try:
-                page = browser.new_page()
-                page.goto(url, timeout=30000, wait_until="domcontentloaded")
-                title = _clean(page.title())
-                body = page.query_selector("body")
-                text = _clean(body.inner_text()) if body else ""
-                _note_read(len(text) > 120, url)
-                return f"# {title}\n{url}\n\n{text[:max_chars]}"
-            finally:
-                browser.close()
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            html = resp.read().decode("utf-8", "ignore")
-        text = _clean(re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", html, flags=re.S | re.I))
-        text = _clean(re.sub("<[^>]+>", " ", text))
+        title, text = _page_text(url)
         _note_read(len(text) > 120, url)
         return f"{url}\n\n{text[:max_chars]}"
     except Exception as e:  # noqa: BLE001

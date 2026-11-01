@@ -2,6 +2,8 @@
   python -m src.tracing            # самодиагностика по трейсам за сутки
   python -m src.tracing --hours 72
 """
+
+from src.config.config_paths import load_base_config
 import argparse
 
 from omegaconf import OmegaConf
@@ -16,7 +18,7 @@ def main() -> None:
     ap.add_argument("--user", default="local")
     args = ap.parse_args()
 
-    cfg = OmegaConf.load("config.yml")
+    cfg = load_base_config()
     store = MemoryStore(
         db_path=cfg.get("memory", {}).get("db_path", "data/memory.db"),
         embedder=build_embedder(False),

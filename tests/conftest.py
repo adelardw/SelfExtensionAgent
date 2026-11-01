@@ -41,3 +41,47 @@ class _DetRouter:
 def _det_intent_router(monkeypatch):
     import src.graph.intent as _intent
     monkeypatch.setattr(_intent, "get_router", lambda: _DetRouter())
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "live: opt-in semantic/API evaluation (SEA_LIVE_TESTS=1)")
+
+
+def pytest_collection_modifyitems(config, items):
+    import os
+    if os.getenv("SEA_LIVE_TESTS") == "1":
+        return
+    skip = pytest.mark.skip(reason="live evaluation: set SEA_LIVE_TESTS=1 with working credentials")
+    for item in items:
+        if item.get_closest_marker("live"):
+            item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def offline_services(monkeypatch):
+    """Unit tests exercise wiring, not a paid classifier. Real semantics are opt-in."""
+    import os
+    if os.getenv("SEA_LIVE_TESTS") == "1":
+        return
+    import socket
+    from src.improve import safety
+    from src.graph.semantic_signals import _ContrastiveSignal
+
+    class StubEmb:
+        enabled = True
+
+        def embed(self, text):
+            text = text.lower()
+            meta = any(x in text for x in ("article", "explains", "educational", "owasp", "статья", "защищаться"))
+            attack = not meta and any(x in text for x in (
+                "ignore", "reveal", "обойди", "игнорируй", "jailbreak", "забудь", "disable", "сними", "忽略", "bypass"))
+            return [1., 0.] if attack else [0., 1.]
+
+    monkeypatch.setattr(safety, "_INJ_DETECTOR", _ContrastiveSignal(safety._INJ_POS, safety._INJ_NEG, StubEmb()))
+    monkeypatch.setattr(safety, "_verdict_cache", {})
+    monkeypatch.setattr(safety, "_offline_noted", False)
+
+    def no_network(*args, **kwargs):
+        raise RuntimeError("network disabled in unit tests; mock transport or mark test live")
+
+    monkeypatch.setattr(socket.socket, "connect", no_network)

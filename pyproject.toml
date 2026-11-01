@@ -12,6 +12,7 @@ dependencies = [
     "deepagents>=0.6.8",
     "dotenv>=0.9.9",
     "fastapi>=0.115.0",
+    "httpx>=0.28.1",
     "langchain>=1.2.10",
     "langchain-mcp-adapters>=0.2.2",
     "langchain-openai>=1.1.10",
@@ -36,6 +37,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "rich>=13.0.0",
     "swebench>=4.1.0",
+    "sympy>=1.14.0",
     "textgrad>=0.1.8",
     "textual>=8.2.7",
     "turbovec>=0.7.0",
@@ -77,3 +79,6 @@ package = [
 gui = [
     "pywebview>=5.3",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

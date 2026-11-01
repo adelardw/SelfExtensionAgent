@@ -50,8 +50,9 @@ _SESSION_ROOT = Path(tempfile.gettempdir()) / "agent_session_kb"
 
 
 def _user_root(user_id: str) -> Path:
-    p = _KB_ROOT / (re.sub(r"[^\w.-]", "_", user_id) or "default")
-    p.mkdir(parents=True, exist_ok=True)
+    p = _KB_ROOT / _safe_id(user_id)
+    if _KB_ROOT.is_symlink() or p.is_symlink(): raise ValueError('Unsafe knowledge directory')
+    p.mkdir(parents=True, exist_ok=True, mode=0o700)
     return p
 
 
@@ -117,10 +118,8 @@ async def add_document_async(user_id: str, src_path: str | Path, folder: str = "
     dst_dir, rel = _safe_dir(user_id, folder)
     dst_dir.mkdir(parents=True, exist_ok=True)
     dst = dst_dir / src.name
-    try:
-        shutil.copy2(src, dst)
-    except Exception:  # noqa: BLE001 — уже там / тот же файл
-        pass
+    from src.security.attachments import copy_private
+    copy_private(src, dst)
     text = read_file(dst, 200_000)
     chunks = _chunk(text)
     doc_rel = str(dst.relative_to(_user_root(user_id)))
@@ -236,9 +235,26 @@ def make_kb_tool(user_id: str):
 
 
 # ── Ярус 3: ВРЕМЕННЫЕ файлы сессии (tmp, чистятся в конце) ─────────────────────────
+def _safe_id(value):
+    import hashlib
+    value = value or 'default'
+    if re.fullmatch(r'[\w.-]{1,100}', value) and value not in {'.', '..'}:
+        return value
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _session_root(session_id):
+    root = _SESSION_ROOT / _safe_id(session_id)
+    if _SESSION_ROOT.is_symlink() or root.is_symlink():
+        raise ValueError('Unsafe session directory')
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    root.chmod(0o700)
+    return root
+
+
 def _sess_conn(session_id: str) -> sqlite3.Connection:
-    root = _SESSION_ROOT / re.sub(r"[^\w.-]", "_", session_id or "default")
-    root.mkdir(parents=True, exist_ok=True)
+    root = _session_root(session_id)
+    if (root/'_index.db').is_symlink(): raise ValueError('Unsafe session index')
     c = sqlite3.connect(str(root / "_index.db"))
     c.execute("CREATE TABLE IF NOT EXISTS chunks (id INTEGER PRIMARY KEY, doc TEXT, chunk TEXT)")
     return c
@@ -254,13 +270,10 @@ def add_session_file(session_id: str, src_path: str | Path) -> str:
     src = Path(src_path)
     if not src.exists():
         return f"[файл не найден: {src}]"
-    root = _SESSION_ROOT / re.sub(r"[^\w.-]", "_", session_id or "default")
-    root.mkdir(parents=True, exist_ok=True)
+    root = _session_root(session_id)
     dst = root / src.name
-    try:
-        shutil.copy2(src, dst)
-    except Exception:  # noqa: BLE001
-        pass
+    from src.security.attachments import copy_private
+    copy_private(src, dst)
     chunks = _chunk(read_file(dst, 200_000))
     con = _sess_conn(session_id)
     con.execute("DELETE FROM chunks WHERE doc=?", (src.name,))
@@ -271,7 +284,7 @@ def add_session_file(session_id: str, src_path: str | Path) -> str:
 
 
 def session_has_files(session_id: str) -> bool:
-    db = _SESSION_ROOT / re.sub(r"[^\w.-]", "_", session_id or "default") / "_index.db"
+    db = _session_root(session_id) / "_index.db"
     if not db.exists():
         return False
     try:
@@ -304,7 +317,7 @@ def search_session(session_id: str, query: str, k: int = 5) -> str:
 
 def clear_session(session_id: str) -> None:
     """Очистить временные файлы сессии (конец сессии — ярус 3 не сохраняется)."""
-    root = _SESSION_ROOT / re.sub(r"[^\w.-]", "_", session_id or "default")
+    root = _session_root(session_id)
     shutil.rmtree(root, ignore_errors=True)
 
 

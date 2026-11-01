@@ -1,0 +1,11 @@
+extends: base.yml
+# Optional text-only coder; not downloaded or trained by this change.
+model:
+  name: mlx-community/Qwen2.5-Coder-3B-Instruct-4bit
+  path: data/models/Qwen2.5-Coder-3B-Instruct-4bit
+  revision: null # pin the actual HF revision in download_manifest before a reproducible run
+  max_parameters_b: 4 # accommodates the actual parameter count, not just the rounded "3B" label
+runtime:
+  gradient_checkpointing: true
+output:
+  path: data/training/runs/coder-3b-pilot

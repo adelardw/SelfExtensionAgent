@@ -1,3 +1,5 @@
+
+from src.config.config_paths import load_base_config
 import re
 import time
 import asyncio
@@ -127,6 +129,7 @@ from src.data.research import make_deep_research_tool, agentic_research
 from src.tools.image_search import make_image_search_tool
 from src.runtime.compute import make_compute_tool, make_datetime_tool
 from src.runtime.data_fetch import make_fetch_data_tool
+from src.security.audit import make_audit_tool
 from src.runtime.artifacts import make_export_tool
 from src.media import make_pdf_vision_tool, image_data_url
 from src.data.knowledge_base import (
@@ -152,7 +155,7 @@ from src.tools.skill_creation import (
 )
 
 
-config = OmegaConf.load("config.yml")
+config = load_base_config()
 
 MAX_CREATE_RETRIES: int = config.agent.max_create_retries
 MAX_GLOBAL_RETRIES: int = config.agent.max_global_retries
@@ -1146,6 +1149,7 @@ async def act_node(state: GeneralGraphState) -> dict:
     # export_table → агент врал «мои инструменты не поддерживают генерацию файлов»). Доставка — та же.
     tools.append(make_export_tool())
     tools.append(make_fetch_data_tool())   # «дай датасет по URL» приходит и в act — добыча → .xlsx
+    tools.append(make_audit_tool())
     # ВЫЧИСЛЕНИЯ и в act (валидация: «а если пополнять по 5к/мес» пришло follow-up'ом в act,
     # compute был только в step-пути → агент отправил юзера в веб-калькуляторы вместо расчёта).
     tools.append(make_compute_tool())
@@ -2224,6 +2228,7 @@ async def step_executor_node(state: GeneralGraphState) -> dict:
     # Добыча ДАТАСЕТА по URL → .xlsx (read-only сеть, HITL): закрывает дыру «python_exec без сети +
     # веб чанкует» → агент СКАЧИВАЕТ полные данные (CSV/JSON/bulk) и собирает файл, а не «находит источник».
     tools.append(make_fetch_data_tool())
+    tools.append(make_audit_tool())
     # Vision-чтение фигур в PDF — ТОЛЬКО когда в задаче реально есть PDF (анти-bloat
     # контекста: не вешать на каждый шаг тул, который без файла бесполезен).
     _ctx = (state.get("query", "") + " " + state.get("memory_context", "")).lower()

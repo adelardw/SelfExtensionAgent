@@ -21,10 +21,13 @@
   <img alt="BM25s" src="https://img.shields.io/badge/BM25s-retrieval-7c899c">
   <img alt="TurboVec" src="https://img.shields.io/badge/TurboVec-vectors-0E8088">
   <img alt="TextGrad" src="https://img.shields.io/badge/TextGrad-backward%20opt-D79B00">
-  <img alt="tests" src="https://img.shields.io/badge/tests-410%20passed-3fae5a">
+  <img alt="tests" src="https://img.shields.io/badge/tests-offline%20suite-3fae5a">
 </p>
 
 # self-extension-agent
+
+Local self-audit and enforced tool/API boundaries: [security controls and their limits](docs/security.md).
+Run `sea security audit --network`; no model calls or active network probes.
 
 A self-extending, self-improving personal agent built on **LangGraph**. It picks a *thinking
 mode* per task, remembers the user across sessions, extends itself with skills, and **learns
@@ -38,6 +41,58 @@ Architectural principle — the **amortized agent**: with ReAct / plan-execute t
 ~constant; here every successful run leaves an artifact (pattern → habit → skill) that makes
 similar tasks cheaper and more reliable. Proven on a live bench: a warm pass is **−13% tokens
 with quality rising 78%→98%** (`scripts/amortize_bench.py`).
+
+## Shared harness: software, mathematics, algorithms
+
+The same `src.harness.Harness` loop supports source changes, exact symbolic calculations and
+scratch algorithm experiments, isolated recursive subagents, context-preserving cognitive profiles,
+live operator steering and project-local notes. The legacy LangGraph assistant remains separate.
+Open **Движок · Авто** in the desktop for reasoning/execution controls; **Оператор** shows
+agents, actual request context, evidence and profile switching.
+Requirements and evidence now form a persisted claim graph. An active critic runs bounded
+independent probes in disposable source snapshots and audits their expected values. Context
+navigation retains alternative groups with backtracking. Ranking uses bounded Jev 1.13
+Decisions API calls (Liquid d1-ultra is selectable), cached results and lexical fallback.
+The cognitive controller also uses typed decisions: existing modes need no generated plan;
+new strategies/decompositions invoke a separately bounded planner. Uncertain choices retain
+the current strategy. Parents retain a compact ledger of child progress, with stale-source markers.
+`--same-model` disables separate scoring/controller/critic models; `navigation.backend: lexical`
+only disables the retrieval scorer.
+
+Each step compiles a permitted action set from the current mode, remaining branches and
+observed progress. Repeated unchanged proposals temporarily leave that set. Read-only reviewers
+retain read-only authority across mode switches and inherit the actual inspected source.
+Explicit artifact/check obligations control whether `finish` is available and are checked again
+before buying a semantic review; verifier tool
+failures require replacement evidence and are distinguished from candidate counterexamples.
+Cloud native function calls are available with `--action-protocol tools`, but remain experimental;
+the default JSON protocol and native protocol share the same runtime checks.
+
+The current profile explicitly uses inexpensive `google/gemini-3.1-flash-lite` on OpenRouter:
+worker envelope $0.10/run, decision selector $0.001 plus conditional planner $0.004/run,
+critic $0.02/run and retrieval scorer $0.002/run, price ceilings and no model fallback.
+Local inference is stopped. The optional desktop profile uses Unsloth GGUF via llama.cpp;
+local adapters verify ≤10B parameters rather than trusting a model name.
+
+```sh
+uv run sea code --root /path/to/project --auto "Implement the change and verify it"
+uv run sea code --root /path/to/project --plan "Design the change"
+uv run sea code --root /path/to/project --resume
+uv run sea solve --same-model --root /path/to/workspace "Solve the problem with exact arithmetic"
+```
+
+Commands run in a restricted filesystem with scratch builds; extra network/project-write authority
+requires approval. Workers edit private snapshots; parents inspect and validate proposals before adoption. See
+[comparison, configuration, measurements and limits](docs/local_coding_harness.md).
+An earlier ten-case cloud diagnostic completed 7/10 tasks, while the tested 9B configuration completed
+0/3. These are **not public benchmark scores**; failures and intermediate regressions are retained in
+the [quality evaluation log](docs/local_coding_harness.md#проверка-качества-общего-ядра-3031-октября-2026).
+The [November 1 behavioral validation](docs/behavior_validation.md) records six real
+actor/tool/critic scenarios, failures found and fixed, retained evidence and model limitations.
+For numeric/structured JSON answers, a blind executable checker now compares the actual delivered
+values or validates a witness. Model-written checkers remain fallible; this is not a formal proof system.
+The [universal-engine research and design](docs/universal_harness_design.md) distinguishes implemented
+runtime mechanisms, missing capabilities and the evaluation needed for a strict ≤10B claim.
 
 ## Architecture
 
@@ -132,7 +187,7 @@ Reproduce: `python -m src.eval.route_eval`.
 user, then the *same* user now carrying patterns/few-shots/priors) — the warm pass spends
 **−13% tokens at no worse quality** (confidence 78%→98%). This shows the *mechanism* (a warm pass
 reuses compiled patterns), not a statistical claim — a series with medians is still needed.
-**Tests:** 408, mostly offline (no LLM) — incl. concurrency/isolation tests (per-request run_context,
+**Tests:** offline suite (no LLM) — incl. concurrency/isolation tests (per-request run_context,
 per-user HITL grants, SQLite-WAL writers, atomic codebook/registry/ParamStore, runtime skill sandbox)
 and characterization tests pinning the anti-hallucination + embedding-injection gates.
 
@@ -311,7 +366,7 @@ has no `force`; owner deletion — only `force_delete_skill` from code/CLI).
 
 **Protection against injection via tool outputs** (`safety.sanitize_tool_output`, **embedding-based**,
 not regex — multilingual, with a labeled corpus accruing for a future trained classifier; without an
-embedder detection is disabled — fail-open, but surfaced via the degradation counter, not silent):
+embedder classification is unknown: external data is quarantined and learning is skipped, with a degradation counter):
 the output of any tool/MCP/skill/search is untrusted DATA; on a prompt-injection attempt ("ignore previous…",
 "reveal system prompt", hidden commands) the whole output is wrapped as "this is data, not
 instructions" — protection against skills-/mcp-/search-injection. The check is **source-gated
@@ -552,7 +607,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # 408 tests, mostly without LLM (memory/retrieval/router/security/concurrency/…)
+.venv/bin/python -m pytest tests/ -q   # offline tests without LLM (memory/retrieval/router/security/concurrency/…)
 ```
 Graph-build tests require an API key (the LLM is built on import), the rest run offline.
 A quick pass of everyday scenarios through the real graph: `python -m src.eval.daily_eval [N]`.
@@ -592,7 +647,7 @@ main.py / bot.py      REPL / Telegram
 
 ## Status
 
-Implemented and tested (408 tests): the core, **6 thinking modes** (incl. act with
+Implemented and tested (offline suite): the core, **6 thinking modes** (incl. act with
 auto-escalation; **heavy review earned by runtime evidence**), a **universal embedding intent
 router** (any language, route_eval 89.3%), **conditional recall + GraphRAG-lite memory**, per-step
 execution with **action grounding** + **context masking**, memory + **memory-as-tool (3
@@ -639,7 +694,7 @@ use requires a separate license from the author. Copyright © 2026 Yaroslav Serg
   <img alt="SQLite" src="https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white">
   <img alt="LightRAG" src="https://img.shields.io/badge/LightRAG-graph%20KB-0E8088">
   <img alt="TextGrad" src="https://img.shields.io/badge/TextGrad-backward%20opt-D79B00">
-  <img alt="tests" src="https://img.shields.io/badge/tests-410%20passed-3fae5a">
+  <img alt="tests" src="https://img.shields.io/badge/tests-offline%20suite-3fae5a">
 </p>
 
 # self-extension-agent (Русская версия)
@@ -749,7 +804,7 @@ media_control, но ошибочная маршрутизация play не ло
 юзер, затем *тот же* юзер — теперь с паттернами/few-shots/априорными оценками) — тёплый проход тратит
 **−13% токенов при не худшем качестве** (уверенность 78%→98%). Это демонстрация *механизма*
 (тёплый проход переиспользует скомпилированные паттерны), а не статистическое утверждение —
-для строгости нужна серия с медианами. **Тесты:** 408, в основном оффлайн (без LLM) — включая
+для строгости нужна серия с медианами. **Тесты:** оффлайн-набор (без LLM) — включая
 concurrency/изоляция-тесты (per-request run_context, HITL-гранты per-user, SQLite-WAL, атомарные
 кодбук/реестр/ParamStore, рантайм-песочница навыков) и характеризационные тесты гейтов.
 
@@ -934,7 +989,7 @@ concurrency/изоляция-тесты (per-request run_context, HITL-гран�
 
 **Защита от инъекций через выводы инструментов** (`safety.sanitize_tool_output`, **на эмбеддингах**,
 не регэксп — мультиязык, с накоплением корпуса под будущий классификатор; без эмбеддера детект
-отключается — fail-open, но виден через счётчик деградации, не молча): вывод
+недоступен: внешние данные изолируются, обучение пропускается; причина видна в диагностике): вывод
 любого инструмента/MCP/навыка/поиска — недоверенные ДАННЫЕ; при попытке prompt-injection
 («ignore previous…», «reveal system prompt», скрытые команды) весь вывод оборачивается рамкой
 «это данные, не инструкции» — защита от skills-/mcp-/search-injection. Проверка **source-gated
@@ -1172,7 +1227,7 @@ AGENT_EVAL_MODE=1 AGENT_NO_BROWSER=1 python scripts/gaia_resilient.py 100 --json
 ## Тесты
 
 ```bash
-.venv/bin/python -m pytest tests/ -q   # 408 тестов, в осн. без LLM (память/retrieval/роутер/безопасность/конкурентность/…)
+.venv/bin/python -m pytest tests/ -q   # оффлайн-тесты без LLM (память/retrieval/роутер/безопасность/конкурентность/…)
 ```
 Тесты сборки графа требуют API-ключ (LLM строится на импорте), остальные — оффлайн.
 Быстрый прогон повседневных сценариев через реальный граф: `python -m src.eval.daily_eval [N]`.
@@ -1212,7 +1267,7 @@ main.py / bot.py      REPL / Telegram
 
 ## Статус
 
-Реализовано и протестировано (408 тестов): ядро, **6 режимов мышления** (вкл. act с
+Реализовано и протестировано (оффлайн-тесты): ядро, **6 режимов мышления** (вкл. act с
 автоэскалацией; **heavy-ревью зарабатывается рантайм-evidence**), **универсальный
 embedding-роутер интентов** (любой язык, route_eval 89.3%), **условный recall + GraphRAG-lite
 память**, по-пунктовое исполнение с **заземлением действий** + **маскинг контекста**, память +

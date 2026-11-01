@@ -14,6 +14,28 @@ is the backward pass over that trace.
 > [`docs/architecture.en.drawio`](docs/architecture.en.drawio) → SVG. The same graph is described
 > step by step below.
 
+## Shared problem-solving loop and cognitive branches
+
+`src/harness.Harness` (compatible with `src/coding.CodingHarness`) is one executor for software,
+mathematics and algorithm problems with explicit local/cloud profiles; see
+[the design and comparison](docs/local_coding_harness.md). Its model adapter, workspace tools,
+verification state machine and process lock are independent of the general LangGraph graph.
+Desktop `/chat` selects it with `task_mode=coding`; `sea solve` / `sea code` import it directly.
+Cognitive profiles compose trusted system rules and scoped tools while keeping per-node working
+memory. A bounded Decision-model routes delegation/anomalies and can create scoped profiles. Recursive branches inherit
+compact handoffs and share evidence, rather than full transcripts. Operator messages cancel stale
+generations and propagate down the addressed subtree. Writable workers use private source snapshots;
+parents inspect/check/adopt proposals with conflict detection and rollback. Native checks use disposable
+writable snapshots; the container adapter currently permits only read-only delegation.
+`minds.json` and the operator API expose
+summaries, tool scopes, evidence presence and stale-file checks; model summaries remain unverified.
+Current inference is cheap OpenRouter with spend/price limits; local llama.cpp/Ollama adapters enforce
+≤10B and do not start a server or silently select a cloud fallback. `--same-model` binds controller
+and critic to the selected adapter too. Exact SymPy and scratch Python/C++ tools share the same loop;
+they are not a formal proof verifier. See [research, remaining gaps and evaluation](docs/universal_harness_design.md).
+`agent_experimental.py` and `self_model.py` mentioned in historical notes are absent from this
+checkout; those notes are not evidence of implemented features.
+
 ## Forward graph (one request)
 
 ```
@@ -260,7 +282,7 @@ the interface), rather than printed as text to copy.
 - **play_media ↔ media_control overlap** — the two are semantically close, so ~20% of play lands in control (route_eval play_media 80%); kept on purpose because a pause misfiring into auto-play is worse than play losing only its deterministic nudge.
 - The syscall sandbox is optional and depends on bwrap/firejail; a full gVisor/container per smoke is the next level.
 - Working with ALREADY-OPEN windows (keystroke/scroll/AX, phone/adb) — macOS only so far; a cross-platform UI-automation layer is next.
-- Orchestration = picking 1 of 6 fixed mode-templates (fast/reason/act/deliberate/heavy/clarify), each a baked-in node pipeline; the escalation ladder (act→deliberate→earned-heavy) is the only runtime deviation. NEXT (not "chain several whole modes" — that's still templates): dissolve modes into atomic cognitive PRIMITIVES (recall/reason/tool-act/verify/decompose/reflect) and let a meta-controller COMPOSE them per task from intermediate results (router-picks-1-of-N → planner-assembles-a-compute-graph). Modes would then be just frequent baked patterns, not the only options. **Being prototyped behind a flag in `src/graph/agent_experimental.py` (experimental, isolated from the working graph).**
+- Orchestration = picking 1 of 6 fixed mode-templates (fast/reason/act/deliberate/heavy/clarify), each a baked-in node pipeline; the escalation ladder (act→deliberate→earned-heavy) is the only runtime deviation. NEXT (not "chain several whole modes" — that's still templates): dissolve modes into atomic cognitive PRIMITIVES (recall/reason/tool-act/verify/decompose/reflect) and let a meta-controller COMPOSE them per task from intermediate results (router-picks-1-of-N → planner-assembles-a-compute-graph). Modes would then be just frequent baked patterns, not the only options. **Historical prototype: `agent_experimental.py` is absent from this checkout. The local coding loop is a separate implemented path; it does not dynamically rewrite LangGraph topology.**
 - **Cross-turn history rewrite** — within-step masking is done (above), but rewriting the message history ACROSS turns stays out: it's owned by LangGraph `create_agent` and a rewrite there is a fragile hack.
 - **LightRAG** works for the user's KB documents (`knowledge_base.py`); for GLOBAL memory (episodes/facts) it's GraphRAG-lite — **typed edges already exist** (`memory_edges.relation`: `similar` fact↔fact by cosine, `derived` episode→fact) and **multi-hop traversal exists** (`_graph_boost` spreading-activation over `graph_hops`, config-gated to 1), on top of recency+relevance+importance + TurboVec-ANN. Still the next level vs full LightRAG: **LLM-extracted semantic relation types** (entities+relations, not just structural similar/derived) and a dedicated **graph-query retrieval mode** (today the graph only re-weights recall, it isn't a standalone retriever).
 - Amortization: n=4 statistics (a series with medians is needed); LLM-abstraction of a pattern (strip a specific user's particulars) before collective promotion (privacy in a multi-user deploy); inheriting strong MCPs via a before/after comparison.

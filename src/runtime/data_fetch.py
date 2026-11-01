@@ -17,7 +17,6 @@ import csv as _csv
 import gzip
 import io
 import json
-import urllib.request
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
@@ -35,17 +34,17 @@ class _FetchArgs(BaseModel):
 
 
 def _download(url: str) -> bytes:
-    req = urllib.request.Request(url, headers={"User-Agent": "SEA-fetch_data/1.0"})
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:  # noqa: S310 — read-only egress, HITL-gated
-        data = r.read(_MAX_BYTES + 1)
-    if len(data) > _MAX_BYTES:
-        raise ValueError(f"файл больше лимита {_MAX_BYTES // (1024 * 1024)} МБ")
-    return data
+    from src.security.egress import get
+    return get(url, max_bytes=_MAX_BYTES, timeout=_TIMEOUT)
 
 
 def _maybe_gunzip(url: str, data: bytes) -> bytes:
     if url.lower().endswith(".gz") or data[:2] == b"\x1f\x8b":  # gzip-магия
-        return gzip.decompress(data)
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as stream:
+            unpacked = stream.read(_MAX_BYTES + 1)
+        if len(unpacked) > _MAX_BYTES:
+            raise ValueError("Decompressed data exceeds size limit")
+        return unpacked
     return data
 
 

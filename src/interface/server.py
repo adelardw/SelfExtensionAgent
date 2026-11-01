@@ -3,7 +3,7 @@ FastAPI-сервер: единый вход для всех клиентов (П
 
 Запуск:  python -m src.server   (бэкенд на 127.0.0.1:8000 — loopback по умолчанию)
          LAN-доступ (телефон на том же Wi-Fi) — ОСОЗНАННО: AGENT_BIND_HOST=0.0.0.0
-         (тогда нужен auth перед эндпойнтами — сейчас их нет).
+         (нужны AGENT_API_TOKEN, AGENT_ALLOWED_HOSTS и TLS).
 
 Эндпоинты:
   POST /chat            — основной диалог с агентом
@@ -14,8 +14,11 @@ FastAPI-сервер: единый вход для всех клиентов (П
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import asyncio
 import os
+from typing import Literal
 import sqlite3
 import time
 from pathlib import Path
@@ -26,7 +29,7 @@ import uuid
 
 from langchain_core.callbacks import BaseCallbackHandler
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from omegaconf import OmegaConf
@@ -45,6 +48,8 @@ from src.tracing import diagnose, trace_store
 from src.tools import skill_health, skill_repair
 
 app = FastAPI(title="Self-Extension Agent", version="0.2.0")
+from src.security.http import AgentHTTPGuard, validate_bind
+app.add_middleware(AgentHTTPGuard)
 
 # GUI — собранный React/Vite-фронт (frontend/dist). Тонкий клиент + мозг: сервер отдаёт
 # статику, она говорит с /chat. Собрать: `cd frontend && npm install && npm run build`.
@@ -62,7 +67,7 @@ def webui():
     return HTMLResponse(
         "<h1>self-extension</h1><p>GUI не собран. Выполни: "
         "<code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code></p>", status_code=404)
-_cfg = OmegaConf.load("config.yml")
+_cfg = load_base_config()
 _last_request = time.time()
 _idle_done = False  # чтобы не гонять improve повторно за один idle-период
 _graph = None       # строится на старте с АСИНХРОННЫМ чекпойнтером
@@ -74,6 +79,9 @@ async def _build_graph_async() -> None:
     SqliteSaver async-методы не поддерживает (был источник 500). Фолбэк — MemorySaver
     (состояние графа не персистится, но история тредов всё равно живёт в chat_store)."""
     global _graph
+    validate_bind(os.getenv('AGENT_BIND_HOST', '127.0.0.1'))
+    from src.security.integrity import require_integrity
+    require_integrity()
     # GUI: пользователь — локальный оператор, рядом. Без auto-accept side-effect тулы
     # уходят в deny-by-default (нет канала подтверждения в окне) → агент «ждёт
     # подтверждения», которое не появляется. auto-accept → браузер/плеер реально работают.
@@ -128,8 +136,7 @@ async def _build_graph_async() -> None:
                 return f"ошибка: {type(ex).__name__}: {ex}"
 
         browser_bridge.set_chat_handler(_ext_chat)
-        print(f"[server] 🧩 мост браузера слушает 127.0.0.1:{browser_bridge.PORT} · "
-              f"токен для расширения: {browser_bridge.token()}")
+        print(f"[server] 🧩 мост браузера слушает 127.0.0.1:{browser_bridge.PORT}; токен доступен в локальных настройках")
     except Exception as e:  # noqa: BLE001
         print(f"[server] мост браузера не поднялся: {type(e).__name__}: {e}")
 
@@ -187,6 +194,11 @@ class ChatIn(BaseModel):
     user_id: str
     query: str
     thread_id: str | None = None  # тред-разговор (GUI); по умолчанию = user_id (обратная совместимость)
+    task_mode: Literal["general", "coding"] = "general"
+    reasoning: Literal["auto", "low", "medium", "high"] = "auto"
+    execution: Literal["auto", "plan"] = "auto"
+    workspace: str = ""
+    resume: bool = False
 
 
 class SettingsIn(BaseModel):
@@ -273,10 +285,63 @@ async def _heal_bg() -> None:
         print(f"[self-heal] фон упал: {type(e).__name__}: {e}", flush=True)
 
 
+_CODING_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+async def _run_coding(run_id: str, inp: ChatIn, tid: str) -> None:
+    from src.coding.harness import CodingHarness
+    run = _RUNS[run_id]
+    from src.coding.control import SessionControl
+    control = run.setdefault('control', SessionControl())
+    try:
+        root = Path(inp.workspace or os.getenv("AGENT_PROJECT_ROOT") or Path.cwd()).resolve(strict=True)
+        if not root.is_dir():
+            raise ValueError("workspace must be a directory")
+        lock = _CODING_LOCKS.setdefault(str(root), asyncio.Lock())
+
+        def progress(event):
+            run["progress"] = event["message"]
+            run["mode"] = "coding:" + event["phase"]
+            run["tokens"] = event.get("usage", {}).get("tokens", 0)
+            if event["phase"] not in run["steps"]:
+                run["steps"].append(event["phase"])
+            run.setdefault("research_log", []).append(event["message"])
+            del run["research_log"][:-80]
+
+        run["progress"] = "Waiting for workspace"
+        # All writes to one workspace are serialized, including different chat threads.
+        async with lock:
+            with run_context.request_scope("coding-" + run_id, inp.user_id):
+                result = await CodingHarness(root).run(inp.query, reasoning=inp.reasoning,
+                    execution=inp.execution, session_id=inp.user_id + ":" + tid,
+                    resume=inp.resume, progress=progress, control=control)
+        answer = result["final_answer"]
+        combined_query = inp.query + ''.join('\n\n[Уточнение оператора]\n' + e['text'] for e in control.history if e.get('origin') == 'user')
+        chat_store.record_turn(tid, inp.user_id, combined_query, answer)
+        run["result"] = {"answer": answer, "thread_id": tid, "mode": result["mode"],
+                         "coding_status": result["status"], "plan": result["plan"],
+                         "completion": result.get("completion", {}),
+                         "changed": result["changed"], "checks_passed": result["checks_passed"],
+                         "delegates": result["delegates"], "tools_used": [{"name": n, "sec": None} for n in result["tools_used"]],
+                         "tokens": result.get("tokens", 0), "tokens_in": result.get("tokens_in", 0),
+                         "tokens_out": result.get("tokens_out", 0), "cost": result.get('cost', 0),
+                         "title": (chat_store.get_thread(tid) or {}).get("title", ""),
+                         "research_log": run.get("research_log", [])}
+        run['result'].update(context=result.get('context', {}), supervisor=result.get('supervisor', {}))
+        run["status"] = "done"
+    except asyncio.CancelledError:
+        run["status"], run["error"] = "error", "Stopped; checkpoint retained. Use resume to continue."
+    except Exception as exc:
+        run["status"], run["error"] = "error", f"{type(exc).__name__}: {exc}"
+
+
 async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
     """Фоновый прогон через astream: прогресс по узлам → run['progress'], а clarify/confirm
     всплывают в _RUNS[run_id] и ждут клиента."""
     _cur_run.set(run_id)
+    if inp.task_mode == "coding":
+        await _run_coding(run_id, inp, tid)
+        return
     run = _RUNS[run_id]
     try:
         query = inp.query
@@ -376,6 +441,9 @@ async def _run_graph(run_id: str, inp: ChatIn, tid: str) -> None:
         # доработает. Ошибки самопочинки не трогают ответ (фон, best-effort).
         if skill_health.degraded():
             asyncio.create_task(_heal_bg())
+    except asyncio.CancelledError:
+        run["error"], run["status"] = "Stopped by operator", "error"
+        raise
     except Exception as e:  # noqa: BLE001
         run["error"] = f"{type(e).__name__}: {e}"
         run["status"] = "error"
@@ -396,11 +464,14 @@ async def chat(inp: ChatIn) -> dict:
     tid = inp.thread_id or inp.user_id
     run_id = uuid.uuid4().hex
     _RUNS[run_id] = {"status": "running", "pending": None, "future": None, "result": None,
-                     "error": None, "progress": "Starting", "steps": []}
+                     "error": None, "progress": "Starting", "steps": [], 'task_mode': inp.task_mode}
+    if inp.task_mode == 'coding':
+        from src.coding.control import SessionControl
+        _RUNS[run_id]['control'] = SessionControl()
     if len(_RUNS) > 60:  # анти-утечка: чистим старые завершённые
         for k in [k for k, v in list(_RUNS.items()) if v["status"] in ("done", "error")][:40]:
             _RUNS.pop(k, None)
-    asyncio.create_task(_run_graph(run_id, inp, tid))
+    _RUNS[run_id]["task"] = asyncio.create_task(_run_graph(run_id, inp, tid))
     return {"run_id": run_id}
 
 
@@ -426,6 +497,73 @@ def run_status(run_id: str) -> dict:
     if st == "error":
         return {"status": "error", "error": run["error"], "steps": run["steps"]}
     return {"status": "running", "progress": run["progress"], "steps": run["steps"], **_trace}
+
+
+@app.post("/run/{run_id}/cancel")
+async def cancel_run(run_id: str) -> dict:
+    run = _RUNS.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="unknown run")
+    task = run.get("task")
+    if task and not task.done():
+        task.cancel()
+    return {"cancelled": True}
+
+
+class SteerIn(BaseModel):
+    message: str = ''
+    interrupt: bool = True
+    target: str = 'main'
+    action: Literal['steer', 'pause', 'switch'] = 'steer'
+    mode: str | None = None
+    profile: dict | None = None
+
+
+@app.post('/run/{run_id}/steer')
+async def steer_run(run_id: str, inp: SteerIn) -> dict:
+    run = _RUNS.get(run_id)
+    if not run or run.get('status') not in {'running', 'waiting'}:
+        raise HTTPException(409, 'run is not active')
+    control = run.get('control')
+    if control is None:
+        raise HTTPException(400, 'live steering is available for coding runs')
+    supervisor = getattr(control, 'supervisor', None)
+    if inp.target != 'main' and (supervisor is None or inp.target not in supervisor.agents):
+        raise HTTPException(404, 'unknown subagent')
+    if inp.target != 'main' and supervisor.agents[inp.target]['status'] in {'done','paused','interrupted','partial','error'}:
+        raise HTTPException(409, 'subagent has finished; steer the parent to schedule new work')
+    if inp.action == 'switch':
+        scheduler = getattr(control, 'scheduler', None)
+        if scheduler is None or inp.mode is None or inp.target not in scheduler.nodes:
+            raise HTTPException(422, 'mode switching requires cognitive orchestration and a mode')
+        try:
+            if inp.profile:
+                inp.mode=scheduler.profiles.install(inp.profile,scheduler.nodes[inp.target].ceiling)
+            scheduler.switch(inp.target, inp.mode)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {'accepted':True, 'mode':inp.mode, 'target':inp.target, 'context_preserved':True}
+    if inp.action == 'pause':
+        if inp.target == 'main': control.pause = True
+        else: control.cancelled_agents.add(inp.target)
+    try:
+        return control.post(inp.message, inp.interrupt, inp.target)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@app.get('/run/{run_id}/context')
+def coding_context(run_id: str) -> dict:
+    run = _RUNS.get(run_id)
+    if not run or not run.get('control'):
+        raise HTTPException(404, 'coding run not found')
+    control = run['control']
+    supervisor = getattr(control, 'supervisor', None)
+    return {**control.snapshot, 'thinking': control.thinking, 'steering': control.history,
+            'cognition': control.scheduler.report() if hasattr(control, 'scheduler') else [],
+            'profiles': control.scheduler.profiles.inventory() if hasattr(control,'scheduler') else [],
+            'proposals': [control.orchestrator.branches.view(p) for p in control.orchestrator.branches.proposals.values()] if hasattr(control,'orchestrator') else [],
+            'supervisor': supervisor.view(include_context=True) if supervisor else {}}
 
 
 @app.get("/artifact/{artifact_id}")
@@ -482,13 +620,26 @@ def chat_delete(thread_id: str) -> dict:
 @app.post("/upload")
 async def upload(thread_id: str, file: UploadFile = File(...)) -> dict:
     """Приложить документ/файл к треду (pdf/doc/image/audio/…) — мультимодальное вложение."""
-    suffix = "".join(c for c in (file.filename or "file") if c.isalnum() or c in "._- ")
-    tmp = Path(tempfile.gettempdir()) / f"selfext_{thread_id}_{suffix}"
-    tmp.write_bytes(await file.read())
-    try:
-        stored = await asyncio.to_thread(knowledge_base.add_session_file, thread_id, str(tmp))
-    except Exception:  # noqa: BLE001
-        stored = str(tmp)
+    from src.security.attachments import MAX_BYTES
+    from src.security.sensitive import SecurityViolation
+    from fastapi import HTTPException
+    name = Path(file.filename or 'file').name
+    if name in {'.', '..', ''}: raise HTTPException(400, 'Invalid attachment name')
+    with tempfile.TemporaryDirectory(prefix='sea-upload-') as folder:
+        tmp = Path(folder)/name
+        with tmp.open('xb') as out:
+            tmp.chmod(0o600)
+            size = 0
+            while chunk := await file.read(1024**2):
+                size += len(chunk)
+                if size > MAX_BYTES: raise HTTPException(413, 'Attachment size limit exceeded')
+                out.write(chunk)
+        try:
+            stored = await asyncio.to_thread(knowledge_base.add_session_file, thread_id, str(tmp))
+        except SecurityViolation as exc:
+            raise HTTPException(400, str(exc)) from None
+        except Exception:
+            raise HTTPException(400, 'Attachment could not be admitted') from None
     lst = _THREAD_FILES.setdefault(thread_id, [])
     if stored not in lst:
         lst.append(stored)
@@ -555,14 +706,23 @@ async def detach(inp: DetachIn) -> dict:
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)) -> dict:
     """Запись с микрофона → текст (STT). Фронт пишет аудио и шлёт сюда."""
-    ext = Path(file.filename or "audio.webm").suffix or ".webm"
-    tmp = Path(tempfile.gettempdir()) / f"selfext_rec{ext}"
-    tmp.write_bytes(await file.read())
-    try:
-        text = await asyncio.to_thread(media.transcribe_audio, str(tmp))
-        return {"text": text or ""}
-    except Exception as e:  # noqa: BLE001
-        return {"text": "", "error": f"{type(e).__name__}: {e}"}
+    from src.security.attachments import MAX_BYTES, validate
+    from fastapi import HTTPException
+    ext = Path(file.filename or "audio.webm").suffix.lower() or ".webm"
+    if ext not in {'.webm', '.wav', '.mp3', '.ogg', '.m4a', '.flac'}:
+        raise HTTPException(400, 'Unsupported audio type')
+    data = await file.read(MAX_BYTES + 1)
+    if len(data) > MAX_BYTES: raise HTTPException(413, 'Audio size limit exceeded')
+    with tempfile.TemporaryDirectory(prefix='sea-record-') as folder:
+        tmp = Path(folder)/('audio'+ext)
+        tmp.write_bytes(data)
+        tmp.chmod(0o600)
+        try:
+            validate(tmp)
+            text = await asyncio.to_thread(media.transcribe_audio, str(tmp))
+            return {"text": text or ""}
+        except Exception as e:
+            return {"text": "", "error": type(e).__name__}
 
 
 # Десктоп (pywebview/WKWebView): getUserMedia НЕ поддерживается → пишем с мика на СЕРВЕРЕ через ffmpeg
@@ -714,6 +874,12 @@ def facts(user_id: str = "local") -> list[dict]:
     return [dict(f) for f in memory_store.get_facts(user_id)]
 
 
+@app.get('/security/audit')
+async def security_audit():
+    from src.security.audit import audit
+    return await asyncio.to_thread(audit, network=True)
+
+
 @app.get("/memory/goal")
 def goal(user_id: str = "local") -> dict:
     g = memory_store.get_active_goal(user_id)
@@ -733,11 +899,11 @@ def main() -> None:
     import uvicorn
 
     # Локальное приложение: бэкенд слушает LOOPBACK по умолчанию (как desktop.py:HOST=127.0.0.1).
-    # 0.0.0.0 без auth на недоверенной сети = любой в LAN управляет агентом как владелец
-    # (auto-accept + руки/память/ключ). LAN-доступ (телефон на том же Wi-Fi) — ОСОЗНАННЫЙ opt-in
-    # через AGENT_BIND_HOST=0.0.0.0 (и тогда добавляй auth перед эндпойнтами). Bind-находка ревью.
+    # LAN requires a strong token, explicit allowed hosts, and TLS at this server.
     host = os.getenv("AGENT_BIND_HOST", "127.0.0.1")
-    uvicorn.run(app, host=host, port=8000)
+    validate_bind(host)
+    uvicorn.run(app, host=host, port=8000, proxy_headers=False,
+                ssl_certfile=os.getenv('AGENT_TLS_CERT'), ssl_keyfile=os.getenv('AGENT_TLS_KEY'))
 
 
 if __name__ == "__main__":

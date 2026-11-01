@@ -1,0 +1,12 @@
+extends: base.yml
+# Experiment budget, not a measured quality improvement.
+train:
+  steps: 200
+  seed: 1907
+  datasets:
+    heldout_count: 16
+runtime:
+  max_seconds: 7200
+  gradient_checkpointing: true
+output:
+  path: data/training/runs/grpo-long

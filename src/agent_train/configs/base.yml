@@ -1,0 +1,59 @@
+# Paths resolve against project_root, independently of the shell cwd.
+version: 1
+project_root: ../../..
+model:
+  name: mlx-community/Qwen3-0.6B-4bit
+  path: data/models/Qwen3-0.6B-4bit
+  revision: 73e3e38d981303bc594367cd910ea6eb48349da8
+  init_adapter: null # optional matching SFT adapter for tool_episodes GRPO
+  mlx: true
+  max_parameters_b: 3
+train:
+  type: grpo
+  steps: 8
+  seed: 811
+  type_cfg:
+    reward:
+      kind: verified_edits
+      model_name: null
+    learning_rate: 1.0e-5
+    per_device_train_batch_size: 1 # GRPO microbatch; SFT batch size
+    gradient_accumulation_steps: 1 # SFT only; GRPO accumulates its group internally
+    num_generations: 4
+    max_completion_length: 160
+    max_prompt_length: 1024
+    kl_beta: 0.02
+    temperature: 1.0
+    top_p: 1.0
+    use_vllm: false # unsupported by the MLX backend
+    bf16: false # no PyTorch dtype override; dtype comes from the MLX model
+  qat: false # QLoRA is supported; quantization-aware training is not
+  lora:
+    type: qlora
+    cfg:
+      r: 8
+      scale: 20.0 # MLX scale, not PEFT alpha
+      target_modules: null # auto-discovery; explicit suffixes also accepted
+      lora_dropout: 0.0 # GRPO uses deterministic behavior logprobs
+      bias: null
+  datasets:
+    source: verified_edits # fresh local GRPO rollouts, never historical cloud responses
+    os: [] # OS/terminal curriculum is not connected
+    trajectory_paths: [data/eval/quality] # export inputs
+    path: data/training/trajectory-export # audited SFT dataset
+    heldout_count: 3
+  episodes:
+    max_turns: 8 # only used by tool_episodes
+  sft:
+    mask_prompt: true
+    val_batches: 10
+    steps_per_report: 1
+    steps_per_eval: 20
+    save_every: 20
+runtime:
+  memory_gb: 12
+  cache_mb: 512
+  max_seconds: 600 # GRPO: between groups; SFT: subprocess timeout
+  gradient_checkpointing: false
+output:
+  path: data/training/runs/grpo-pilot # fresh directory; override with --output

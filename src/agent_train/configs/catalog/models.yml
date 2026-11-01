@@ -1,0 +1,32 @@
+# Reference catalog, NOT a training configuration. No automatic downloads.
+checked_on: '2026-10-31'
+default: mlx-community/Qwen3-0.6B-4bit
+candidates:
+  coder_3b:
+    model: mlx-community/Qwen2.5-Coder-3B-Instruct-4bit
+    modality: text
+    format: mlx_safetensors_4bit
+    config: ../coder_3b.yml
+    status: profile_prepared_not_locally_tested
+    source: https://huggingface.co/mlx-community/Qwen2.5-Coder-3B-Instruct-4bit
+  vision_4b:
+    base_model: Qwen/Qwen3.5-4B
+    quantized_repo: unsloth/Qwen3.5-4B-GGUF
+    modality: image_text
+    inference_backend: llama_cpp
+    first_inference_candidate: Qwen3.5-4B-UD-Q4_K_XL.gguf
+    quantized_files_decimal_gb:
+      Qwen3.5-4B-UD-Q4_K_XL.gguf: 2.91
+      Qwen3.5-4B-UD-IQ2_M.gguf: 1.76
+      Qwen3.5-4B-UD-IQ2_XXS.gguf: 1.52
+    vision_projector: mmproj-F16.gguf
+    vision_projector_decimal_gb: 0.672
+    status: inference_candidate_requires_separate_vision_training_backend
+    notes:
+      - File sizes do not include KV cache, activations or runtime overhead.
+      - Quantization quality and coding performance have not been tested in this harness.
+      - GGUF is not the MLX QLoRA training format accepted by this runner.
+    sources:
+      - https://huggingface.co/Qwen/Qwen3.5-4B
+      - https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/tree/main
+      - https://unsloth.ai/docs/models/qwen3.5

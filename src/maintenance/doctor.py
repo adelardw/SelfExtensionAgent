@@ -11,6 +11,8 @@ Doctor делает их ВИДИМЫМИ до того, как они испо�
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import json
 import os
 import subprocess
@@ -57,7 +59,7 @@ def check_embeddings(offline: bool) -> dict:
     try:
         from omegaconf import OmegaConf
 
-        mc = OmegaConf.load("config.yml").get("memory", {})
+        mc = load_base_config().get("memory", {})
         if not mc.get("embeddings", False):
             return _r("Эмбеддинги", WARN, "выключены в config.yml (memory.embeddings=false)",
                       "recall/селектор навыков работают на token-overlap/BM25 — слабее")
@@ -264,7 +266,7 @@ def check_skills() -> list[dict]:
         temp = [n for n, m in reg.items() if m.get("temporary")]
         broken = [n for n in reg
                   if reg[n].get("has_tools") and not (sc._skill_base(n) / f"{n}.py").exists()]
-        skcfg = OmegaConf.load("config.yml").get("skills", {})
+        skcfg = load_base_config().get("skills", {})
         min_uses = int(skcfg.get("curator_min_uses", 5))
         floor = float(skcfg.get("curator_win_floor", 0.2))
         losers = [n for n, m in reg.items()
@@ -315,7 +317,7 @@ def check_config_sanity() -> dict:
 
         import src.tools.skill_creation as sc
 
-        cfg = OmegaConf.load("config.yml")
+        cfg = load_base_config()
         missing = [n for n in (cfg.get("skills", {}).get("protected", []) or [])
                    if not (sc.SKILLS_DIR / n).is_dir()]
         risky = os.getenv("AGENT_ALLOW_RISKY_SKILLS") == "1"

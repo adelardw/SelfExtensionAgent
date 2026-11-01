@@ -1,0 +1,4 @@
+extends: base.yml
+# Same 0.6B/8-group setup as the earlier pilot; never launches automatically.
+output:
+  path: data/training/runs/grpo-pilot

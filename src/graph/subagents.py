@@ -39,10 +39,16 @@ def react_subagent_tool(name: str, description: str, system: str,
     tools = get_all_loaded_skill_tools(skill_names) if skill_names else []
     agent = create_agent(llm, tools, system_prompt=system)
 
-    async def _run(task: str) -> str:
+    async def _invoke(task: str) -> dict:
         r = await agent.ainvoke({"messages": [("user", task)]}, config={"recursion_limit": 25})
         msgs = r.get("messages", [])
-        return msgs[-1].content if msgs else ""
+        return {"answer": msgs[-1].content if msgs else ""}
+
+    from src.tracing import traced
+    recorded = traced(name.removeprefix("run_"), _invoke)
+
+    async def _run(task: str) -> str:
+        return (await recorded(task))["answer"]
 
     return StructuredTool.from_function(coroutine=_run, name=name, description=description)
 
@@ -69,7 +75,7 @@ def get_subagent_tools(names: Optional[list[str]] = None) -> list[StructuredTool
     for n in wanted:
         if n not in SUBAGENT_CATALOG:
             continue
-        if n not in _cache:
+        if n not in _cache or n == "researcher":
             try:
                 _cache[n] = SUBAGENT_CATALOG[n]()
             except Exception as e:  # noqa: BLE001

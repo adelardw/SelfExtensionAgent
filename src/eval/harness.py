@@ -7,6 +7,8 @@ Eval-харнесс: метрики качества агента + честна
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import asyncio
 import json
 import tempfile
@@ -20,7 +22,7 @@ from ..memory import MemoryStore, build_embedder
 
 TASKS = json.loads((Path(__file__).parent / "tasks.json").read_text(encoding="utf-8"))
 OUT = Path("data/eval")
-_MODEL_CFG = __import__("omegaconf").OmegaConf.load("config.yml").get("model", {}).get("name", "gpt-4o-mini")
+_MODEL_CFG = load_base_config().get("model", {}).get("name", "gpt-4o-mini")
 
 
 class _Judge(BaseModel):

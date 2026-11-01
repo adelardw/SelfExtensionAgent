@@ -1,0 +1,2 @@
+# Compatibility entry; actual training dependencies live with the package.
+-r src/agent_train/requirements.txt

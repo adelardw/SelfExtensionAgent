@@ -6,6 +6,8 @@ CLI для self-learning пайпа.
   python -m src.improve --list       # показать принятые overrides
   python -m src.improve --revert execution
 """
+
+from src.config.config_paths import load_base_config
 import argparse
 
 from omegaconf import OmegaConf
@@ -15,7 +17,7 @@ from . import SelfLearningPipe, list_overrides, revert
 
 
 def main() -> None:
-    cfg = OmegaConf.load("config.yml")
+    cfg = load_base_config()
     ap = argparse.ArgumentParser(description="Self-learning prompt optimization")
     ap.add_argument("--role", default="step_execution")
     ap.add_argument("--min-failures", type=int, default=3)

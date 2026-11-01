@@ -22,11 +22,8 @@ def setup_logging():
     )
 
 def load_config():
-    config_path = Path("config.yml")
-    if not config_path.exists():
-        raise FileNotFoundError("config.yml not found")
-    
-    conf = OmegaConf.load(config_path)
+    from .config_paths import load_base_config
+    conf = load_base_config()
     # Merge with env variables if needed
     return conf
 

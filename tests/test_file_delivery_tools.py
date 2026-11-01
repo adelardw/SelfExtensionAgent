@@ -42,6 +42,7 @@ def test_write_file_blocks_path_traversal(in_tmp):
         assert "/" not in m["name"] and ".." not in m["name"]  # имя санитизировано
 
 
+@pytest.mark.live
 def test_wants_file_output_detector():
     """Embedding-сигнал «нужен файл-вывод» (исключает file-запросы из форса web_grounding→act)."""
     from src.graph.semantic_signals import wants_file_output as w

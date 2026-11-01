@@ -14,7 +14,7 @@ def client_and_artifacts():
     from src.runtime import artifacts, run_context
     old = os.getcwd()
     os.chdir(tempfile.mkdtemp())
-    yield TestClient(app), artifacts, run_context
+    yield TestClient(app, base_url='http://localhost', client=('127.0.0.1', 50000)), artifacts, run_context
     os.chdir(old)
 
 

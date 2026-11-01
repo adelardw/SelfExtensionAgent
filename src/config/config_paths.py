@@ -29,6 +29,12 @@ def base_config_path() -> Path:
     return cwd if cwd.exists() else _PKG_DEFAULT
 
 
+def load_base_config():
+    """Load project defaults or the bundled defaults, independently of cwd."""
+    from omegaconf import OmegaConf
+    return OmegaConf.load(str(base_config_path()))
+
+
 def user_config_dir() -> Path:
     """Каталог глобального пользовательского конфига: SEA_CONFIG_DIR → XDG_CONFIG_HOME/sea → ~/.config/sea."""
     env = os.getenv("SEA_CONFIG_DIR")

@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback, useEffectEvent } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { marked } from "marked"
 import DOMPurify from "dompurify"
 import renderMathInElement from "katex/contrib/auto-render"
 import { Plus, ArrowUp, Star, X, PanelLeft, Settings, Paperclip, Mic, Square, ChevronDown, Check } from "lucide-react"
+import { SupervisorPanel } from "./SupervisorPanel"
+import { CodingControls } from "./CodingControls"
+import { initialCodingOptions } from "./coding-options"
 
 marked.setOptions({ gfm: true, breaks: true })
 
@@ -13,6 +16,18 @@ type Msg = { role: "user" | "assistant"; content: string; artifacts?: Artifact[]
 type Cfg = { provider?: string; base_url?: string; api_key_source?: string; active?: string;
   model?: string; code_model?: string; deep_model?: string; work_mode?: string; force_mode?: string;
   searxng_url?: string; model_modalities?: string[]; bridge_connected?: boolean; bridge_token?: string; bridge_port?: number }
+
+type RunSnapshot = {
+  steps?: string[]; tokens?: number; cost?: number; tools_used?: { name: string; sec: number | null }[]; rationale?: string;
+  findings_used?: boolean; timings?: Record<string, number>; research_log?: string[];
+  attach?: { n: string; ok: boolean }[]; mode?: string; status?: string; progress?: string;
+  pending?: { type: string; questions?: { question: string; options: string[]; why?: string }[]; text?: string };
+  answer?: string; artifacts?: Artifact[]; title?: string; error?: string
+}
+declare global {
+  interface Window { pywebview?: { api?: { pick_files?: () => Promise<string[] | null> } } }
+}
+function errorMessage(error: unknown) { return error instanceof Error ? error.message : String(error) }
 
 // СТАБИЛЬНЫЙ user_id (single-owner). Раньше был случайный gui-XXXX в localStorage, но в pywebview
 // порт сервера случаен каждый запуск → origin меняется → localStorage сбрасывается → новый uid →
@@ -59,7 +74,22 @@ function md(s: string): string {
     let html = marked.parse(pre, { async: false }) as string
     html = html.replace(/<p>\s*@@GAL(\d+)@@\s*<\/p>/g, (_m, i) => gals[+i] || "")
                .replace(/@@GAL(\d+)@@/g, (_m, i) => gals[+i] || "")
-    return DOMPurify.sanitize(html, { ADD_ATTR: ["target", "rel", "loading"] })
+    const fragment = DOMPurify.sanitize(html, { ADD_ATTR: ["target", "rel", "loading"], RETURN_DOM_FRAGMENT: true })
+    // A model-generated image URL can silently exfiltrate text through a GET.
+    // Keep local artifacts; external images require an explicit navigation.
+    fragment.querySelectorAll("img").forEach(img => {
+      const src = img.getAttribute("src") || ""
+      if (/^\/artifact\/[a-zA-Z0-9_-]+$/.test(src) || /^data:image\/(png|jpeg|webp|gif);base64,/i.test(src)) return
+      const replacement = document.createElement("a")
+      replacement.textContent = `[Image: ${img.getAttribute("alt") || "open external source"}]`
+      if (/^https?:\/\//i.test(src)) replacement.href = src
+      replacement.target = "_blank"
+      replacement.rel = "noopener noreferrer"
+      ;(img.closest("a") || img).replaceWith(replacement)
+    })
+    const container = document.createElement("div")
+    container.append(fragment)
+    return container.innerHTML
   } catch {
     return esc(s).replace(/\n/g, "<br>")
   }
@@ -112,19 +142,22 @@ export default function App() {
   const [recording, setRecording] = useState(false)
   const [transcribing, setTranscribing] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [codingOptions, setCodingOptions] = useState(initialCodingOptions)
+  const [activeRun, setActiveRun] = useState<string | null>(null)
+  const [showSupervisor, setShowSupervisor] = useState(false)
   const [pending, setPending] = useState<{ run_id: string; questions?: { question: string; options: string[]; why?: string }[]; confirm?: string } | null>(null)
   const [progress, setProgress] = useState("")
   const [steps, setSteps] = useState<string[]>([])
   const scroller = useRef<HTMLDivElement>(null)
   const ta = useRef<HTMLTextAreaElement>(null)
   const fileInput = useRef<HTMLInputElement>(null)
-  const recRef = useRef<MediaRecorder | null>(null)
+  const recRef = useRef<MediaRecorder | "server" | null>(null)
 
   const loadThreads = useCallback(async () => {
     try { const r = await fetch(`/chats?user_id=${uid}`); setThreads(await r.json()); setOnline(true) }
     catch { setOnline(false) }
   }, [])
-  useEffect(() => { loadThreads(); const t = setInterval(loadThreads, 15000); return () => clearInterval(t) }, [loadThreads])
+  useEffect(() => { const boot = setTimeout(() => { void loadThreads() }, 0); const t = setInterval(loadThreads, 15000); return () => { clearTimeout(boot); clearInterval(t) } }, [loadThreads])
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: "smooth" }) }, [msgs])
 
   const newChat = () => { setCur(newId()); setMsgs([]); setTitle("New chat"); setMode(""); setTokens(0); setCost(0); setTools([]); setRationale(""); setFindingsUsed(false); setTimings({}); setResearchLog([]); setAttachInfo([]); setAttached([]); setVisionWarn(false); setPending(null); setSteps([]); setProgress(""); ta.current?.focus() }
@@ -145,7 +178,7 @@ export default function App() {
   const streamAnswer = (full: string) => new Promise<void>(res => {
     const total = full.length, per = Math.max(1, Math.ceil(total / Math.min(total || 1, 90)))
     let n = 0
-    const tick = () => { n = Math.min(total, n + per); setLastAssistant(full.slice(0, n)); n < total ? window.setTimeout(tick, 16) : res() }
+    const tick = () => { n = Math.min(total, n + per); setLastAssistant(full.slice(0, n)); if (n < total) window.setTimeout(tick, 16); else res() }
     tick()
   })
   const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
@@ -153,7 +186,7 @@ export default function App() {
   const poll = async (run_id: string): Promise<void> => {
     for (; ;) {
       await sleep(650)
-      let d: any
+      let d: RunSnapshot
       try { d = await (await fetch(`/run/${run_id}`)).json() } catch { continue }  // транзиент → ещё раз
       if (d.steps) setSteps(d.steps)
       if (typeof d.tokens === "number") setTokens(d.tokens)   // живой счётчик токенов
@@ -176,19 +209,30 @@ export default function App() {
     }
   }
 
-  const sendText = async (text: string) => {
-    text = text.trim(); if (!text || busy || uploading > 0) return  // не слать, пока грузятся файлы
+  const sendText = async (text: string, resume = false) => {
+    text = text.trim(); if (!text || uploading > 0) return
+    if (busy) {
+      if (codingOptions.task_mode !== 'coding' || !activeRun) return
+      try {
+        const response = await fetch(`/run/${activeRun}/steer`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text,interrupt:true}) })
+        if (!response.ok) throw new Error(await response.text())
+        setInput('')
+        setMsgs(m => [...m.slice(0,-1), {role:'user',content:text}, {role:'assistant',content:'…'}])
+      } catch (e) { setAttachErr('Уточнение не отправлено: ' + errorMessage(e)) }
+      return
+    }  // не слать, пока грузятся файлы
     setBusy(true); setInput(""); setSteps([]); setProgress(""); setTokens(0); setCost(0); setTools([]); setRationale(""); setFindingsUsed(false); setTimings({}); setResearchLog([]); setAttachInfo([]); if (ta.current) ta.current.style.height = "auto"
     setMsgs(m => [...m, { role: "user", content: text }, { role: "assistant", content: "…" }])
     setAttached([]); setVisionWarn(false)
     try {
-      const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, thread_id: cur, query: text }) })
+      const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: uid, thread_id: cur, query: text, ...codingOptions, resume }) })
       if (!r.ok) throw new Error("HTTP " + r.status)
       const { run_id } = await r.json()
+      setActiveRun(run_id)
       await poll(run_id)
-    } catch (e: any) {
-      const net = /load failed|failed to fetch|networkerror/i.test(String(e?.message || e))
-      setLastAssistant("⚠ " + (net ? "connection lost — your text is saved, press ↑ to retry" : String(e?.message || e)))
+    } catch (e: unknown) {
+      const net = /load failed|failed to fetch|networkerror/i.test(errorMessage(e))
+      setLastAssistant("⚠ " + (net ? "connection lost — your text is saved, press ↑ to retry" : errorMessage(e)))
       setInput(text); setBusy(false)
     }
     ta.current?.focus()
@@ -208,14 +252,15 @@ export default function App() {
   }
   // Esc выходит из ожидающего уточнения/подтверждения: clarify → пустые ответы (агент действует
   // по своему усмотрению), confirm → «нет». Прогон разблокируется (иначе висит в waiting).
+  const onPendingEscape = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key !== "Escape" || !pending) return
+    e.preventDefault()
+    if (pending.questions) void submitClarify(pending.questions.map(() => ""))
+    else if (pending.confirm) void submitConfirm("нет")
+  })
   useEffect(() => {
     if (!pending) return
-    const h = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return
-      e.preventDefault()
-      if (pending.questions) submitClarify(pending.questions.map(() => ""))
-      else if (pending.confirm) submitConfirm("нет")
-    }
+    const h = (e: KeyboardEvent) => onPendingEscape(e)
     document.addEventListener("keydown", h)
     return () => document.removeEventListener("keydown", h)
   }, [pending])
@@ -258,7 +303,7 @@ export default function App() {
     try { await fetch("/detach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ thread_id: cur, name }) }) } catch { /* */ }
   }
   const pickFiles = async () => {
-    const pw = (window as any).pywebview
+    const pw = window.pywebview
     if (pw?.api?.pick_files) {
       try { await attachLocal(await pw.api.pick_files() || []) } catch { /* ignore */ }
     } else {
@@ -267,10 +312,10 @@ export default function App() {
   }
   const startRec = async () => {
     // Десктоп (pywebview): WKWebView не умеет getUserMedia → пишем на СЕРВЕРЕ (ffmpeg).
-    if ((window as any).pywebview) {
+    if (window.pywebview) {
       try {
         const r = await (await fetch(`/voice/start?thread_id=${cur}`, { method: "POST" })).json()
-        if (r.ok) { recRef.current = "server" as any; setRecording(true) }
+        if (r.ok) { recRef.current = "server"; setRecording(true) }
         else alert(r.error || "No microphone access")
       } catch { alert("No microphone access") }
       return
@@ -290,7 +335,7 @@ export default function App() {
     } catch { alert("No microphone access") }
   }
   const stopRec = async () => {
-    if (recRef.current === ("server" as any)) {   // десктоп: стоп серверной записи + расшифровка
+    if (recRef.current === ("server")) {   // десктоп: стоп серверной записи + расшифровка
       recRef.current = null; setRecording(false); setTranscribing(true)
       try {
         const d = await (await fetch(`/voice/stop?thread_id=${cur}`, { method: "POST" })).json()
@@ -363,6 +408,12 @@ export default function App() {
             title="Toggle sidebar"><PanelLeft size={17} /></button>
           <span className="text-[14px] font-semibold truncate" style={{ color: "var(--ink)" }}>{title}</span>
           <div className="ml-auto flex items-center gap-2 shrink-0">
+            {activeRun && codingOptions.task_mode === 'coding' && <button onClick={() => setShowSupervisor(true)} className="text-[12px] px-2 py-1 rounded" style={{color:'var(--accent)'}}>Оператор</button>}
+            <CodingControls value={codingOptions} onChange={setCodingOptions} busy={busy}
+              onResume={() => { void sendText("Продолжи сохранённую задачу", true) }} />
+            {busy && <button title="Остановить и сохранить контрольную точку" onClick={() => {
+              if (activeRun) void fetch(`/run/${activeRun}/cancel`, { method: "POST" })
+            }}><Square size={16} /></button>}
             {tokens > 0 && (
               <span className="text-[11px] font-mono" style={{ color: "var(--faint)" }} title={cost > 0 ? `~$${cost.toFixed(4)}` : "tokens this run"}>
                 🧮 {tokens.toLocaleString("en-US")} tok{cost > 0 ? ` · $${cost.toFixed(4)}` : ""}
@@ -510,10 +561,10 @@ export default function App() {
             )}
             <div className="flex items-end gap-2 rounded-xl px-3 py-2.5" style={{ background: "var(--surface2)", boxShadow: "var(--sh3)" }}>
               <input ref={fileInput} type="file" multiple className="hidden" onChange={e => { onFiles(e.target.files); e.target.value = "" }} />
-              <button onClick={pickFiles} className={iconBtn} style={{ color: "var(--muted)" }}
+              <button disabled={codingOptions.task_mode === "coding"} onClick={pickFiles} className={iconBtn} style={{ color: "var(--muted)" }}
                 onMouseEnter={e => (e.currentTarget.style.background = "var(--surface)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                 title="Attach file"><Paperclip size={18} /></button>
-              <textarea ref={ta} rows={1} value={input} placeholder={transcribing ? "Transcribing…" : "Message agent…"}
+              <textarea ref={ta} rows={1} value={input} placeholder={transcribing ? "Transcribing…" : busy && codingOptions.task_mode === "coding" ? "Уточнить задачу, пока агент работает…" : "Message agent…"}
                 onChange={e => { setInput(e.target.value); grow(e.target) }} onKeyDown={onKey}
                 className="flex-1 resize-none bg-transparent outline-none text-[14.5px] leading-relaxed py-1.5 max-h-[200px]" style={{ color: "var(--ink)" }} />
               <button onClick={recording ? stopRec : startRec} className={iconBtn}
@@ -521,7 +572,7 @@ export default function App() {
                 onMouseEnter={e => { if (!recording) e.currentTarget.style.background = "var(--surface)" }}
                 onMouseLeave={e => { if (!recording) e.currentTarget.style.background = "transparent" }}
                 title={recording ? "Stop recording" : "Record voice"}>{recording ? <Square size={15} fill="#fff" /> : <Mic size={18} />}</button>
-              <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={busy || uploading > 0 || !input.trim()}
+              <motion.button whileTap={{ scale: 0.9 }} onClick={send} disabled={(busy && codingOptions.task_mode !== "coding") || uploading > 0 || !input.trim()}
                 title={uploading > 0 ? "wait — files are loading" : undefined}
                 className="grid place-items-center w-9 h-9 rounded-lg shrink-0 transition-all disabled:opacity-35"
                 style={{ background: "var(--accent)", color: "var(--accent-fg)", boxShadow: input.trim() ? "var(--sh1)" : "none" }}><ArrowUp size={17} strokeWidth={2.5} /></motion.button>
@@ -530,6 +581,7 @@ export default function App() {
         </div>
       </main>
 
+      {showSupervisor && activeRun && <SupervisorPanel runId={activeRun} onClose={() => setShowSupervisor(false)} />}
       <AnimatePresence>{showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}</AnimatePresence>
       <AnimatePresence>{showTrace && <TraceModal onClose={() => setShowTrace(false)}
         mode={mode} rationale={rationale} findingsUsed={findingsUsed} tokens={tokens} cost={cost}
@@ -619,6 +671,10 @@ function TraceModal({ onClose, mode, rationale, findingsUsed, tokens, cost, step
   )
 }
 
+function Lbl({ children }: { children: React.ReactNode }) {
+  return <label className="block text-[11.5px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>{children}</label>
+}
+
 function SettingsModal({ onClose }: { onClose: () => void }) {
   const [cfg, setCfg] = useState<Cfg>({})
   const [provider, setProvider] = useState("openrouter")
@@ -645,15 +701,14 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const save = async () => {
     setSaving(true); setMsg("")
     try {
-      const body: any = { provider, base_url: baseUrl, model, code_model: codeModel, deep_model: deepModel, work_mode: workMode, force_mode: forceMode, searxng_url: searxng }
+      const body: Cfg & { api_key?: string } = { provider, base_url: baseUrl, model, code_model: codeModel, deep_model: deepModel, work_mode: workMode, force_mode: forceMode, searxng_url: searxng }
       if (apiKey) body.api_key = apiKey
       const d = await (await fetch("/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json()
       setMsg(d.message || ""); setCfg(c => ({ ...c, active: d.active, api_key_source: d.api_key_source })); setApiKey("")
-    } catch (e: any) { setMsg("error: " + e.message) } finally { setSaving(false) }
+    } catch (e: unknown) { setMsg("error: " + errorMessage(e)) } finally { setSaving(false) }
   }
   const field = "w-full px-3 py-2.5 rounded-lg text-[13.5px] outline-none font-mono"
   const fst = { background: "var(--surface)", color: "var(--ink)" } as React.CSSProperties
-  const Lbl = ({ children }: { children: any }) => <label className="block text-[11.5px] font-semibold mb-1.5" style={{ color: "var(--muted)" }}>{children}</label>
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose}
       className="fixed inset-0 z-50 grid place-items-center p-5" style={{ background: "rgba(9,30,66,.54)" }}>
@@ -787,7 +842,7 @@ function ClarifyCard({ questions, onSubmit }: { questions: { question: string; o
   const [sel, setSel] = useState<Record<number, string[]>>({})
   const [txt, setTxt] = useState<Record<number, string>>({})
   const toggle = (qi: number, opt: string) => setSel(s => {
-    const cur = new Set(s[qi] || []); cur.has(opt) ? cur.delete(opt) : cur.add(opt); return { ...s, [qi]: [...cur] }
+    const cur = new Set(s[qi] || []); if (cur.has(opt)) cur.delete(opt); else cur.add(opt); return { ...s, [qi]: [...cur] }
   })
   const submit = () => onSubmit(questions.map((_q, i) => [...(sel[i] || []), (txt[i] || "").trim()].filter(Boolean).join(", ")))
   const ok = questions.every((_q, i) => (sel[i]?.length || (txt[i] || "").trim()))

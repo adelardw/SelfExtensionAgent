@@ -1,0 +1,5 @@
+# Separate environment: uv venv .venv-rl && uv pip install --python .venv-rl/bin/python -r src/agent_train/requirements.txt
+# These exact versions were exercised on an Apple M4 Pro (24 GiB).
+inductive-mlxrl==0.3.0; sys_platform == 'darwin' and platform_machine == 'arm64'
+mlx==0.32.4; sys_platform == 'darwin' and platform_machine == 'arm64'
+mlx-lm==0.32.2; sys_platform == 'darwin' and platform_machine == 'arm64'

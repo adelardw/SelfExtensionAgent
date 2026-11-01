@@ -10,6 +10,8 @@ on-device варианта здесь же легко добавить OllamaEmb
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import math
 import os
 from typing import Optional, Protocol, runtime_checkable
@@ -51,7 +53,7 @@ class OpenAIEmbedder:
         try:
             from omegaconf import OmegaConf
 
-            _c = OmegaConf.load("config.yml")
+            _c = load_base_config()
             if _c.get("provider") == "ollama":
                 oll = _c.get("ollama", {})
                 from src.llm.llm import ollama_base_url  # единое разрешение (env→настройки→config)
@@ -106,6 +108,9 @@ class OpenAIEmbedder:
             return resp.data[0].embedding
         except Exception as e:  # noqa: BLE001
             print(f"[Embedder] embed failed: {e}")
+            if getattr(e, "status_code", None) in (401, 403):
+                # Bad credentials must not trigger an API call at every trust boundary.
+                self.enabled = False
             return None
 
     async def aembed(self, text: str) -> Optional[list[float]]:

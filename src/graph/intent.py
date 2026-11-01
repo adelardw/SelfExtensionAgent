@@ -23,6 +23,8 @@ Hot-path: классификация переиспользует УЖЕ пос�
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import json
 import os
 import sqlite3
@@ -44,7 +46,7 @@ CODEBOOK_FILE = Path(os.getenv("AGENT_INTENT_CODEBOOK") or "data/intent_codebook
 def _cfg_intent() -> dict:
     try:
         from omegaconf import OmegaConf
-        c = OmegaConf.load("config.yml").get("intent", {}) or {}
+        c = load_base_config().get("intent", {}) or {}
         return {"min_sim": float(c.get("min_sim", 0.30)),
                 "per_label": dict(c.get("min_sim_per_label", {}) or {}),
                 "backend": str(c.get("backend", "knn") or "knn"),
@@ -234,7 +236,7 @@ class IntentRouter:
     def _emb(self):
         if self._embedder is None:
             from omegaconf import OmegaConf
-            c = OmegaConf.load("config.yml") if Path("config.yml").exists() else {}
+            c = load_base_config()
             self._embedder = build_embedder(
                 (c.get("memory", {}) or {}).get("embeddings", False) if c else False,
                 (c.get("memory", {}) or {}).get("embedding_model") if c else None,

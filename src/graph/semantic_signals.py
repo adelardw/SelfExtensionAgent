@@ -22,6 +22,8 @@
 """
 from __future__ import annotations
 
+from src.config.config_paths import load_base_config
+
 import re
 from typing import Optional
 
@@ -37,7 +39,7 @@ def _cfg_signals() -> dict:
          "docx_threshold": 0.48, "docx_margin": 0.04}
     try:
         from omegaconf import OmegaConf
-        c = OmegaConf.load("config.yml").get("semantic_signals", {}) or {}
+        c = load_base_config().get("semantic_signals", {}) or {}
         for k in d:
             d[k] = float(c.get(k, d[k]))
     except Exception:  # noqa: BLE001
@@ -81,7 +83,7 @@ class _ContrastiveSignal:
             from pathlib import Path
             from omegaconf import OmegaConf
             from src.memory.embedder import build_embedder
-            c = OmegaConf.load("config.yml") if Path("config.yml").exists() else {}
+            c = load_base_config()
             self._embedder = build_embedder(
                 (c.get("memory", {}) or {}).get("embeddings", False) if c else False,
                 (c.get("memory", {}) or {}).get("embedding_model") if c else None,
@@ -103,12 +105,27 @@ class _ContrastiveSignal:
         self._neg_v = [v for v in (emb.embed(t) for t in self._neg_seeds) if v]
 
     def fires(self, text: str, threshold: float, margin: float) -> bool:
+        return self.assess(text, threshold, margin) is True
+
+    def assess(self, text: str, threshold: float, margin: float) -> Optional[bool]:
+        """None means unavailable, distinct from an evaluated negative verdict."""
         if not (text or "").strip() or not self.enabled:
-            return False
+            return None
         try:
             qv = self._emb().embed((text or "")[:1500])
         except Exception:  # noqa: BLE001
-            return False
+            return None
+        if not qv:
+            return None
+        try:
+            self._ensure_seeds()
+        except Exception:
+            self._pos_v = self._neg_v = None
+            return None
+        if len(self._pos_v or []) != len(self._pos_seeds) or len(self._neg_v or []) != len(self._neg_seeds):
+            # A transient outage must not permanently poison the seed cache.
+            self._pos_v = self._neg_v = None
+            return None
         return self.fires_vec(qv, threshold, margin)
 
     def fires_vec(self, qv, threshold: float, margin: float) -> bool:

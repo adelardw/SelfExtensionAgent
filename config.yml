@@ -1,4 +1,77 @@
 provider: openrouter  # | ollama
+coding:
+  trajectory_logging: true   # local request/action/outcome journal; no uploads or automatic training
+  trajectory_max_bytes: 33554432 # per invocation, incomplete/redacted logs excluded from datasets
+  backend: openrouter        # explicit cool/cheap profile; local backends remain available
+  base_url: https://openrouter.ai/api/v1
+  model: google/gemini-3.1-flash-lite
+  action_protocol: json     # tools is experimental native function transport, cloud only
+  native_history: false     # experimental actual assistant/tool continuity, tools protocol only
+  planning: required        # adaptive makes separate plan actions optional in auto execution
+  structured_output: auto  # advertised JSON Schema / JSON mode / text; local validation always required
+  # temperature: 1.0        # optional, model-specific; omitted preserves provider defaults
+  # top_p: 0.95             # e.g. North Mini Code model-card recommendation with temperature=1.0
+  result_memory: false     # experimental bounded tool-result memory; quality gain not yet established
+  # provider_only: [provider/endpoint]  # exact endpoint pin; disables provider fallbacks
+  max_cost_usd: 0.10          # worker spend envelope per run; routing separately bounded below
+  max_input_usd_per_million: 0.30
+  max_output_usd_per_million: 2.0
+  max_parameters_b: 10
+  context_tokens: 16384       # bounded KV cache for a desktop GPU/unified memory
+  cloud_context_tokens: 32768 # cloud thinking has room for output; local context stays 16K
+  context_chars: 18000
+  max_turns: 48               # pause at checkpoint, resume instead of discarding progress
+  max_total_tokens: 120000    # shared request reservations across actors, critic, routing and retrieval
+  max_delegates: 2            # top-level delegation groups; descendants share global limits
+  worker_turns: 6
+  timeout_seconds: 180
+  provider_retries: 4         # shared across roles; only rejected 429/503 with Retry-After
+  provider_retry_wait_seconds: 15 # total wait allowance, cancellable; spend cap unchanged
+  allow_web: true             # generic official documentation queries; no private code in searches
+  learn: true                 # promote examples only after verified successful execution
+  supervisor_review: false   # free event observer always on; model review is opt-in, max 2 per run
+  navigation:
+    backend: decisions      # bounded typed scoring; lexical fallback on errors/budget exhaustion
+    model: typesafe/jev-1.13 # alternative: liquid/d1-ultra; same Decisions API, no local inference
+    max_calls: 2
+    max_cost_usd: 0.002
+  orchestration:
+    enabled: true
+    auto_domains: true
+    same_model: false         # true: selected backbone also performs decisions and critique
+    isolated_writes: true
+    observer: true
+    local_slots: 1           # logical branches share one local GPU generation slot
+    max_nodes: 12            # new child nodes per run; shared, not multiplied recursively
+    max_depth: 3
+    root_delegation_min_observations: 1 # inspect/compute once before splitting; 0 disables this heuristic
+    max_branches: 3
+    mind_turns: 16
+    reasoning: low
+    decision:
+      backend: decisions    # typed mode selection; overridden by same_model
+      model: typesafe/jev-1.13
+      max_calls: 4          # delegation/anomalies only; no paid observer polling
+      max_cost_usd: 0.001
+      min_probability: 0.5
+      min_margin: 0.1
+      planner:              # invoked only when a new profile or subtask decomposition is needed
+        model: google/gemini-3.1-flash-lite
+        max_calls: 2
+        max_cost_usd: 0.004
+    critic:
+      enabled: true
+      backend: openrouter
+      model: google/gemini-3.1-flash-lite
+      max_calls: 8
+      max_cost_usd: 0.02
+      active: true          # one compact probe plan + at most two isolated experiments per review
+      answer_verification: true # bind numeric/structured JSON answers to executed blind checks
+      reference_repair: false   # experimental: checked scalar repairs only in proven agent-added tests
+      reference_output_tokens: 1024
+      max_probes: 2
+  # checks:                   # optional project-specific argv lists; otherwise discover manifests
+  #   unit: [python3, -m, pytest, -q, tests/unit]
 # Endpoint провайдера. Пусто → https://openrouter.ai/api/v1. Годится любой OpenAI-совместимый
 # шлюз/прокси/self-host. Приоритет: env OPENROUTER_BASE_URL (или OPENAI_BASE_URL) → `sea provider
 # openrouter <base_url>` → это поле → дефолт.

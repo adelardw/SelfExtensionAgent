@@ -12,6 +12,7 @@ needs_key = pytest.mark.skipif(
 )
 
 
+@pytest.mark.live
 @needs_key
 def test_time_sensitive_fires_only_on_temporal():
     from src.graph.semantic_signals import is_time_sensitive as t
@@ -25,6 +26,7 @@ def test_time_sensitive_fires_only_on_temporal():
     assert not t("что посмотреть в Осаке и Киото")
 
 
+@pytest.mark.live
 @needs_key
 def test_time_sensitive_accepts_precomputed_vector():
     """fires_vec: переиспользуем готовый эмбеддинг запроса (без второго embed в recall)."""

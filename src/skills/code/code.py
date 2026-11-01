@@ -40,7 +40,8 @@ def _project_root() -> Path:
     return Path(os.getenv("AGENT_PROJECT_ROOT") or Path.cwd()).resolve()
 
 
-_SECRET_NAMES = {".env", ".netrc", ".pgpass", ".htpasswd", "credentials"}
+_SECRET_NAMES = {".env", ".netrc", ".pgpass", ".htpasswd", "credentials", "config.local.yml", "browser_bridge.token",
+                 "memory.db", "checkpoints.db", "memory.db-wal", "checkpoints.db-wal"}
 _SECRET_SUBSTR = ("id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", ".pem", ".key", ".keystore",
                   ".pfx", ".p12", ".env.", "secret", ".npmrc", ".pypirc", "credential", ".aws")
 # Исключения секрет-файлов для ripgrep (быстрый путь grep_repo).
@@ -108,13 +109,22 @@ def grep_repo(pattern: str, path: str = ".", file_glob: str = "") -> str:
     if err:
         return err
     # Быстрый путь: ripgrep, если установлен. Секрет-файлы исключаем глобами (-g '!...').
+    if _ignored(base) or _is_secret_file(base):
+        return "доступ к служебным и секретным файлам запрещён"
     try:
         cmd = ["rg", "-n", "--no-heading", "-S", "--max-columns", "200"]
-        for g in _RG_SECRET_EXCLUDES:
-            cmd += ["-g", g]
         if file_glob:
             cmd += ["-g", file_glob]
-        cmd += [pattern, str(base)]
+        # Denials come LAST: a caller's include glob must not re-enable secrets.
+        for g in _RG_SECRET_EXCLUDES:
+            cmd += ["--iglob", g]
+        for name in sorted(_SECRET_NAMES):
+            cmd += ["--iglob", "!"+name]
+        for part in _SECRET_SUBSTR:
+            cmd += ["--iglob", "!*"+part+"*"]
+        for directory in sorted(_IGNORE):
+            cmd += ["-g", "!"+directory+"/**"]
+        cmd += ["--", pattern, str(base)]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         if r.returncode in (0, 1):  # 1 = нет совпадений (не ошибка)
             return (r.stdout[:_MAXOUT].strip() or "(совпадений нет)") + (
@@ -212,6 +222,11 @@ def edit_file(file_path: str, old_string: str, new_string: str) -> str:
         return err
     if _is_secret_file(p):
         return "правка секрет-файлов запрещена (.env/ключи/credentials защищены)"
+    from src.security.integrity import protect_agent_write, require_integrity
+    try:
+        require_integrity(); protect_agent_write(p)
+    except ValueError as exc:
+        return str(exc)
     if not p.is_file():
         return f"файл не найден: {file_path}"
     try:
