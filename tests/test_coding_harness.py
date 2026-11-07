@@ -82,11 +82,12 @@ def test_plan_mode_cannot_write_or_execute(tmp_path):
     assert not result["tools_used"]
 
 
-def test_worker_readonly_enforced_and_no_recursive_delegation(tmp_path):
+@pytest.mark.parametrize('context_policy',['bounded','single_action'])
+def test_worker_readonly_enforced_and_no_recursive_delegation(tmp_path,context_policy):
     model = Scripted(plan(), {"action": "delegate", "role": "review", "task": "Review one module"},
                      tool("write", path="unsafe", content="bad"),
                      {"action": "delegate", "task": "recursive"}, finish("reviewed"), finish())
-    result = asyncio.run(harness(tmp_path, model).run("inspect"))
+    result = asyncio.run(harness(tmp_path, model,context_policy=context_policy).run("inspect"))
     assert result["delegates"] == 1 and not (tmp_path / "unsafe").exists()
     assert any("read-only worker" in str(m) for m, _ in model.requests)
     assert any("use a read-only" in str(m) for m, _ in model.requests)
@@ -99,12 +100,13 @@ def test_delegate_count_is_bounded(tmp_path):
     assert result["delegates"] == 1 and len(model.requests) == 5
 
 
-def test_resume_never_trusts_old_verification(tmp_path):
+@pytest.mark.parametrize('context_policy',['bounded','single_action'])
+def test_resume_never_trusts_old_verification(tmp_path,context_policy):
     one = Scripted(plan(), tool("write", path="a.txt", content="ok"))
-    first = asyncio.run(harness(tmp_path, one, max_turns=2, checks={"unit": [sys.executable, "-c", "pass"]}).run("create", session_id="s"))
+    first = asyncio.run(harness(tmp_path, one, context_policy=context_policy,max_turns=2, checks={"unit": [sys.executable, "-c", "pass"]}).run("create", session_id="s"))
     assert first["status"] == "paused"
     two = Scripted(finish("false completion"), tool("check", name="unit"), finish())
-    result = asyncio.run(harness(tmp_path, two, checks={"unit": [sys.executable, "-c", "pass"]}).run("", session_id="s", resume=True))
+    result = asyncio.run(harness(tmp_path, two, context_policy=context_policy,checks={"unit": [sys.executable, "-c", "pass"]}).run("", session_id="s", resume=True))
     assert result["status"] == "done" and result["changed"] == ["a.txt"]
     assert len(two.requests) == 3
     assert "create" in str(two.requests[0])

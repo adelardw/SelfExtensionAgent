@@ -143,6 +143,26 @@ def test_repair_advice_survives_resume_but_not_task_change(tmp_path):
     assert not restored.data.get('next_steps')
 
 
+def test_concrete_repair_precedes_generic_completion_gap_and_final_check(tmp_path):
+    ws=workspace(tmp_path)
+    contract=TaskContract(requirements=[
+        {'id':'r1','text':'Complete the product','validation':'model_evidence'},
+        {'id':'r2','text':'Measure actual playback','validation':'model_evidence'},
+        {'id':'r3','text':'Run tests after changes','validation':'registered_checks'}])
+    graph=ws.obligations();graph.sync(contract,[])
+    graph.review(Assessment(aligned=True,ready=False,criteria=[
+        {'requirement':r.id,'status':'uncertain','evidence':[]} for r in contract.requirements],
+        issues=['Paused media is counted as viewing'],next_mode='repair',next_steps=[{
+            'requirement':'r2','problem':'Paused media is counted as viewing',
+            'action':'Accumulate actual playback only','mode':'repair',
+            'verification':'Paused playback increments no viewing time'}]),[])
+    for missing in ([],[contract.requirements[2]]):
+        queue=agenda(contract,graph,missing,mode='repair',revision=0,steering_version=0)
+        assert queue['focus']['requirement']=='r2'
+        assert queue['suggested_mode']=='repair'
+        assert {r['requirement'] for r in queue['items']}=={'r1','r2','r3'}
+
+
 def test_pending_question_is_not_assumed_and_survives_restart(tmp_path):
     ws=workspace(tmp_path);control=SessionControl();control.bind(ws.directory/'steering.jsonl')
     attention=Attention(ws,control)

@@ -22,7 +22,8 @@ finally:
     faulthandler.cancel_dump_traceback_later()
 '''
 
-READONLY = {'ask_user', 'inspect_artifact', 'security_audit', 'tree', 'read', 'search', 'evidence', 'diff', 'grep', 'status', 'context', 'web', 'fetch', 'patch', 'think', 'reject', 'math', 'experiment', 'claim'}
+# share writes evidence-linked session metadata, never project source or authority.
+READONLY = {'ask_user', 'inspect_artifact', 'security_audit', 'tree', 'read', 'search', 'evidence', 'diff', 'grep', 'status', 'context', 'web', 'fetch', 'patch', 'think', 'reject', 'math', 'experiment', 'claim', 'share'}
 TOOLS = ['ask_user', 'inspect_artifact', 'security_audit', 'tree', 'read', 'search', 'write', 'edit', 'run', 'check', 'evidence',
          'diff', 'grep', 'status', 'context', 'web', 'fetch', 'share', 'learn', 'project_note',
          'patch', 'accept', 'reject', 'think', 'register_check', 'resume_agent','math','experiment','claim']
@@ -230,7 +231,7 @@ async def execute_extra(ws, name, args):
         return {'ok':True,'output':json.dumps(note,ensure_ascii=False)}
     if name == 'share':
         item = ws.board.publish(str(args['text']), args.get('evidence', []), args.get('files', []),
-                                str(args.get('trigger', '')))
+                                str(args.get('trigger', '')), workspace=ws)
         return {'ok': True, 'output': json.dumps(item, ensure_ascii=False)}
     if name == 'learn':
         evidence = args.get('evidence', [])

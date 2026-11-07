@@ -7,6 +7,7 @@ coding:
   model: google/gemini-3.1-flash-lite
   action_protocol: json     # tools is experimental native function transport, cloud only
   native_history: false     # experimental actual assistant/tool continuity, tools protocol only
+  context_policy: bounded  # single_action: latest observation + brief + retrievable archive; disables native replay
   planning: required        # adaptive makes separate plan actions optional in auto execution
   structured_output: auto  # advertised JSON Schema / JSON mode / text; local validation always required
   # temperature: 1.0        # optional, model-specific; omitted preserves provider defaults
@@ -42,6 +43,7 @@ coding:
     isolated_writes: true
     observer: true
     local_slots: 1           # logical branches share one local GPU generation slot
+    cloud_slots: 2           # simultaneous cloud worker generations; same shared spend/token/node limits
     max_nodes: 12            # new child nodes per run; shared, not multiplied recursively
     max_depth: 3
     root_delegation_min_observations: 1 # inspect/compute once before splitting; 0 disables this heuristic

@@ -28,7 +28,8 @@ class Model:
         return schema.model_validate(value)
 
 
-def test_steering_cancels_generation_and_stale_tool_never_executes(tmp_path):
+@pytest.mark.parametrize('context_policy',['bounded','single_action'])
+def test_steering_cancels_generation_and_stale_tool_never_executes(tmp_path,context_policy):
     async def scenario():
         started = asyncio.Event()
         class Slow(Model):
@@ -44,7 +45,7 @@ def test_steering_cancels_generation_and_stale_tool_never_executes(tmp_path):
                 assert 'Do not modify files' in str(messages)
                 return Turn(action='finish', summary='Inspection only')
         model, control = Slow(), SessionControl()
-        task = asyncio.create_task(CodingHarness(tmp_path, model=model, config={}).run('write', control=control))
+        task = asyncio.create_task(CodingHarness(tmp_path, model=model, config={'context_policy':context_policy}).run('write', control=control))
         await started.wait()
         control.post('Do not modify files; inspect only')
         result = await asyncio.wait_for(task, 2)
@@ -96,7 +97,11 @@ def test_experience_is_historical_verified_and_scoped_to_stack(tmp_path):
     (tmp_path/'pyproject.toml').write_text('version = "1"')
     store = ExperienceStore(tmp_path)
     assert store.promote('API validation', 'check types', [], [], []) is None
-    entry = store.promote('API validation', 'check types before conversion', [{'tool':'check'}], ['unit'], ['1'])
+    directory=tmp_path/'.sea'/'coding'/'episode';directory.mkdir(parents=True)
+    ws=Workspace(tmp_path,directory,{})
+    eid=ws.record({'ok':True,'output':'checks passed'})
+    ws.passed.add('unit');ws.verified_revision=ws.revision
+    entry = store.promote('API validation', 'check types before conversion', [{'tool':'check'}], ['unit'], [eid],workspace=ws)
     assert store.retrieve('API')[0]['id'] == entry['id']
     (tmp_path/'pyproject.toml').write_text('version = "2"')
     assert ExperienceStore(tmp_path).retrieve('API') == []

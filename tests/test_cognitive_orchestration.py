@@ -54,6 +54,34 @@ def test_switch_preserves_working_memory_and_replaces_prompt_and_tools(tmp_path)
     assert json.loads((o.ws.directory/'minds.json').read_text())[0]['memory']['summary'] == node.memory.summary
 
 
+@pytest.mark.parametrize('restricted', [False, True])
+def test_missing_recovery_controller_retains_software_repair_authority(tmp_path, monkeypatch, restricted):
+    o=setup(tmp_path)
+    node=o.scheduler.nodes['main']
+    if restricted: node.ceiling=frozenset({'read','tree'})
+    o.scheduler.switch('main','reason',override=False)
+    node.memory.summary='API tests passed; UI is still missing.'
+    async def unavailable(*args):return {'ready':False,'availability':'unavailable'}
+    async def no_controller(*args):return None
+    monkeypatch.setattr(o,'assess',unavailable)
+    monkeypatch.setattr(o,'decide',no_controller)
+    asyncio.run(o.recover(node,2))
+    assert node.mode==('reason' if restricted else 'repair')
+    assert ('write' in node.tools) is (not restricted)
+    assert node.memory.summary=='API tests passed; UI is still missing.'
+
+
+def test_no_decision_does_not_overwrite_successful_review_mode(tmp_path, monkeypatch):
+    o=setup(tmp_path);node=o.scheduler.nodes['main']
+    async def assessed(*args):
+        o.scheduler.switch('main','research',override=False)
+        return {'ready':False,'next_mode':'research','issues':['Need primary source']}
+    async def no_controller(*args):return None
+    monkeypatch.setattr(o,'assess',assessed);monkeypatch.setattr(o,'decide',no_controller)
+    asyncio.run(o.recover(node,2))
+    assert node.mode=='research' and 'write' not in node.tools
+
+
 def test_rejected_advisory_profile_does_not_change_permissions_or_valid_assessment(tmp_path,monkeypatch):
     from src.coding.critic import Assessment
     o=setup(tmp_path)
@@ -90,7 +118,8 @@ def test_worker_can_correct_arguments_after_two_failed_calls(tmp_path):
     assert 'VALUE=2' in node.memory.reads['present.py']
 
 
-def test_worker_result_memory_survives_observation_roll_and_stays_isolated(tmp_path,monkeypatch):
+@pytest.mark.parametrize('context_policy',['bounded','single_action'])
+def test_worker_result_memory_survives_observation_roll_and_stays_isolated(tmp_path,monkeypatch,context_policy):
     execute=Workspace.execute
     async def calculation(ws,name,args,**kwargs):
         if name=='math':return {'ok':True,'output':'{"ok":true,"result":"4","resolved":true}'}
@@ -109,6 +138,7 @@ def test_worker_result_memory_survives_observation_roll_and_stays_isolated(tmp_p
         {'action':'finish','summary':'Computed 4 and inspected the inputs.'}]
     o=setup(tmp_path,RetainingModel(*turns),same_model=True,critic={'enabled':False})
     o.harness.config['result_memory']=True
+    o.harness.config['context_policy']=context_policy
     node=o.scheduler.create('main',Branch(mode='reason',task='Compute and inspect inputs',tools=['math','read']))
     result=asyncio.run(o.run_mind(node))
     assert result=='Computed 4 and inspected the inputs.'
@@ -381,7 +411,9 @@ def test_root_automatic_profiles_follow_plan_edit_check(tmp_path,monkeypatch):
     result = asyncio.run(CodingHarness(tmp_path,model=model,config=config).run('Create result'))
     assert result['status'] == 'done'
     profiles = [json.loads(r[-1]['content'])['cognitive_mode'] for r in model.requests]
-    assert profiles == ['plan','implement','verify','verify']
+    # A write may be one file of a larger change; only the explicit successful
+    # check moves into verification. The completion gate still enforces it.
+    assert profiles == ['plan','implement','implement','verify']
     assert result['decision_usage']['calls'] == 0  # Normal work never calls a router.
 
 

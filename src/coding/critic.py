@@ -364,7 +364,8 @@ Return the compact contract, with no solution or implementation plan."""},
         # Cache against content, not freshly assigned source evidence ids. A changed
         # answer, source, operator message or tool observation forces a new review.
         from .obligations import digest
-        source_names = sorted(ws.changed | set(node.memory.files))[:32]
+        declared_sources={p for r in contract.requirements for p in [r.path,*r.paths,*r.inputs] if p}
+        source_names = sorted(ws.changed | set(node.memory.files) | declared_sources)
         if 'probe' in ws.verifier_tools:
             # Native workspaces can inspect the complete source manifest, including
             # previously unread dependencies and newly added files.
@@ -373,26 +374,31 @@ Return the compact contract, with no solution or implementation plan."""},
         for name in source_names:
             try: hashes[name] = ws.file_digest(name)
             except (ValueError, OSError): hashes[name] = None
-        input_evidence = {}
-        for eid in node.memory.evidence[-12:]:
-            try:
-                item = json.loads((ws.directory / (str(eid)+'.json')).read_text())
-                if not item.get('verifier') and not item.get('critic_source'):
-                    input_evidence[str(eid)] = digest(item)
-            except (OSError, ValueError): pass
+        from .review_context import recent_observations
+        records=recent_observations(ws,node.memory.evidence)
+        input_evidence={eid:digest(item) for eid,item in records}
         key = digest([node.id, node.memory.summary, node.memory.plan, contract.model_dump(),
                       self.control.instructions(node.id), hashes, ws.revision,
                       sorted(ws.passed), ws.verified_revision, input_evidence,
+                      self.config.get('source_context_chars',24000),self.config.get('source_file_limit',32),
                       {k:v for k,v in graph.data['claims'].items() if not k.startswith('c-review-')}])
         if key in self.cache: return self.cache[key].model_copy(deep=True)
         evidence = []
-        for eid in node.memory.evidence[-4:]:
+        # Keep more distinct observations, under a fixed total capacity. Only
+        # observations actually transmitted below may be cited by this reviewer.
+        evidence_remaining=8000
+        for eid,item in reversed(records):
             try:
-                item = json.loads((ws.directory/(str(eid)+'.json')).read_text())
-                if item.get('verifier') or item.get('critic_source'):continue
-                evidence.append({'id':str(eid),'ok':item.get('ok'),'output':str(item.get('output',''))[-1200:]})
+                output=str(item.get('output',''))
+                from .review_context import excerpt
+                shown,truncated=excerpt(output,min(1600,evidence_remaining))
+                evidence.append({'id':str(eid),'ok':item.get('ok'),'output':shown,
+                                 'truncated':truncated,'scope':'historical observation; current sources/checks take precedence'})
+                evidence_remaining-=len(shown)
+                if evidence_remaining<200:break
             except (ValueError,OSError):
                 pass
+        evidence.reverse()
         data = {'task':node.task,'phase':node.mode,'trigger':reason,
                 'allowed_tools':sorted(node.ceiling),
                 'human_steering':self.control.instructions(node.id),
@@ -409,18 +415,17 @@ Return the compact contract, with no solution or implementation plan."""},
             # should demand. Including it made small critics require parent edits from reviewers.
             data['working_memory'].pop('handoff',None)
             data['scope']='Assess this subtask only. Parent implementation/integration is outside its contract.'
-        sources = {}
-        remaining = 4000
-        for name in sorted(ws.changed | set(node.memory.files))[:8]:
-            try:
-                text = await ws.source_text(name,remaining)
-                source_id=ws.record({'ok':True,'output':text,'source':name,'critic_source':True})
-                node.memory.evidence.append(source_id)
-                sources[name] = {'evidence_id':source_id,'text':text}
-                remaining -= len(text)
-                if remaining <= 0: break
-            except (OSError,ValueError): pass
-        data['current_source'] = sources
+        from .review_context import current_sources
+        names=sorted(ws.changed | set(node.memory.files) | declared_sources)
+        data['current_source'],data['source_coverage']=await current_sources(ws,names,
+            char_budget=self.config.get('source_context_chars',24000),
+            file_limit=self.config.get('source_file_limit',32))
+        node.memory.evidence.extend(s['evidence_id'] for s in data['current_source'].values())
+        # Sources and candidate_answer have their own numbered observations.
+        # Repeating their unnumbered copies costs context and invites stale citations.
+        for field in ('inspected_content','observations','summary','handoff'):
+            data['working_memory'].pop(field,None)
+        data['working_memory']['observations']=[]
         data['acceptance_contract']=contract.model_dump()
         # Do not feed the critic its own previous verdict as current evidence. This
         # avoids anchoring a new review to a stale negative/positive assessment.
@@ -486,13 +491,7 @@ Return the compact contract, with no solution or implementation plan."""},
                     return result
             current={candidate_id,*[v['evidence_id'] for v in data['current_source'].values()],
                      *[p['id'] for p in data.get('active_verification',[])]}
-            actual=set()
-            for e in node.memory.evidence:
-                e=str(e)
-                if not e.isdigit():continue
-                try:item=json.loads((ws.directory/(e+'.json')).read_text())
-                except (OSError,ValueError):continue
-                if e in current or not (item.get('verifier') or item.get('critic_source')):actual.add(e)
+            actual=current | {e['id'] for e in evidence}
             data['working_memory']['evidence_ids']=[e for e in data['working_memory']['evidence_ids'] if e in actual]
             data['valid_evidence_ids'] = sorted(actual, key=int)
             class ReviewSchema(Assessment):
@@ -535,6 +534,10 @@ Return the compact contract, with no solution or implementation plan."""},
                 {'role':'system','content':'''Review whether this agent is still solving the user's actual task.
 Use EVERY id and exact requirement in acceptance_contract; do not invent a smaller substitute checklist.
 Mark each supported, missing or uncertain using only numeric string IDs in valid_evidence_ids.
+current_source contains freshly captured source with hashes and explicit truncation flags.
+source_coverage reports missing or partial files. An omitted range is not a defect and cannot
+support an unseen claim. Use complete sources already supplied; do not ask the actor to reread
+them merely to assign another evidence ID. Historical observations do not override current source.
 candidate_answer supports claims about the delivered format/argument, not independent computational correctness.
 A passing test supports only what it tests. Do not invent additional requirements or persistent test artifacts.
 An answer oracle checks finite values/witnesses, NOT the delivered general algorithm, invariant or complexity.
@@ -571,8 +574,10 @@ issues contains only UNRESOLVED material blockers, not resolved faults, metadata
 Use [] when none remain. Keep each issue actionable and at most 500 characters.
 For unresolved criteria provide next_steps (at most 6), each with requirement (exact r-id), problem,
 action (one concrete next action), mode (inspect/reason/research/repair/implement/verify), and verification
-(the observable result needed to close this gap). Do not restate the whole plan. Prefer an availability
-probe over guessing that a library is missing. Ask a person only for a missing material decision,
+(the observable result needed to close this gap). Do not restate the whole plan.
+Use implement/repair when the next action creates or changes files, including adding tests.
+Use verify for executing existing checks or inspecting results, not for writing missing test code.
+Prefer an availability probe over guessing that a library is missing. Ask a person only for a missing material decision,
 not for ordinary implementation, failed tests, or permission already granted.
 artifact_observations are format/content metadata, not proof of all requested content. Check page/slide
 counts and actual content against the task. A passing unrelated environment test is insufficient.

@@ -89,6 +89,20 @@ An earlier ten-case cloud diagnostic completed 7/10 tasks, while the tested 9B c
 the [quality evaluation log](docs/local_coding_harness.md#проверка-качества-общего-ядра-3031-октября-2026).
 The [November 1 behavioral validation](docs/behavior_validation.md) records six real
 actor/tool/critic scenarios, failures found and fixed, retained evidence and model limitations.
+The [offline Pareto configuration search](docs/pareto_search.md) compares repeated executions,
+retains promising variants and selects a profile on separate task families under explicit budgets.
+It adds no runtime model calls; live evaluation is opt-in and quality gains are not yet measured.
+The [bounded reflective prompt search](docs/reflective_prompt_search.md) adapts ideas from GEPA,
+GEPA-Curator and ACE: curated traces, small prompt deltas, per-example selection and a frozen test.
+Its live routing pilot and exact-vs-operation metrics are documented; it does not auto-promote prompts
+or implement a persistent Router service.
+The [short-context execution mode](docs/short_context.md) keeps a continuation brief and the latest
+observation, with searchable actor-local history. It is opt-in and includes a bounded comparison plan.
+The [November 5 architecture review](docs/harness_review_20261105.md) maps both execution engines,
+memory, permissions, verification, training and evaluation limits, with a [module inventory](docs/harness_module_map.md).
+The [DSH design comparison](docs/dsh_superagent_adoption.md) explains parallel cognitive branches,
+nested workers, evidence sharing and isolation. Cloud workers have two generation slots (local: one);
+the parent still joins its worker group, and this is not an always-online multi-channel service.
 For numeric/structured JSON answers, a blind executable checker now compares the actual delivered
 values or validates a witness. Model-written checkers remain fallible; this is not a formal proof system.
 The [universal-engine research and design](docs/universal_harness_design.md) distinguishes implemented

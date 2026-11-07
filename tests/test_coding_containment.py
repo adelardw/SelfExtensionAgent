@@ -62,6 +62,32 @@ print(json.dumps([p.read_text(),network,'OPENROUTER_API_KEY' in os.environ]))
     assert json.loads(result['output'].strip()) == ['compiled output',False,False]
 
 
+def test_browser_runtime_grants_assets_only_and_keeps_write_network_and_profile_denials(tmp_path,monkeypatch):
+    from pathlib import Path
+    from src.coding.containment import browser_runtime_paths
+    ws=workspace(tmp_path);home=tmp_path/'home';cache=home/'Library/Caches/ms-playwright'
+    runtime=cache/'chromium_headless_shell-1234';runtime.mkdir(parents=True)
+    asset=runtime/'icudtl.dat';asset.write_text('runtime asset')
+    profile=home/'Library/Application Support/Chrome';profile.mkdir(parents=True)
+    private=profile/'cookies';private.write_text('private profile')
+    (cache/'chromium-9999').symlink_to(profile,target_is_directory=True)
+    monkeypatch.setattr(Path,'home',classmethod(lambda cls:home))
+    assert browser_runtime_paths()==[runtime]
+    ws.browser_runtime=True
+    code='''
+import pathlib,sys,socket,json
+asset,private=map(pathlib.Path,sys.argv[1:]); results=[asset.read_text()]
+for operation in [lambda:private.read_text(),lambda:asset.write_text('bad'),lambda:socket.socket().bind(('127.0.0.1',0))]:
+ try: operation(); results.append('allowed')
+ except OSError: results.append('denied')
+print(json.dumps(results))
+'''
+    result=asyncio.run(ws.command([sys.executable,'-c',code,str(asset),str(private)]))
+    assert result['ok'],result['output']
+    assert json.loads(result['output'])==['runtime asset','denied','denied','denied']
+    assert asset.read_text()=='runtime asset'
+
+
 def test_actor_can_find_python_with_installed_artifact_packages(tmp_path):
     ws=workspace(tmp_path)
     overview=asyncio.run(ws.overview())

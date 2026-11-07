@@ -55,22 +55,25 @@ class ContextNavigator:
         self.cache = {}
 
     def inventory(self):
+        from .context import memory_items
         entries = []
+        self.ws.board.items=memory_items(self.ws.board.path)
         for x in self.ws.board.items:
             try:
                 # A board can belong to the parent; validity must use THIS branch's
                 # source, or an isolated edit would inherit stale parent findings.
-                if all(self.ws.file_digest(p) == h for p,h in x.get('files', {}).items()):
+                if self.ws.board.valid(x,self.ws):
                     entries.append({**x, 'source': 'shared'})
             except (ValueError, OSError): pass
         project = getattr(self.ws, 'project_context', None)
         if project:
+            project.notes=memory_items(project.path)
             for x in project.notes:
                 if project.valid(x): entries.append({**x, 'source': 'project'})
         if self.experience:
-            stack = fingerprint(self.ws.root)
+            self.experience.items=memory_items(self.experience.path)
             for x in self.experience.items:
-                if x.get('verified') and x.get('stack') == stack: entries.append({**x, 'source': 'experience'})
+                if self.experience.valid(x): entries.append({**x, 'source': 'experience'})
         return entries[:130]
 
     async def select(self, query, action=None):

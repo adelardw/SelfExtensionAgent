@@ -74,6 +74,53 @@ def test_source_window_is_byte_bounded_and_marks_clipped_observations():
     assert reads['latest.py'].startswith(packet['latest.py'].split('\n[excerpt truncated')[0])
 
 
+def test_multiple_read_ranges_remain_visible_without_inventing_gaps():
+    from src.coding.progress import merge_read_fragments
+    schema='FILE app.py · lines 10–11 of 200\nTABLE videos\nPRIMARY KEY id'
+    helper='FILE app.py · lines 80–81 of 200\ndef require_admin(request):\n    return session'
+    combined=merge_read_fragments(schema,helper)
+    assert combined.startswith(helper) and schema in combined
+    assert 'previous inspected range' in combined
+    # Reading a superset replaces the covered fragment, not unrelated evidence.
+    larger='FILE app.py · lines 79–82 of 200\n# auth\ndef require_admin(request):\n    return session\n# end'
+    merged=merge_read_fragments(combined,larger)
+    assert merged.count('def require_admin')==1 and 'TABLE videos' in merged
+    assert merge_read_fragments(merged,larger)==merged
+
+
+def test_read_cache_budget_and_different_source_version_fail_closed():
+    from src.coding.progress import merge_read_fragments
+    old='FILE a.py · lines 1–2 of 200\nold schema\nold helper'
+    new='FILE a.py · lines 90–91 of 201\nnew schema\nnew helper'
+    assert 'old schema' not in merge_read_fragments(old,new)
+    other=new.replace('a.py','b.py')
+    assert 'old schema' not in merge_read_fragments(old,other)
+    large='FILE a.py · lines 3–90 of 200\n'+'source\n'*100
+    cache=merge_read_fragments(old,large,limit=300)
+    assert len(cache)<=300 and 'excerpt truncated' in cache
+
+
+def test_actor_can_use_two_parts_of_one_file_in_the_next_decision(tmp_path):
+    lines=['# filler']*120;lines[9]='TABLE_NAME = "videos"';lines[99]='def require_admin(): return True'
+    (tmp_path/'module.py').write_text('\n'.join(lines)+'\n')
+    class Model:
+        step=0
+        async def __call__(self,messages,schema,effort):
+            data=json.loads(messages[-1]['content'])
+            if self.step==3:
+                observed=data['inspected_content']['module.py']
+                assert 'TABLE_NAME = "videos"' in observed and 'def require_admin' in observed
+            turns=[{'action':'plan','plan':['Inspect both relevant parts']},
+                   {'action':'tool','tool':'read','args':{'path':'module.py','start':10,'end':10}},
+                   {'action':'tool','tool':'read','args':{'path':'module.py','start':100,'end':100}},
+                   {'action':'finish','summary':'Both declarations were inspected.'}]
+            turn=turns[self.step];self.step+=1
+            return schema.model_validate(turn)
+    result=asyncio.run(CodingHarness(tmp_path,model=Model(),config={'learn':False,'max_turns':5,'checks':{}}).run(
+        'Inspect the table name and authorization helper in module.py. Do not edit files.'))
+    assert result['status']=='done'
+
+
 def test_source_window_prioritizes_recent_reads_and_discards_stale_worker_text(tmp_path):
     from src.coding.minds import WorkingMemory
     ws=Workspace(tmp_path,tmp_path/'.sea',{})

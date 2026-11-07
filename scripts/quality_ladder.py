@@ -28,6 +28,13 @@ def source_manifest(project):
     return {str(p.relative_to(project)):hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}
 
 
+def evaluation_protocol(project):
+    paths = ['scripts/quality_ladder.py', 'src/eval/quality_cases.py',
+             'src/eval/quality_transfer_cases.py', 'src/coding/verifier.py', 'uv.lock']
+    return hashlib.sha256(json.dumps({p: hashlib.sha256((project/p).read_bytes()).hexdigest()
+                                      for p in paths}, sort_keys=True).encode()).hexdigest()
+
+
 def configuration(base,args):
     config=copy.deepcopy(base)
     config.update(backend='openrouter',model=args.model,provider_only=[args.provider],
@@ -40,6 +47,7 @@ def configuration(base,args):
         action_protocol=args.action_protocol,adaptive_tools=args.adaptive_tools,
         result_memory=args.result_memory,
         native_history=args.native_history,
+        context_policy=args.context_policy,
         source_prefetch_bytes=args.source_prefetch_bytes,
         completion_review=args.completion_review,
         planning=args.planning,
@@ -51,7 +59,7 @@ def configuration(base,args):
         # Metadata and routing both must enforce free inference; no paid fallback.
         config.update(max_cost_usd=0,max_input_usd_per_million=0,max_output_usd_per_million=0)
     config['orchestration'].update(enabled=True,auto_domains=True,same_model=True,
-        observer=False,local_slots=1,max_nodes=4,max_depth=2,mind_turns=5)
+        observer=False,local_slots=1,cloud_slots=1,max_nodes=4,max_depth=2,mind_turns=5)
     config['orchestration']['critic'].update(enabled=True,backend='local',active=True,
         max_calls=8,max_probes=2,answer_verification=args.answer_verification)
     return config
@@ -74,11 +82,15 @@ async def run(args):
     project=code.parents[1]
     manifest=source_manifest(project)
     source_id=hashlib.sha256(json.dumps(manifest,sort_keys=True).encode()).hexdigest()
-    report={'scenario':'parameterized_quality_ladder_not_public_benchmark','suite':args.suite,'seed':args.seed,
+    report={'schema_version':2,'run_id':uuid.uuid4().hex,
+        'evaluation_protocol':evaluation_protocol(project),
+        'expected_cases':[c.name for c in selected],
+        'scenario':'parameterized_quality_ladder_not_public_benchmark','suite':args.suite,'seed':args.seed,
         'model':args.model,'provider_only':args.provider,'reasoning':args.reasoning,
         'adaptive_tools':args.adaptive_tools,'answer_verification':args.answer_verification,
         'result_memory':args.result_memory,
         'native_history':args.native_history,
+        'context_policy':args.context_policy,
         'source_prefetch_bytes':args.source_prefetch_bytes,
         'completion_review':args.completion_review,
         'planning':args.planning,
@@ -173,7 +185,7 @@ async def run(args):
     return 0
 
 
-if __name__=='__main__':
+def build_parser():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--live',action='store_true')
     parser.add_argument('--model',default='google/gemini-3.1-flash-lite')
@@ -182,6 +194,8 @@ if __name__=='__main__':
     parser.add_argument('--adaptive-tools',action='store_true')
     parser.add_argument('--result-memory',action='store_true',help='Retain bounded exact tool observations beyond the rolling action window')
     parser.add_argument('--native-history',action='store_true',help='Retain bounded actual native exchanges and provider-returned reasoning per actor')
+    parser.add_argument('--context-policy',choices=['bounded','single_action'],default='bounded',
+        help='single_action retains the latest observation and a continuation brief; older state is retrieved from disk')
     parser.add_argument('--source-prefetch-bytes',type=int,choices=range(4801),default=0,
         metavar='0..4800',help='Read a bounded initial source context without model calls; 0 disables this experiment')
     parser.add_argument('--completion-review',action='store_true',
@@ -205,6 +219,11 @@ if __name__=='__main__':
     parser.add_argument('--timeout',type=int,default=150)
     parser.add_argument('--work-dir',default='data/eval/quality')
     parser.add_argument('--output',default='data/eval/quality-ladder.json')
+    return parser
+
+
+if __name__=='__main__':
+    parser=build_parser()
     args=parser.parse_args()
     if not 0<args.budget_usd<=.10:parser.error('budget must be in (0,.10] per run')
     if not 10<=args.timeout<=300:parser.error('timeout must be in [10,300] seconds')

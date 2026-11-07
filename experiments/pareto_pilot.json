@@ -1,0 +1,20 @@
+{
+  "model": "google/gemini-3.1-flash-lite",
+  "provider": "google-ai-studio",
+  "reasoning": "low",
+  "repeats": 3,
+  "budget_per_task_usd": 0.02,
+  "total_budget_usd": 1.30,
+  "timeout_seconds": 180,
+  "max_campaign_seconds": 1800,
+  "variants": [
+    {"name": "baseline", "parent": null, "knobs": {}},
+    {"name": "prefetch", "parent": "baseline", "knobs": {"source_prefetch_bytes": 2400}},
+    {"name": "prefetch_completion", "parent": "prefetch", "knobs": {"completion_review": true}}
+  ],
+  "screen": {"seed": 110401, "cases": ["conditional_urn", "bipartite_cover", "lru_cache"]},
+  "dev": {"seed": 110402, "cases": ["markov_hitting", "negative_dag", "topological_order"]},
+  "test": {"seed": 110403, "cases": ["network_reliability", "constrained_assignment", "sqlite_atomic_batch"]},
+  "promotion": {"draws": 10000, "threshold": 0.7, "quality_loss": 0.1, "cost_growth": 0.5, "seed": 1104},
+  "deployment": {"quality_floor": 0.7, "domain_floor": 0.5, "max_tokens": 80000, "max_seconds": 180.0, "max_false_accept": 0.0}
+}

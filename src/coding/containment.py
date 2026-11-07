@@ -58,7 +58,16 @@ def clean_environment(scratch):
     return env
 
 
-def prefix(root, scratch, output, *, project_write=False, network=False, read_git=False):
+def browser_runtime_paths(home=None):
+    """Operator-enabled Chromium assets, never browser profiles or arbitrary paths."""
+    home=(home or Path.home()).resolve()
+    cache=home/'Library/Caches/ms-playwright'
+    if cache.resolve()!=cache or not cache.is_dir():return []
+    return sorted(p for p in cache.iterdir() if p.is_dir() and not p.is_symlink()
+                  and re.fullmatch(r'chromium(?:_headless_shell)?-[0-9]+',p.name))[:8]
+
+
+def prefix(root, scratch, output, *, project_write=False, network=False, read_git=False,browser_runtime=False):
     from src.security.integrity import protected_paths
     root, scratch = root.resolve(), scratch.resolve()
     system = platform.system()
@@ -70,6 +79,9 @@ def prefix(root, scratch, output, *, project_write=False, network=False, read_gi
         profile += '(deny file-read* (subpath "/Users") (subpath "/private/var/folders"))'
         profile += '(allow file-read-metadata)'
         profile += f'(allow file-read* (subpath {q(root)}) (subpath {q(runtime)}) (subpath {q(sys.prefix)}) (subpath {q(scratch)}))'
+        if browser_runtime:
+            for path in browser_runtime_paths():
+                profile += f'(allow file-read* (subpath {q(path)}))'
         profile += f'(allow file-write* (subpath {q(scratch)}) (literal {q(output)}))'
         profile += '(allow file-write* (literal "/dev/null"))'
         temp = Path(tempfile.gettempdir()).resolve()

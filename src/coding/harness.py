@@ -132,6 +132,7 @@ class Workspace:
         self.scratch = Path(self._scratch.name)
         self.web_cache = {}
         self.allow_web = True
+        self.browser_runtime = False
         self.candidates = []
         self.context_snapshot = {}
         self.next_id = max((int(p.stem) for p in directory.glob('[0-9]*.json')), default=0)
@@ -286,6 +287,9 @@ class Workspace:
                         continue
                 return {"ok": True, "output": "\n".join(hits) or "no matches"}
             if name == "evidence":
+                if 'query' in args or 'context_id' in args:
+                    from .continuation import ContextArchive
+                    return ContextArchive(self).retrieve(args)
                 eid = str(args["id"])
                 if not eid.isdigit() and not (len(eid) == 32 and all(c in "0123456789abcdef" for c in eid)):
                     raise ValueError("invalid evidence id")
@@ -366,6 +370,7 @@ class Workspace:
         store=BranchStore(self,SessionControl(),{})
         owner='check-'+uuid.uuid4().hex[:12]
         staging=store.fork(self,owner,'main')
+        staging.browser_runtime=self.browser_runtime
         before=store.snapshots[owner].baseline
         try:
             result=await staging.command(staging.checks[name],network=network)
@@ -389,8 +394,10 @@ class Workspace:
         log_id = uuid.uuid4().hex
         with (self.directory / f"{log_id}.log").open("w+b") as out:
             try:
+                runtime_options={'browser_runtime':True} if self.browser_runtime else {}
                 sandbox = prefix(self.root, self.scratch, self.directory/f'{log_id}.log',
-                                 project_write=project_write or getattr(self,'isolated',False), network=network, read_git=read_git)
+                                 project_write=project_write or getattr(self,'isolated',False), network=network, read_git=read_git,
+                                 **runtime_options)
             except RuntimeError as exc:
                 return {'ok':False,'output':str(exc),'exit_code':-1}
             proc = await asyncio.create_subprocess_exec(*sandbox, *argv, cwd=self.root,
@@ -451,7 +458,11 @@ class CodingHarness:
                  workspace_factory=Workspace, turn_schema=Turn, system_prompt=SYSTEM):
         self.root = root.resolve()
         self.config = config if config is not None else dict(load_base_config().get("coding", {}))
+        self.context_metrics = {}
         self.planning = self.config.get('planning','required')
+        from .continuation import POLICIES
+        if self.config.get('context_policy','bounded') not in POLICIES:
+            raise ValueError('context_policy must be bounded or single_action')
         if self.planning not in {'required','adaptive'}:
             raise ValueError('planning must be required or adaptive')
         if model is None:
@@ -471,6 +482,7 @@ class CodingHarness:
         from .control import SessionControl
         from .budget import token_scope
         self.control = control or SessionControl()
+        self.context_metrics = {}
         with workspace_lease(self.root), token_scope(self.config.get('max_total_tokens',120000)) as token_budget:
             self.token_budget = token_budget
             try:
@@ -485,6 +497,10 @@ class CodingHarness:
                     _atomic(self.workspace.directory/'token-budget.json',json.dumps(packet))
                     self.workspace._scratch.cleanup()
             result['token_budget'] = token_budget.packet()
+            result['context_usage'] = {'unit': 'utf8_bytes_of_state_packet',
+                'scope': 'prepared actor calls; excludes system/schema, retries and reviewer calls',
+                'actors': self.context_metrics}
+            _atomic(self.workspace.directory/'context-usage.json',json.dumps(result['context_usage']))
             return result
 
     async def _run(self, query: str, *, reasoning: str, execution: str,
@@ -505,6 +521,7 @@ class CodingHarness:
         checkpoint = directory / "state.json"
         ws = self.workspace_factory(self.root, directory, self.config.get("checks"))
         ws.allow_web = bool(self.config.get('allow_web', True))
+        ws.browser_runtime = bool(self.config.get('browser_runtime',False))
         from .context import ExperienceStore
         from .supervisor import Supervisor
         from .control import Steered
@@ -571,11 +588,14 @@ class CodingHarness:
                 self.control.post(query,interrupt=False)
             query = saved["query"]
         recent = deque(maxlen=4)
+        from .continuation import ContinuationContext
+        continuation=ContinuationContext(ws,self.config.get('context_policy','bounded'))
+        self.context_metrics['main']=continuation.metrics
         from .dialogue import ActorDialogue
-        dialogue=ActorDialogue(self.config.get('native_history',False))
+        dialogue=ActorDialogue(self.config.get('native_history',False) and continuation.policy!='single_action')
         phase = "implement" if self.planning=='adaptive' and execution=='auto' else "plan"
         repeats = Counter()
-        from .progress import ActionFrontier,FailureFocus,source_snapshot,source_window
+        from .progress import ActionFrontier,FailureFocus,source_snapshot,source_window,merge_read_fragments
         frontier=ActionFrontier()
         failure_focus=FailureFocus(ws)
         from .result_memory import ResultMemory
@@ -583,6 +603,22 @@ class CodingHarness:
         observations: set[str] = set()
         read_context: dict[str, str] = {}
         read_hashes = {}
+        source_cache_chars=max(2200,min(64000,int(self.config.get('source_cache_chars',6000))))
+        source_window_bytes=max(4800,min(131072,int(self.config.get('source_window_bytes',4800))))
+        if resume:
+            retained=saved.get('source_context',{})
+            if not retained and orchestration:
+                memory=orchestration.scheduler.nodes['main'].memory
+                retained={p:{'text':text,'sha256':memory.files.get(p)} for p,text in memory.reads.items()}
+            for path,item in retained.items():
+                if not isinstance(item,dict) or not isinstance(item.get('text'),str):continue
+                try:
+                    if item.get('sha256')!=ws.file_digest(path):continue
+                except (OSError,ValueError):continue
+                read_context[path]=merge_read_fragments('',item['text'],source_cache_chars)
+                read_hashes[path]=item['sha256']
+            read_context=source_window(read_context,max_bytes=max(24000,source_window_bytes),max_files=32)
+            read_hashes={p:read_hashes[p] for p in read_context}
         external_source_epoch = 0
 
         def stale_reads():
@@ -623,13 +659,18 @@ class CodingHarness:
         def event(message):
             if progress:
                 progress({"phase": phase, "message": message, "delegates": delegates,
+                          "progress_state":{"revision":ws.revision,"evidence_epoch":evidence_version,
+                              "verified_revision":ws.verified_revision,"passed":sorted(ws.passed),
+                              "steering_version":self.control.version()},
                           "usage": self.model.usage() if hasattr(self.model, "usage") else {}})
 
         def persist():
+            retained=source_window(read_context,max_bytes=max(24000,source_window_bytes),max_files=32)
             _atomic(checkpoint, json.dumps({"root": str(self.root), "query": query, "plan": plan,
                     "notes": notes, "phase": phase, "status": status, "changed": sorted(ws.changed), "revision": ws.revision, "pending_action": pending_action,
                     "failed_checks": sorted(failed_checks), "checks":ws.checks, "seen_context": sorted(self.seen_context),
                     "pending_operation":pending_operation, "human_action":ws.attention.pending(),
+                    "source_context":{p:{'text':text,'sha256':read_hashes.get(p)} for p,text in retained.items()},
                     "answer": answer}, ensure_ascii=False, indent=2))
 
         persist()  # Keep the task even when the very first model request fails.
@@ -761,7 +802,7 @@ class CodingHarness:
                        "project_context": project_context,
                        "context_navigation": ws.navigator.packet(),
                        "obligations": ws.obligations().packet(),
-                       "task": clipped(query, 5000), "phase": phase, "plan": plan, "notes": clipped(notes, 1800),
+                       "task": query, "phase": phase, "plan": plan, "notes": clipped(notes, 1800),
                        "next_action_hint": (
                            "Checks already passed after the last change. Finish if the task is satisfied; do not repeat tests."
                            if ws.verified_revision == ws.revision and ws.passed and not failed_checks else
@@ -773,7 +814,7 @@ class CodingHarness:
                             "No checks are registered. Use register_check {name,argv} for a focused check of the delivered result, then execute check. Do not substitute repeated reads or status calls.") if phase == "verify" else
                            "Diagnose the failure against the task: distinguish implementation, new test expectation and environment defects before editing. Then run checks." if phase == "repair" else
                            "Inspect the relevant files and produce a short executable plan."),
-                       "inspected_content": source_window(read_context),
+                       "inspected_content": source_window(read_context,max_bytes=source_window_bytes),
                        "project_guidance_files": [n for n in ("AGENTS.md", "SEA.md", "README.md") if (self.root / n).is_file()],
                        "checks": ws.checks, "changed": sorted(ws.changed), "failed_checks": sorted(failed_checks),
                        "verified": ws.verified_revision == ws.revision and bool(ws.passed),
@@ -807,7 +848,6 @@ class CodingHarness:
                     'Candidate IDs are in clarification_replies. An unrelated message is not an answer; never invent one.')
             if interrupted_operation:
                 context['recovery_note']='Previous command may have taken effect before interruption. Inspect actual files/state before retrying it. Never infer failure or success from a missing receipt.'
-            from .request import compact_packet
             frontier.sync((evidence_version,ws.revision,self.control.version()))
             context['recovery']=frontier.packet()
             if result_memory and context['completed_results']:
@@ -816,7 +856,7 @@ class CodingHarness:
                 from .tool_scope import scope_packet
                 offered=scope_packet(ws,main_mind,orchestration.domains,self.config,context)
                 context['delegation_gate']=orchestration.delegation_status(main_mind)
-            text = json.dumps(compact_packet(context), ensure_ascii=False,separators=(',',':'))
+            text = json.dumps(continuation.prepare(context,self.control.version()), ensure_ascii=False,separators=(',',':'))
             system_prompt, turn_schema = self.system_prompt, self.turn_schema
             if self.native_tools and self.system_prompt==SYSTEM and not orchestration:
                 from .prompts import system_prompt as native_prompt,action_policy
@@ -848,6 +888,7 @@ class CodingHarness:
                     system_prompt+='\nENVIRONMENT CONTRACT:\n'+self.system_prompt
             if self.planning=='adaptive' and execution=='auto':
                 system_prompt+='\nPLANNING: a separate plan action is optional. Inspect only missing evidence, then act. Use plan to coordinate complex work; do not wait for a plan action before an otherwise permitted edit or check.'
+            system_prompt+=continuation.prompt
             event(f"{phase} · reasoning={effort} · step {step+1}")
             try:
                 generation_revision = self.control.version()
@@ -887,6 +928,11 @@ class CodingHarness:
                     if isinstance(turn,CompletionProposal):
                         recent.append({'completion_candidate_deferred':turn.remaining_work,
                                        'status':'model_report_unverified'})
+                        # Passing a partial test suite does not end implementation.
+                        # Re-enter the work phase when the delivery review finds
+                        # unfinished requirements, retaining all authority ceilings
+                        # and explicit operator profile overrides.
+                        phase = 'implement'
                         invalid_responses=0
                         continue
                 receipt = getattr(self.model, 'context_receipt', {'experience': [e['id'] for e in retrieved], 'shared': [e['id'] for e in shared]})
@@ -997,12 +1043,12 @@ class CodingHarness:
                     continue
                 status, answer = "done", turn.summary
                 if verified and ws.revision and self.config.get('learn', True):
-                    experience.promote(query, turn.summary, action_examples, sorted(ws.passed), check_evidence)
+                    experience.promote(query, turn.summary, action_examples, sorted(ws.passed), check_evidence,workspace=ws)
                     ws.project_context.add('procedure', 'Verified workflow: '+query[:100], turn.summary,
                                            check_evidence, sorted(ws.changed))
                     for candidate in ws.candidates:
                         experience.promote(candidate['trigger'], candidate['lesson'], action_examples,
-                                           sorted(ws.passed), candidate['evidence'])
+                                           sorted(ws.passed), candidate['evidence'],workspace=ws)
                 if verified and ws.revision:
                     workflow = {"task": clipped(query, 300), "plan": plan, "checks": sorted(ws.passed)}
                     if workflow not in lessons:
@@ -1079,9 +1125,9 @@ class CodingHarness:
                         observations.add(fingerprint)
                         evidence_version += 1
                     if turn.tool == "read":
-                        read_context.pop(str(turn.args.get('path','')),None)
-                        read_context[str(turn.args.get("path", ""))] = clipped(result.get("output", ""), 2200)
                         path = str(turn.args.get('path', ''))
+                        previous=read_context.pop(path,'')
+                        read_context[path]=merge_read_fragments(previous,result.get('output',''),source_cache_chars)
                         read_hashes[path] = ws.file_digest(path)
                     elif turn.tool in {"edit", "write"} and not result.get('changed_paths'):
                         path=str(turn.args.get('path',''))
@@ -1166,7 +1212,11 @@ class CodingHarness:
                     if orchestration and failures == 2:
                         await orchestration.recover(main_mind, failures)
                 elif turn.tool in {"edit", "write", "run", "accept"}:
-                    phase = "implement" if self.config.get('terminal_sandbox') else "verify"
+                    # A multi-file change remains implementation until the actor
+                    # requests a check or completion. Every edit still invalidates
+                    # verification, and finish still requires fresh checks.
+                    phase = ("implement" if turn.tool != 'run' or self.config.get('terminal_sandbox')
+                             else "verify")
                     if turn.tool in {'edit', 'write', 'accept'}:
                         failures = 0
             persist()
@@ -1226,26 +1276,46 @@ class CodingHarness:
 
     async def worker(self, ws, task, role, effort, progress=None, worker_id="worker") -> str:
         from .control import Steered
+        import copy
+        from .continuation import ContinuationContext
+        view=copy.copy(ws)
+        view.owner_id=worker_id
+        continuation=ContinuationContext(view,self.config.get('context_policy','bounded'))
+        self.context_metrics[worker_id]=continuation.metrics
         evidence = deque(maxlen=3)
         evidence_ids = []
+        notes=''
+        allowed_tools={'tree','read','search','evidence'}
+        from .orchestration import scoped_schema
+        worker_schema=scoped_schema(Turn,allowed_tools,can_delegate=False,can_plan=False)
         for _ in range(int(self.config.get("worker_turns", 6))):
-            if worker_id in self.control.cancelled_agents:
+            if self.control.is_cancelled(worker_id):
                 raise Steered()
             if hasattr(self.model, "usage") and self.model.usage().get("tokens", 0) >= int(self.config.get("max_total_tokens", 120000)):
                 return "Worker paused at token threshold; no completion claimed."
             system = "Read-only " + role + ". Inspect files and return concrete findings with file:line evidence. Use only tree/read/search/evidence. No edits, commands, delegation. Return Turn JSON."
-            updates = self.control.drain(worker_id)
-            packet = {"task": task, "human_steering": updates, "shared_context": ws.board.retrieve(task), "evidence": list(evidence)}
+            self.control.drain(worker_id)
+            generation_version=self.control.version(worker_id)
+            packet = continuation.prepare({"task": task, "human_steering": self.control.instructions(worker_id),
+                "notes":notes,"shared_context": ws.board.retrieve(task), "evidence": list(evidence)},self.control.version(worker_id))
             with self.supervisor.scope(worker_id):
                 try:
-                    turn = await self.control.call(lambda: self.model([{"role": "system", "content": SYSTEM + "\n" + system},
-                        {"role":"user", "content":json.dumps(packet, ensure_ascii=False)}], Turn, effort), worker_id)
+                    turn = await self.control.call(lambda: self.model([{"role": "system", "content": SYSTEM + "\n" + system+continuation.prompt},
+                        {"role":"user", "content":json.dumps(packet, ensure_ascii=False)}], worker_schema, effort), worker_id)
                 except Steered:
                     if any(e['target'] == worker_id for e in self.control.pending):
                         continue
                     raise
+                except ValueError as exc:
+                    from .budget import BudgetExceeded
+                    if isinstance(exc,BudgetExceeded): raise
+                    evidence.append({'error':'read-only worker: use a read-only tool or finish; '+str(exc)[:250]})
+                    continue
+            if self.control.version(worker_id)!=generation_version:
+                continue
             if not isinstance(turn, Turn):
                 turn = Turn.model_validate(turn)
+            if turn.summary: notes=clipped(turn.summary,1800)
             if turn.action == "finish":
                 if evidence_ids and turn.summary:
                     ws.board.publish(turn.summary, evidence_ids, trigger=task, kind='worker-finding')
@@ -1253,7 +1323,10 @@ class CodingHarness:
             if turn.action != "tool":
                 evidence.append({"error": "use a read-only tool or finish"})
                 continue
-            result = await ws.execute(turn.tool, turn.args, readonly=True)
+            if turn.tool not in allowed_tools:
+                evidence.append({'error':'read-only worker: action outside assigned tree/read/search/evidence scope'})
+                continue
+            result = await view.execute(turn.tool, turn.args, readonly=True)
             eid = ws.record(result)
             evidence_ids.append(eid)
             self.supervisor.action(worker_id, turn.tool, result['ok'], eid)

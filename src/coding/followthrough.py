@@ -15,7 +15,7 @@ class NextStep(BaseModel):
 
 
 def agenda(contract, graph, missing, *, mode, revision, steering_version):
-    """Mechanical blockers first; reviews retain their provenance after an edit.
+    """Concrete work before final checks and catch-all gaps; retain provenance.
 
     No queue item can grant authority or mark a requirement supported. Only a new
     observation/review can close it. Unreviewed semantic requirements aren't failures.
@@ -57,6 +57,12 @@ def agenda(contract, graph, missing, *, mode, revision, steering_version):
                 'action': 'Inspect the specific unresolved criterion and obtain a discriminating observation.',
                 'mode': 'inspect', 'verification': 'Evidence addresses this criterion on the current revision.',
                 'status': 'recheck_after_change' if stale else 'review_gap'})
+    # A generic "complete the product" criterion must not switch repair back to
+    # inspect ahead of the critic's specific fix. Checks follow known unfinished
+    # work instead of running once after every file edit. All gates remain present.
+    queue.sort(key=lambda step: 0 if step['status']=='observed_missing' and step['mode']!='verify'
+               else 1 if step['requirement'] in advice
+               else 2 if step['status']=='observed_missing' else 3)
     focus = queue[0] if queue else None
     return {'remaining': len(queue), 'unreviewed':sum(r['status']=='unreviewed' for r in report['requirements']),
             'items':[{k:s[k] for k in ('requirement','mode','status')} | {'problem':s['problem'][:180]} for s in queue[:6]], 'focus': focus,

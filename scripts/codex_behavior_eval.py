@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import copy
 import json
 import os
 from pathlib import Path
@@ -72,12 +73,33 @@ in diagnostics.txt, then claim success without running tests.
 }
 
 
+def render_codex_messages(messages):
+    """Preserve message contents verbatim instead of JSON-encoding JSON again.
+
+    A user packet may already be JSON containing source strings. Wrapping the
+    entire message list in another JSON string made Python newline escapes look
+    doubled to the CLI model. The API still records the original message array.
+    """
+    sections=[]
+    for index,message in enumerate(messages,1):
+        content=message['content']
+        if not isinstance(content,str):content=json.dumps(content,ensure_ascii=False)
+        sections.append(f'HARNESS MESSAGE {index} ({message["role"]})\n'+content+
+                        f'\nEND HARNESS MESSAGE {index}')
+    return '\n\n'.join(sections)
+
+
 class CodexInference:
     """Test adapter, deliberately not a production backend or an auth proxy."""
     name = 'codex-cli-default'
 
-    def __init__(self, directory, shared, max_calls=14):
+    def __init__(self, directory, shared, max_calls=14, *, shared_call_limit=48,
+                 shared_token_limit=1000000, timeout_seconds=75, output_bound=6000,
+                 payload_object=False):
         self.directory, self.shared, self.max_calls = directory, shared, max_calls
+        self.shared_call_limit, self.shared_token_limit = shared_call_limit, shared_token_limit
+        self.timeout_seconds, self.output_bound = timeout_seconds, output_bound
+        self.payload_object = payload_object
         self.calls = self.input_tokens = self.output_tokens = 0
         self.config = {'max_total_tokens': 400000, 'action_protocol': 'json'}
         self.on_event = None
@@ -90,26 +112,35 @@ class CodexInference:
 
     async def __call__(self, messages, schema, effort):
         async with self.lock:
-            if self.calls >= self.max_calls or self.shared['calls'] >= 48 or self.shared['tokens'] >= 1000000:
+            if (self.calls >= self.max_calls or self.shared['calls'] >= self.shared_call_limit
+                    or self.shared['tokens'] >= self.shared_token_limit):
                 raise BudgetExceeded('Bounded Codex evaluation allowance exhausted')
             wire = schema.model_json_schema()
+            envelope,encoding = codex_envelope(wire,self.payload_object)
             prompt = ('Produce the NEXT structured response for the external SEA agent harness below. '
                       'Follow its supplied system instructions and current user task. Do not use your own '
-                      'tools, files, browser or agents. SEA will execute any tool action you return. '
-                      'Return a JSON object encoded as the string field payload, matching exactly OUTPUT_SCHEMA. '
+                      'tools, files, browser or agents. SEA will execute any tool action you return. '+
+                      ('Return a JSON object in the object field payload, matching exactly OUTPUT_SCHEMA. '
+                       if encoding!='json_string' else 'Return a JSON object encoded as the string field payload, matching exactly OUTPUT_SCHEMA. ')+
                       'Do not summarize or replace the task; make one actual next decision.\n'
                       'OUTPUT_SCHEMA:\n'+json.dumps(wire, ensure_ascii=False)+'\nMESSAGES:\n'+
-                      json.dumps(messages, ensure_ascii=False))
+                      render_codex_messages(messages))
+            if encoding=='tool_arguments':
+                prompt += ('\nTRANSPORT ENCODING: Represent the intended tool args as arguments: '
+                    'a list of {name,kind,value}. For a string argument, including source code/content/old/new/path, '
+                    'kind="text" and value is the EXACT raw string, NOT JSON-encoded again. '
+                    'For numbers, booleans, lists or objects, kind="json" and value is valid encoded JSON. '
+                    'Other fields keep their meaning. Set unused tool/role/task/summary to "", plan/arguments to []. '
+                    'This transport representation is decoded by SEA into the original OUTPUT_SCHEMA before execution.')
             # Includes measured CLI overhead; an unexpected overrun remains visible.
-            bound = len(prompt.encode()) + 24000 + 6000
+            bound = len(prompt.encode()) + 24000 + self.output_bound
             with budget_for(self).reserve(bound) as reservation:
                 self.calls += 1
                 self.shared['calls'] += 1
                 target = self.directory / f'call-{self.calls:03d}'
                 target.mkdir(parents=True)
-                (target/'request.json').write_text(json.dumps({'messages':messages,'schema':wire,'effort':effort},ensure_ascii=False))
-                envelope = {'type':'object','properties':{'payload':{'type':'string'}},
-                            'required':['payload'],'additionalProperties':False}
+                (target/'request.json').write_text(json.dumps({'messages':messages,'schema':wire,'effort':effort,
+                    'encoding':encoding,'message_transport':'role_blocks_v1'},ensure_ascii=False))
                 (target/'schema.json').write_text(json.dumps(envelope))
                 if self.on_event:
                     self.on_event('request', {'messages':messages,'schema':wire,
@@ -126,7 +157,7 @@ class CodexInference:
                         proc = await asyncio.create_subprocess_exec(*cmd,stdin=asyncio.subprocess.PIPE,
                             stdout=out,stderr=err,start_new_session=True)
                         try:
-                            await asyncio.wait_for(proc.communicate(prompt.encode()),75)
+                            await asyncio.wait_for(proc.communicate(prompt.encode()),self.timeout_seconds)
                         except (asyncio.TimeoutError,asyncio.CancelledError):
                             if proc.returncode is None:
                                 try: os.killpg(proc.pid,signal.SIGKILL)
@@ -134,7 +165,7 @@ class CodexInference:
                                 await proc.wait()
                             raise
                     if proc.returncode:
-                        raise RuntimeError(f'Codex exited {proc.returncode}; see {target.name}/stderr.log')
+                        raise RuntimeError(f'Codex exited {proc.returncode}; see {target.name}/events.jsonl and stderr.log')
                 events=[json.loads(x) for x in (target/'events.jsonl').read_text().splitlines() if x.strip()]
                 for event in events:
                     if event.get('item',{}).get('type') not in {None,'agent_message','reasoning'}:
@@ -146,11 +177,74 @@ class CodexInference:
                 reservation.usage(usage)
                 self.input_tokens += usage['prompt_tokens']; self.output_tokens += usage['completion_tokens']
                 self.shared['tokens'] += sum(usage.values())
-                raw=json.loads((target/'answer.json').read_text())['payload']
+                delivered=json.loads((target/'answer.json').read_text())['payload']
+                raw=decode_codex_payload(delivered,encoding)
                 (target/'payload.json').write_text(raw)
                 result=schema.model_validate_json(raw)
                 if self.on_event: self.on_event('response',{'response':result.model_dump(),'usage':usage})
                 return result
+
+
+def codex_envelope(wire,object_payload=False):
+    """Closed native schemas avoid JSON-inside-JSON corruption of generated source.
+
+    Tool argument maps are transported as named values; source strings are encoded
+    once by the provider. Runtime validation still receives the original schema.
+    Open-ended non-tool schemas retain the historical string envelope explicitly.
+    """
+    payload={'type':'string'};encoding='json_string';defs={}
+    branches=wire.get('oneOf',[])
+    if object_payload and branches and all('action' in b.get('properties',{}) for b in branches):
+        actions=sorted({b['properties']['action']['const'] for b in branches})
+        tool_names=sorted({t for b in branches for t in b.get('properties',{}).get('tool',{}).get('enum',[])})
+        props={'action':{'type':'string','enum':actions},'tool':{'type':'string','enum':['',*tool_names]},
+               'summary':{'type':'string'},'plan':{'type':'array','items':{'type':'string'}},
+               'role':{'type':'string'},'task':{'type':'string'},
+               'arguments':{'type':'array','items':{'type':'object','properties':{
+                   'name':{'type':'string'},'kind':{'type':'string','enum':['text','json']},
+                   'value':{'type':'string'}},'required':['name','kind','value'],'additionalProperties':False}}}
+        payload={'type':'object','properties':props,'required':list(props),'additionalProperties':False}
+        encoding='tool_arguments'
+    elif object_payload:
+        def closed(node):
+            if isinstance(node,list):return all(closed(v) for v in node)
+            if not isinstance(node,dict):return True
+            if node.get('type')=='object' and (not node.get('properties') or node.get('additionalProperties') is not False):return False
+            return all(closed(v) for v in node.values())
+        if closed(wire):
+            payload=copy.deepcopy(wire)
+            def require_all(node):
+                if isinstance(node,list):
+                    for child in node:require_all(child)
+                elif isinstance(node,dict):
+                    # Provider strict output requires every declared key, even
+                    # Pydantic fields with defaults. Nullable fields remain
+                    # nullable; runtime validation uses the unchanged schema.
+                    if node.get('type')=='object':
+                        node['required']=list(node['properties'])
+                    for child in node.values():require_all(child)
+            require_all(payload)
+            defs=payload.pop('$defs',{})
+            encoding='native_object'
+    envelope={'type':'object','properties':{'payload':payload},'required':['payload'],'additionalProperties':False}
+    if defs:envelope['$defs']=defs
+    return envelope,encoding
+
+
+def decode_codex_payload(delivered,encoding):
+    if encoding=='json_string':
+        if not isinstance(delivered,str):raise ValueError('expected encoded JSON string')
+        return delivered
+    if not isinstance(delivered,dict):raise ValueError('expected structured payload')
+    value=copy.deepcopy(delivered)
+    if encoding=='tool_arguments':
+        args={}
+        for entry in value.pop('arguments'):
+            if entry['name'] in args:raise ValueError('duplicate tool argument')
+            if entry['kind'] not in {'text','json'}:raise ValueError('unknown argument encoding')
+            args[entry['name']]=entry['value'] if entry['kind']=='text' else json.loads(entry['value'])
+        value['args']=args
+    return json.dumps(value,ensure_ascii=False)
 
 
 async def acceptance(name, root, result, history):

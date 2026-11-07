@@ -3,7 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .context import select, digest
+from .context import select, digest, memory_items, memory_update, capture_evidence, evidence_valid
 
 KINDS = {'fact','hypothesis','decision','procedure','pitfall','question','preference','reference'}
 
@@ -30,8 +30,7 @@ class ProjectContext:
         self.ws, self.control = workspace, control
         self.directory = workspace.root/'.sea'/'context'
         self.path = self.directory/'index.json'
-        try: self.notes = json.loads(self.path.read_text()) if self.path.exists() else []
-        except (ValueError,OSError): self.notes = []
+        self.notes = memory_items(self.path)
 
     def add(self, kind, title, text, evidence=(), files=()):
         from .harness import _atomic
@@ -49,18 +48,23 @@ class ProjectContext:
         if kind == 'question': status = 'open'
         note = {'id':'note-'+digest(kind+title), 'kind':kind, 'trigger':title[:160], 'text':text[:1800],
                 'status':status, 'evidence':evidence[:8], 'files':hashes}
-        self.notes = [n for n in self.notes if n['id'] != note['id']] + [note]
-        self.notes = self.notes[-60:]
-        _atomic(self.path,json.dumps(self.notes,ensure_ascii=False,indent=2))
-        _atomic(self.directory/(note['id']+'.md'), '# '+title+'\n\nType: '+kind+' · Status: '+status+'\n\n'+text+'\n\nEvidence: '+', '.join(evidence)+'\n')
-        _atomic(self.directory/'INDEX.md', '# Project context\n\n'+'\n'.join(f"- [{n['trigger']}]({n['id']}.md) — {n['kind']} / {n['status']}" for n in self.notes))
+        note['evidence_refs']=capture_evidence(self.ws,[e for e in note['evidence'] if e.isdigit()])
+        with memory_update(self.path):
+            current=memory_items(self.path,strict=True)
+            previous=next((n for n in current if n['id']==note['id']),{})
+            note['revision']=int(previous.get('revision',0))+1
+            self.notes = ([n for n in current if n['id'] != note['id']] + [note])[-60:]
+            _atomic(self.path,json.dumps(self.notes,ensure_ascii=False,indent=2))
+            _atomic(self.directory/(note['id']+'.md'), '# '+title+'\n\nType: '+kind+' · Status: '+status+'\n\n'+text+'\n\nEvidence: '+', '.join(evidence)+'\n')
+            _atomic(self.directory/'INDEX.md', '# Project context\n\n'+'\n'.join(f"- [{n['trigger']}]({n['id']}.md) — {n['kind']} / {n['status']}" for n in self.notes))
         return note
 
     def valid(self,note):
-        try: return all(hashlib.sha256(self.ws.path(p).read_bytes()).hexdigest()==h for p,h in note['files'].items())
+        try: return evidence_valid(self.ws,note) and all(hashlib.sha256(self.ws.path(p).read_bytes()).hexdigest()==h for p,h in note['files'].items())
         except (ValueError,OSError): return False
 
     def retrieve(self, query):
+        self.notes=memory_items(self.path)
         notes=select([n for n in self.notes if self.valid(n)],query,3)
         return {'stack':stack(self.ws.root),'notes':notes,
                 'index':[{'id':n['id'],'kind':n['kind'],'title':n['trigger'],'status':n['status'],'current':self.valid(n)} for n in self.notes][-15:]}

@@ -6,6 +6,11 @@ import json
 def compact_packet(packet):
     """Remove duplicate observations, not operator constraints or evidence identities."""
     data=copy.deepcopy(packet)
+    # Digests are checked by runtime before retrieval and again before actions.
+    # Keep evidence IDs visible; do not repeatedly pay for opaque hash metadata.
+    for rows in (data.get('shared_context',[]),data.get('experience',[]),
+                 data.get('project_context',{}).get('notes',[])):
+        for row in rows: row.pop('evidence_refs',None)
     reads=data.get('inspected_content',{})
     memory=data.get('working_memory',{})
     reads={**reads,**memory.get('inspected_content',{})}
@@ -144,7 +149,10 @@ def fit_messages(messages, schema, context_tokens, output_tokens):
     except (ValueError, TypeError):
         data = None
     if isinstance(data, dict):
-        protected = {'task', 'human_steering', 'checks', 'phase'}
+        protected = {'task', 'human_steering', 'checks', 'phase', 'plan', 'notes',
+                     'obligations', 'completion_blockers', 'human_action', 'clarification_replies',
+                     'pending_proposals', 'interrupted_operation', 'capabilities',
+                     'next_action_hint', 'recovery_note', 'continuation'}
         def encode():
             return json.dumps(data, ensure_ascii=False)
         for key in ('recent', 'evidence', 'verified_workflows', 'inspected_content', 'experience', 'shared_context'):
@@ -161,23 +169,26 @@ def fit_messages(messages, schema, context_tokens, output_tokens):
             if len(encode().encode()) <= remaining:
                 break
             candidates = []
-            def visit(obj, prefix):
+            def visit(obj, path=()):
                 if isinstance(obj, dict):
                     for k,v in obj.items():
-                        if prefix or k not in protected:
-                            if isinstance(v, str) and len(v) > 200 and k not in {'id','evidence_id','path'}:
-                                candidates.append((len(v), obj, k))
-                            else:
-                                visit(v, True)
+                        if not path and k in protected: continue
+                        if path==('working_memory',) and k in {'summary','plan','handoff','validation'}: continue
+                        if isinstance(v, str) and len(v) > 200 and k not in {'id','evidence_id','path'}:
+                            candidates.append((len(v), obj, k))
+                        else:
+                            visit(v, (*path,k))
                 elif isinstance(obj, list):
-                    for value in obj: visit(value, True)
-            visit(data, False)
+                    for value in obj: visit(value, (*path,'[]'))
+            visit(data)
             if not candidates:
-                raise ValueError('task and human steering exceed context; compact the request before continuing')
+                raise ValueError('task, human steering and required continuation state exceed context; use a larger context or shorten the request')
             _, parent, key = max(candidates, key=lambda v:v[0])
             value = parent[key]
             parent[key] = value[:len(value)//4] + '\n[omitted; use evidence]\n' + value[-len(value)//4:]
         text = encode()
+        if len(text.encode()) > remaining:
+            raise ValueError('required context exceeds budget after bounded compaction')
     elif len(text.encode()) > remaining:
         raise ValueError('unstructured request exceeds the context budget')
     messages[-1]['content'] = text
@@ -187,6 +198,8 @@ def fit_messages(messages, schema, context_tokens, output_tokens):
         recovery=None
     receipt = {'experience': [x['id'] for x in effective.get('experience', [])],
                'shared': [x['id'] for x in effective.get('shared_context', [])],
+               'peer_findings': [x['id'] for x in effective.get('cooperation', {}).get('recent_findings', [])],
+               'peers': [x['id'] for x in effective.get('cooperation', {}).get('peers', [])],
                'steering': [x['id'] for x in effective.get('human_steering', [])],
                'mode': effective.get('cognitive_mode', effective.get('phase')),
                'memory_evidence': effective.get('working_memory', {}).get('evidence_ids', []),
@@ -201,5 +214,7 @@ def fit_messages(messages, schema, context_tokens, output_tokens):
                'completed_results': [x['evidence_id'] for x in effective.get('completed_results', [])],
                'output_recovery': ({'draft_chars':len(recovery['provider_returned_draft']),
                                     'status':recovery.get('status')} if recovery else None),
+               'context_policy': effective.get('continuation',{}).get('policy','bounded'),
+               'context_archive_id': effective.get('continuation',{}).get('context_id'),
                'input_utf8_bytes': sum(len(m['content'].encode()) for m in messages)}
     return messages, receipt

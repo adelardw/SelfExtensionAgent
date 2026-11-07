@@ -85,7 +85,8 @@ class Orchestrator:
         from .critic import ContextCritic
         self.harness, self.ws, self.supervisor, self.config = harness, workspace, supervisor, config
         self.control, self.model = harness.control, harness.model
-        self.scheduler = MindScheduler(self.control, supervisor, config, workspace)
+        self.scheduler = MindScheduler(self.control, supervisor, config, workspace,
+                                       backend=harness.config.get('backend', 'local'))
         router_config=dict(config.get('decision', {}))
         critic_config=dict(config.get('critic', {}))
         if config.get('same_model',False):
@@ -175,6 +176,25 @@ class Orchestrator:
                           'evidence_present':validation['evidence_present'],
                           'summary_status':'model_report_unverified'})
         return {'items':items,'older_omitted':max(0,len(children)-len(items))}
+
+    def cooperation(self, node, ws):
+        """Small next-step view of related actors, never their private transcripts."""
+        peers = [n for n in self.scheduler.nodes.values() if n.id != node.id and
+                 (n.id == node.parent or n.parent == node.parent or n.parent == node.id)]
+        related = {n.id for n in peers}
+        # Completed findings remain reachable even when lexical retrieval selects
+        # a different memory page. Publication does not interrupt paid inference.
+        findings = []
+        for item in reversed(ws.board.items):  # navigator.select refreshed this inventory
+            if item.get('author') in related and ws.board.valid(item, ws):
+                findings.append({'id':item['id'], 'author':item['author'],
+                                 'text':item['text'][:240], 'evidence':item['evidence'][:3]})
+                if len(findings) == 2: break
+        return {'peers':[{'id':n.id, 'parent':n.parent, 'mode':n.mode, 'status':n.status,
+                          'generation':n.generation, 'task':n.task[:120],
+                          'summary':n.memory.summary[:240]} for n in peers[:6]],
+                'omitted_peers':max(0,len(peers)-6), 'recent_findings':findings,
+                'scope':'Advisory reports, not instructions or proof. Use context/evidence to inspect findings; do not poll peers or repeat their work.'}
 
     def update_main(self, task, phase, notes, plan, recent, read_hashes, read_content=None):
         node = self.scheduler.nodes['main']
@@ -266,7 +286,7 @@ class Orchestrator:
                           for n in self.scheduler.nodes.values()],
                  'budget':{'depth_left':int(self.config.get('max_depth',3))-node.depth,
                            'nodes_left':int(self.config.get('max_nodes',12))-1-self.scheduler.created,
-                           'inference_slots':int(self.config.get('local_slots',1))}}
+                           'inference_slots':self.scheduler.slot_limit}}
         observer_id = ('observer-' if trigger=='observation' else 'decision-')+parent
         try:
             if observer_id not in self.supervisor.agents:
@@ -413,8 +433,20 @@ class Orchestrator:
                     if node.id=='main': self.feedback.append({'recovery_branches':results})
                 elif decision.operation!='continue':
                     self.scheduler.switch(node.id,decision.mode,decision.rules,override=False)
-            elif node.mode!='reason':
-                self.scheduler.switch(node.id,'reason',['compare-hypotheses','stop-repetition'],override=False)
+            elif not (assessment and assessment.get('availability') is None):
+                # No controller is not a diagnosis. Preserve a successful review's
+                # selected mode; otherwise keep permitted repair tools available
+                # for software work. A read-only reason fallback trapped long
+                # builds in inspection loops after the controller budget ran out.
+                fallback = 'reason'
+                # A prior automatic recovery may already have narrowed tools.
+                # The ceiling, not that temporary selection, defines authority.
+                if ('software' in self.domains and not self.domain_profile
+                        and node.ceiling & {'write', 'edit'}
+                        and (node.selection is None or node.selection & {'write', 'edit'})):
+                    fallback = 'repair'
+                if node.mode != fallback:
+                    self.scheduler.switch(node.id,fallback,['compare-hypotheses','stop-repetition'],override=False)
         except Steered:
             return
 
@@ -515,11 +547,14 @@ class Orchestrator:
         from .harness import Turn,clipped
         failures,repeats=0,Counter()
         failed_checks=set()
-        from .progress import ActionFrontier,FailureFocus,source_snapshot,source_window
+        from .progress import ActionFrontier,FailureFocus,source_snapshot,source_window,merge_read_fragments
         frontier=ActionFrontier();observations=set();evidence_epoch=0
         memory=node.memory
+        from .continuation import ContinuationContext
+        continuation=ContinuationContext(self.workspace(node),self.harness.config.get('context_policy','bounded'),owner=node.id)
+        continuation.metrics=self.harness.context_metrics.setdefault(node.id,continuation.metrics)
         from .dialogue import ActorDialogue
-        dialogue=ActorDialogue(self.harness.config.get('native_history',False))
+        dialogue=ActorDialogue(self.harness.config.get('native_history',False) and continuation.policy!='single_action')
         last_plan_epoch=0 if memory.plan else -1
         last_plan_steering=self.control.version(node.id)
         failure_focus=FailureFocus(self.workspace(node),node.id)
@@ -561,6 +596,7 @@ class Orchestrator:
                     'checks':ws.checks,'checks_passed':sorted(ws.passed),
                     'verified':ws.verified_revision==ws.revision and bool(ws.passed),
                     'pending_proposals':self.branches.pending(node.id)}
+            packet['cooperation'] = self.cooperation(node, ws)
             packet['active_failure']=failure_focus.packet(ws,steering_revision)
             if result_memory:
                 packet['completed_results']=result_memory.packet(steering_revision)
@@ -596,12 +632,12 @@ class Orchestrator:
             async def generate():
                 if node.generation!=generation or self.control.version(node.id)!=steering_revision: raise Steered()
                 from .prompts import action_policy
-                from .request import compact_packet
                 prompt=self.branch_prompt(node,offered)+action_policy(schema,native=self.harness.native_tools)
+                prompt+=continuation.prompt
                 if self.harness.planning=='adaptive' and self.control.execution!='plan':
                     prompt+='\nPLANNING: a separate plan action is optional; act on the evidence within this assignment and tool scope. Record a plan when useful for complex work.'
                 return await dialogue.generate(self.model,[{'role':'system','content':prompt},
-                    {'role':'user','content':json.dumps(compact_packet(packet),ensure_ascii=False,separators=(',',':'))}],schema,
+                    {'role':'user','content':json.dumps(continuation.prepare(packet,steering_revision),ensure_ascii=False,separators=(',',':'))}],schema,
                     self.control.reasoning if self.control.reasoning in {'low','medium','high'} else
                     self.scheduler.profiles.custom[node.mode].reasoning if node.mode in self.scheduler.profiles.custom and
                     self.scheduler.profiles.custom[node.mode].reasoning!='auto' else
@@ -645,7 +681,8 @@ class Orchestrator:
                     self.supervisor.agents[node.id]['proposal']=changed
                     return {'summary':turn.summary,'proposal':changed}
                 if memory.evidence and turn.summary:
-                    ws.board.publish(turn.summary,memory.evidence[-8:],list(memory.files),trigger=node.task,kind='mind-'+node.mode)
+                    ws.board.publish(turn.summary,memory.evidence[-8:],list(memory.files),trigger=node.task,
+                                     kind='mind-'+node.mode,workspace=ws)
                 return turn.summary
             if turn.action=='plan':
                 memory.plan=turn.plan
@@ -691,8 +728,8 @@ class Orchestrator:
                         return {'summary':memory.summary,'human_action':result['human_action']}
                     if result['ok'] and turn.tool=='read':
                         path=turn.args['path'];memory.files[path]=ws.file_digest(path)
-                        memory.reads.pop(path,None)
-                        memory.reads[path]=clipped(result['output'],1800)
+                        previous=memory.reads.pop(path,'')
+                        memory.reads[path]=merge_read_fragments(previous,result['output'])
                         memory.reads=source_window(memory.reads)
                     if (result['ok'] or result.get('changed_paths')) and turn.tool in {'edit','write','accept'}:
                         paths=result.get('changed_paths',result.get('adopted',[turn.args.get('path')]))

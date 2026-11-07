@@ -91,9 +91,11 @@ class Mind:
 
 
 class MindScheduler:
-    def __init__(self, control, supervisor, config, workspace=None):
+    def __init__(self, control, supervisor, config, workspace=None, *, backend='local'):
         self.control, self.supervisor, self.config, self.ws = control, supervisor, config, workspace
-        self.slots = asyncio.Semaphore(max(1, int(config.get('local_slots', 1))))
+        key = 'cloud_slots' if backend == 'openrouter' else 'local_slots'
+        self.slot_limit = max(1, int(config.get(key, config.get('local_slots', 1))))
+        self.slots = asyncio.Semaphore(self.slot_limit)
         self.nodes = {'main': Mind('main', '', 'inspect', '', 0, frozenset(TOOLS))}
         self.counter = 0
         self.created = 0
@@ -229,6 +231,10 @@ class MindScheduler:
                 return {'id':node.id, 'mode':node.mode, 'result':result,
                         'status':node.status,
                         'validation':node.memory.validate(node.workspace or self.ws) if self.ws else {}}
+            except asyncio.CancelledError:
+                node.status = 'interrupted'
+                self.supervisor.finish(node.id, 'interrupted')
+                raise
             except Steered:
                 node.status = 'interrupted'
                 self.supervisor.finish(node.id, 'interrupted')

@@ -115,7 +115,7 @@ def configuration(base,variant,model,budget=.025):
         config.update(max_input_usd_per_million=.30,max_output_usd_per_million=2.0)
     config['navigation']={'backend':'lexical'}
     config['orchestration'].update(enabled=True,auto_domains=True,same_model=variant!='hybrid',
-                                  observer=False,local_slots=1,max_nodes=4,max_depth=2,mind_turns=5)
+                                  observer=False,local_slots=1,cloud_slots=1,max_nodes=4,max_depth=2,mind_turns=5)
     config['orchestration']['critic'].update(enabled=True,backend='local',active=variant!='passive',
                                            max_calls=8,max_probes=2)
     config['orchestration']['decision'].update(backend='decisions',max_calls=4,max_cost_usd=.001,

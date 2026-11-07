@@ -18,6 +18,7 @@ class Model:
     def __init__(self,root,*,critic_ready=True,proposal='ready',json_answer=False):
         self.root=root;self.critic_ready=critic_ready;self.proposal=proposal;self.json_answer=json_answer
         self.actions=0;self.proposals=0;self.reviews=0
+        self.actor_packets=[]
 
     async def __call__(self,messages,schema,effort):
         packet=json.loads(messages[-1]['content'])
@@ -47,6 +48,7 @@ class Model:
         actions=[{'action':'tool','tool':'edit','args':{'path':'value.py','old':'VALUE=1','new':'VALUE=2'}},
                  {'action':'tool','tool':'check','args':{'name':'unit'}}]
         turn=actions[self.actions] if self.actions<2 else {'action':'tool','tool':'read','args':{'path':'value.py'}}
+        self.actor_packets.append(packet)
         self.actions+=1;return schema.model_validate(turn)
 
 
@@ -83,6 +85,9 @@ def test_deferred_delivery_returns_to_work_without_repeating_same_proposal(tmp_p
     result,h=run(tmp_path,model,5)
     assert result['status']=='paused' and model.proposals==1 and model.reviews==0
     assert result['tools_used']==['edit','check','read','read']
+    assert model.actor_packets[2]['phase']=='implement'
+    assert model.actor_packets[2]['cognitive_mode']=='implement'
+    assert 'Inspect the API' in str(model.actor_packets[2]['recent'])
 
 
 def test_source_race_discards_proposal_and_invalidates_old_checks(tmp_path):
@@ -90,3 +95,27 @@ def test_source_race_discards_proposal_and_invalidates_old_checks(tmp_path):
     result,h=run(tmp_path,model)
     assert result['status']=='paused' and model.proposals==1 and model.reviews==0
     assert result['checks_passed']==[] and h.workspace.verified_revision==-1
+
+
+def test_multifile_implementation_keeps_write_tools_and_requires_final_check(tmp_path):
+    class MultiFile:
+        calls=0
+        async def __call__(self,messages,schema,effort):
+            packet=json.loads(messages[-1]['content'])
+            turns=[{'action':'tool','tool':'write','args':{'path':'one.py','content':'VALUE=1\n'}},
+                   {'action':'tool','tool':'write','args':{'path':'two.py','content':'VALUE=2\n'}},
+                   {'action':'finish','summary':'Premature; two files exist'},
+                   {'action':'tool','tool':'check','args':{'name':'unit'}},
+                   {'action':'finish','summary':'Both files created and checked.'}]
+            if self.calls==1:
+                assert packet['phase']==packet['cognitive_mode']=='implement'
+            if self.calls==3:
+                assert not packet['verified']
+                assert packet['phase']=='verify'
+            result=schema.model_validate(turns[self.calls]);self.calls+=1;return result
+    h=CodingHarness(tmp_path,model=MultiFile(),config={'planning':'adaptive','max_turns':5,'learn':False,
+        'checks':{'unit':[sys.executable,'-B','-c','import one,two; assert one.VALUE+two.VALUE==3']},
+        'orchestration':{'enabled':True,'same_model':True,'critic':{'enabled':False}}})
+    result=asyncio.run(h.run('Create one.py and two.py, then verify the pair.'))
+    assert result['status']=='done' and result['tools_used']==['write','write','check']
+    assert result['checks_passed']==['unit']

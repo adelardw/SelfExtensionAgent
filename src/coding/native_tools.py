@@ -37,7 +37,8 @@ def parameters(name):
                  'rhs':{**STRING,'description':'Right-hand expression for solve/identity, defaults to 0. For systems use experiment.'},'point':STRING,
                  'bounds':{'type':'array','items':{'anyOf':[STRING,{'type':'number'}]},'minItems':2,'maxItems':2},
                  'assumptions':{'type':'object','additionalProperties':{'type':'object','additionalProperties':BOOLEAN}}},['op','expr']),
-        'evidence':({'id':STRING,'start':INTEGER,'end':INTEGER},['id']),
+        'evidence':({'id':STRING,'context_id':INTEGER,'query':STRING,'after':INTEGER,'limit':INTEGER,
+                    'start':INTEGER,'end':INTEGER},[]),
         'web':({'query':STRING},['query']),
         'fetch':({'url':STRING,'find':STRING},['url']),
         'resume_agent':({'id':STRING,'instructions':STRING},['id']),
@@ -52,6 +53,9 @@ def parameters(name):
     if name not in fields:
         return {'type':'object','properties':{},'additionalProperties':True}
     props,required=fields[name]
+    if name=='evidence':
+        return {'type':'object','properties':props,'additionalProperties':False,
+                'oneOf':[{'required':[key]} for key in ('id','context_id','query')]}
     return {'type':'object','properties':props,'required':required,'additionalProperties':False}
 
 

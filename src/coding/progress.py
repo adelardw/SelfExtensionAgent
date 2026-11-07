@@ -1,6 +1,23 @@
 """Bounded exploration: repeated unchanged proposals temporarily leave the action menu."""
 import json
+import re
 from collections import Counter
+
+
+class ProgressWatchdog:
+    """Detect unchanged state, including useful read/verification progress.
+
+    The caller supplies semantic progress counters, never fresh log IDs, elapsed
+    time or model claims. Thresholds remain a run policy, not a completion gate.
+    """
+    def __init__(self,limit=16):
+        self.limit=max(1,int(limit));self.last=None;self.stalled=0
+
+    def observe(self,state):
+        signature=json.dumps(state,sort_keys=True,ensure_ascii=False)
+        self.stalled=self.stalled+1 if signature==self.last else 0
+        self.last=signature
+        return self.stalled>=self.limit
 
 
 class FailureFocus:
@@ -59,6 +76,35 @@ async def source_snapshot(ws, name, limit=2200):
         return f'CURRENT SOURCE {name}\n'+text[:limit]+suffix, after
     except (OSError, ValueError):
         return None
+
+
+def merge_read_fragments(previous, incoming, limit=6000):
+    """Retain a few exact read ranges from one still-current source version.
+
+    Callers invalidate the entire path on a digest change. No model summary, no
+    inferred missing lines: gaps retain explicit FILE/range headers. Covered
+    ranges are dropped; newest ranges get priority under the character budget.
+    """
+    separator='\n\n[previous inspected range]\n\n'
+    pattern=re.compile(r'^FILE (.+?) · lines (\d+)[–-](\d+) of (\d+)(?: \(EOF\))?\n')
+    current=pattern.match(incoming)
+    if not current:return incoming[:limit]+'\n[excerpt truncated]' if len(incoming)>limit else incoming
+    fragments=[incoming]
+    for fragment in previous.split(separator) if previous else []:
+        match=pattern.match(fragment)
+        if not match or match[1]!=current[1] or match[4]!=current[4]:continue
+        if int(current[2])<=int(match[2]) and int(match[3])<=int(current[3]):continue
+        if fragment not in fragments:fragments.append(fragment)
+    kept=[];remaining=max(200,int(limit))
+    for fragment in fragments[:6]:
+        cost=len(fragment)+(len(separator) if kept else 0)
+        if cost>remaining:
+            if not kept:
+                kept.append(fragment[:remaining-55]+'\n[excerpt truncated; read missing ranges]')
+                break
+            continue
+        kept.append(fragment);remaining-=cost
+    return separator.join(kept)
 
 
 def source_window(reads, max_bytes=4800, max_files=8):
